@@ -18,6 +18,7 @@
 // =============================================================================
 #include <future>
 #include <chrono>
+#include <csignal>
 
 #include "chrono_vehicle/ChConfigVehicle.h"
 #include "chrono_vehicle/ChVehicleDataPath.h"
@@ -52,12 +53,19 @@ using namespace chrono::vehicle;
 
 // Quality of Service
 #include <fastdds/dds/domain/qos/DomainParticipantQos.hpp>
-#include <fastdds/rtps/transport/UDPv4TransportDescriptor.h>
-#include <fastdds/rtps/transport/UDPv6TransportDescriptor.h>
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    #include <fastdds/rtps/transport/UDPv4TransportDescriptor.hpp>
+    #include <fastdds/rtps/transport/UDPv6TransportDescriptor.hpp>
+#else
+    #include <fastdds/rtps/transport/UDPv4TransportDescriptor.h>
+    #include <fastdds/rtps/transport/UDPv6TransportDescriptor.h>
+#endif
 
 using namespace eprosima::fastdds::dds;
 using namespace eprosima::fastdds::rtps;
+#if !defined(CHRONO_SYNCHRONO_FASTDDS_API) || CHRONO_SYNCHRONO_FASTDDS_API < 3
 using namespace eprosima::fastrtps::rtps;
+#endif
 
 // =============================================================================
 
@@ -98,6 +106,16 @@ bool IPv6 = false;  // 100[Hz]
 
 // Time interval between two render frames
 double render_step_size = 1.0 / 50;  // FPS = 50
+
+// =============================================================================
+
+namespace {
+volatile std::sig_atomic_t g_shutdown_requested = 0;
+
+void HandleShutdownSignal(int) {
+    g_shutdown_requested = 1;
+}
+}  // namespace
 
 // =============================================================================
 
@@ -167,6 +185,9 @@ class DriverWrapper : public ChDriver {
 // =============================================================================
 
 int main(int argc, char* argv[]) {
+    std::signal(SIGINT, HandleShutdownSignal);
+    std::signal(SIGTERM, HandleShutdownSignal);
+
     // -----------------------------------------------------
     // CLI SETUP - Get most parameters from the command line
     // -----------------------------------------------------
@@ -351,7 +372,7 @@ int main(int argc, char* argv[]) {
 
     std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
     bool appok = true;
-    while (appok && syn_manager.IsOk()) {
+    while (!g_shutdown_requested && appok && syn_manager.IsOk()) {
         double time = vehicle.GetSystem()->GetChTime();
 
         // End simulation
@@ -401,6 +422,8 @@ int main(int argc, char* argv[]) {
         appok = true;
 #endif
     }
+
+    syn_manager.QuitSimulation();
 
     return 0;
 }

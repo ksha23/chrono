@@ -18,6 +18,7 @@
 // =============================================================================
 
 #include <chrono>
+#include <csignal>
 
 #include "chrono_vehicle/ChConfigVehicle.h"
 #include "chrono_vehicle/ChVehicleDataPath.h"
@@ -78,6 +79,16 @@ double heartbeat = 1e-2;  // 100[Hz]
 
 // Time interval between two render frames
 double render_step_size = 1.0 / 50;  // FPS = 50
+
+// =============================================================================
+
+namespace {
+volatile std::sig_atomic_t g_shutdown_requested = 0;
+
+void HandleShutdownSignal(int) {
+    g_shutdown_requested = 1;
+}
+}  // namespace
 
 // =============================================================================
 
@@ -148,6 +159,9 @@ class DriverWrapper : public ChDriver {
 // =============================================================================
 
 int main(int argc, char* argv[]) {
+    std::signal(SIGINT, HandleShutdownSignal);
+    std::signal(SIGTERM, HandleShutdownSignal);
+
     // -----------------------------------------------------
     // CLI SETUP - Get most parameters from the command line
     // -----------------------------------------------------
@@ -269,7 +283,7 @@ int main(int argc, char* argv[]) {
 
     std::chrono::high_resolution_clock::time_point start = std::chrono::high_resolution_clock::now();
 
-    while (app.IsOk() && syn_manager.IsOk()) {
+    while (!g_shutdown_requested && app.IsOk() && syn_manager.IsOk()) {
         double time = vehicle.GetSystem()->GetChTime();
 
         // End simulation
