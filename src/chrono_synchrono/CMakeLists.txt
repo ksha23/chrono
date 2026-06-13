@@ -224,9 +224,10 @@ message(STATUS "Synchrono configured with MPI backend")
 option(CH_USE_SYNCHRONO_FASTDDS "Enable the FastDDS interface for the SynChrono Module" OFF)
 
 set(FASTDDS_FOUND FALSE)
+set(CHRONO_SYNCHRONO_FASTDDS_API_DEFINE "#undef CHRONO_SYNCHRONO_FASTDDS_API")
 
 if (CH_USE_SYNCHRONO_FASTDDS)
-	set(FastDDS_ROOT "" CACHE PATH "Path to FastDDS install directory")
+	set(FastDDS_ROOT "" CACHE PATH "Path to FastDDS install prefix, CMake package directory, or package config file")
 
 	if (FastDDS_ROOT STREQUAL "")
 	  # When ROS 2 is sourced, cmake may silently find the ROS-bundled FastDDS
@@ -251,9 +252,53 @@ if (CH_USE_SYNCHRONO_FASTDDS)
 	      "Please set FastDDS_ROOT to an independent FastDDS install prefix.")
 	  endif()
 
-	  message(STATUS "Find FastRTPS")
-	  find_package(fastrtps REQUIRED PATHS "${FastDDS_ROOT}/cmake" "${fastrtps}/share/fastrtps/cmake")
-	  
+      if (IS_DIRECTORY "${FastDDS_ROOT}")
+        if (EXISTS "${FastDDS_ROOT}/fastdds-config.cmake")
+          set(fastdds_DIR "${FastDDS_ROOT}" CACHE PATH "Path to Fast DDS CMake package directory" FORCE)
+        elseif (EXISTS "${FastDDS_ROOT}/fastrtps-config.cmake")
+          set(fastrtps_DIR "${FastDDS_ROOT}" CACHE PATH "Path to Fast RTPS CMake package directory" FORCE)
+        else()
+          list(PREPEND CMAKE_PREFIX_PATH "${FastDDS_ROOT}")
+        endif()
+      elseif (EXISTS "${FastDDS_ROOT}")
+        get_filename_component(_syn_fastdds_config_dir "${FastDDS_ROOT}" DIRECTORY)
+        get_filename_component(_syn_fastdds_config_name "${FastDDS_ROOT}" NAME)
+        if (_syn_fastdds_config_name STREQUAL "fastdds-config.cmake")
+          set(fastdds_DIR "${_syn_fastdds_config_dir}" CACHE PATH "Path to Fast DDS CMake package directory" FORCE)
+        elseif (_syn_fastdds_config_name STREQUAL "fastrtps-config.cmake")
+          set(fastrtps_DIR "${_syn_fastdds_config_dir}" CACHE PATH "Path to Fast RTPS CMake package directory" FORCE)
+        else()
+          message(FATAL_ERROR
+            "FastDDS_ROOT (${FastDDS_ROOT}) is a file, but not a recognized "
+            "Fast DDS or Fast RTPS package config file.")
+        endif()
+      else()
+        list(PREPEND CMAKE_PREFIX_PATH "${FastDDS_ROOT}")
+      endif()
+
+	  message(STATUS "Find FastDDS")
+	  find_package(fastdds CONFIG QUIET COMPONENTS shared)
+	  if (fastdds_FOUND)
+	    set(_syn_fastdds_target fastdds)
+	    set(_syn_fastdds_package "fastdds")
+	    if (fastdds_VERSION VERSION_LESS 3.0.0)
+	      set(_syn_fastdds_api 2)
+	    else()
+	      set(_syn_fastdds_api 3)
+	    endif()
+	  else()
+	    message(STATUS "  FastDDS package not found; falling back to legacy FastRTPS package")
+	    find_package(fastrtps REQUIRED CONFIG)
+	    set(_syn_fastdds_target fastrtps)
+	    set(_syn_fastdds_package "fastrtps")
+	    set(_syn_fastdds_api 2)
+	  endif()
+
+	  message(STATUS "  FastDDS package:      ${_syn_fastdds_package}")
+	  message(STATUS "  FastDDS API version:  ${_syn_fastdds_api}")
+	  message(STATUS "  FastDDS found?        ${fastdds_FOUND}")
+	  message(STATUS "  FastDDS include dir:  ${fastdds_INCLUDE_DIR}")
+	  message(STATUS "  FastDDS lib dir:      ${fastdds_LIB_DIR}")
 	  message(STATUS "  FastCDR found?        ${fastcdr_FOUND}")
 	  message(STATUS "  FastCDR include dir:  ${fastcdr_INCLUDE_DIR}")
       message(STATUS "  FastCDR lib dir:      ${fastcdr_LIB_DIR}")
@@ -262,11 +307,12 @@ if (CH_USE_SYNCHRONO_FASTDDS)
       message(STATUS "  FastRTPS lib dir:     ${fastrtps_LIB_DIR}")
 	  message(STATUS "  FooNathan found?      ${foonathan_memory_FOUND}")
 
-	  if (fastcdr_FOUND AND fastrtps_FOUND AND foonathan_memory_FOUND)
+	  if (fastcdr_FOUND AND foonathan_memory_FOUND AND TARGET ${_syn_fastdds_target})
         # Fast DDS package targets may be created in this directory scope only,
         # but Chrono_synchrono exposes them through a PUBLIC link interface that
         # is consumed from sibling demo directories.
         set(FASTDDS_IMPORTED_TARGETS
+            fastdds
             fastrtps
             fastcdr
             foonathan_memory
@@ -279,41 +325,82 @@ if (CH_USE_SYNCHRONO_FASTDDS)
         foreach(dds_target IN LISTS FASTDDS_IMPORTED_TARGETS)
           if(TARGET ${dds_target})
             set_property(TARGET ${dds_target} PROPERTY IMPORTED_GLOBAL TRUE)
+            get_target_property(_dds_target_release_location ${dds_target} IMPORTED_LOCATION_RELEASE)
+            if(_dds_target_release_location)
+              set_target_properties(${dds_target} PROPERTIES
+                MAP_IMPORTED_CONFIG_NOCONFIG Release
+                MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release
+                MAP_IMPORTED_CONFIG_MINSIZEREL Release
+              )
+            endif()
           endif()
         endforeach()
 
-		target_link_libraries(Chrono_synchrono PUBLIC fastrtps fastcdr)
+		target_link_libraries(Chrono_synchrono PUBLIC ${_syn_fastdds_target} fastcdr)
+        target_compile_definitions(Chrono_synchrono PUBLIC
+                                   CHRONO_SYNCHRONO_FASTDDS_API=${_syn_fastdds_api})
+
 	    ##set(SYN_INCLUDES ${SYN_INCLUDES} ${fastrtps_INCLUDE_DIR} ${fastcdr_INCLUDE_DIR})
 		set(FASTDDS_FOUND TRUE)
+        set(CHRONO_SYNCHRONO_FASTDDS_API_DEFINE
+            "#define CHRONO_SYNCHRONO_FASTDDS_API ${_syn_fastdds_api}")
+        set(fastdds_DIR "${fastdds_DIR}" PARENT_SCOPE)
         set(fastrtps_DIR "${fastrtps_DIR}" PARENT_SCOPE)
 	  else()
 	    set(FASTDDS_FOUND FALSE)
       endif()
 	endif()
 
-	list(APPEND SYN_COMMUNICATION_FILES
-		communication/dds/SynDDSCommunicator.h
-		communication/dds/SynDDSCommunicator.cpp
-		
-		communication/dds/SynDDSPublisher.h
-		communication/dds/SynDDSPublisher.cpp
-		communication/dds/SynDDSSubscriber.h
-		communication/dds/SynDDSSubscriber.cpp
-		communication/dds/SynDDSTopic.h
-		communication/dds/SynDDSTopic.cpp
-		communication/dds/SynDDSListener.h
-		communication/dds/SynDDSListener.cpp
+    if (FASTDDS_FOUND)
+        set(SYN_DDS_IDL_FILES
+            communication/dds/idl/SynDDSMessage.idl
+            communication/dds/idl/SynDDSMessage.h
+            communication/dds/idl/SynDDSMessagePubSubTypes.h
+        )
 
-		communication/dds/idl/SynDDSMessage.h
-		communication/dds/idl/SynDDSMessage.cxx
-		communication/dds/idl/SynDDSMessagePubSubTypes.h
-		communication/dds/idl/SynDDSMessagePubSubTypes.cxx
-	)
-	source_group("communication" FILES ${SYN_COMMUNICATION_FILES})
-	target_sources(Chrono_synchrono PRIVATE ${SYN_COMMUNICATION_FILES})
-	set(CHRONO_SYNCHRONO_USE_FASTDDS "#define CHRONO_SYNCHRONO_USE_FASTDDS")
+        if (_syn_fastdds_api GREATER_EQUAL 3)
+            list(APPEND SYN_DDS_IDL_FILES
+                communication/dds/idl/fastdds3/SynDDSMessage.hpp
+                communication/dds/idl/fastdds3/SynDDSMessageCdrAux.hpp
+                communication/dds/idl/fastdds3/SynDDSMessageCdrAux.ipp
+                communication/dds/idl/fastdds3/SynDDSMessagePubSubTypes.hpp
+                communication/dds/idl/fastdds3/SynDDSMessagePubSubTypes.cxx
+                communication/dds/idl/fastdds3/SynDDSMessageTypeObjectSupport.hpp
+                communication/dds/idl/fastdds3/SynDDSMessageTypeObjectSupport.cxx
+            )
+        else()
+            list(APPEND SYN_DDS_IDL_FILES
+                communication/dds/idl/fastdds2/SynDDSMessage.h
+                communication/dds/idl/fastdds2/SynDDSMessage.cxx
+                communication/dds/idl/fastdds2/SynDDSMessagePubSubTypes.h
+                communication/dds/idl/fastdds2/SynDDSMessagePubSubTypes.cxx
+            )
+        endif()
 
-    message(STATUS "Synchrono configured with FastDDS backend")
+        list(APPEND SYN_COMMUNICATION_FILES
+            communication/dds/SynDDSCommunicator.h
+            communication/dds/SynDDSCommunicator.cpp
+
+            communication/dds/SynDDSPublisher.h
+            communication/dds/SynDDSPublisher.cpp
+            communication/dds/SynDDSSubscriber.h
+            communication/dds/SynDDSSubscriber.cpp
+            communication/dds/SynDDSTopic.h
+            communication/dds/SynDDSTopic.cpp
+            communication/dds/SynDDSListener.h
+            communication/dds/SynDDSListener.cpp
+
+            ${SYN_DDS_IDL_FILES}
+        )
+        source_group("communication" FILES ${SYN_COMMUNICATION_FILES})
+        target_sources(Chrono_synchrono PRIVATE ${SYN_COMMUNICATION_FILES})
+        set(CHRONO_SYNCHRONO_USE_FASTDDS "#define CHRONO_SYNCHRONO_USE_FASTDDS")
+
+        message(STATUS "Synchrono configured with FastDDS backend")
+    else()
+        set(CHRONO_SYNCHRONO_USE_FASTDDS "#undef CHRONO_SYNCHRONO_USE_FASTDDS")
+        message(STATUS "Synchrono configured without FastDDS backend")
+    endif()
 
 else()
 	set(CHRONO_SYNCHRONO_USE_FASTDDS "#undef CHRONO_SYNCHRONO_USE_FASTDDS")
@@ -348,7 +435,7 @@ install(TARGETS Chrono_synchrono
 # Old way (install headers preserving directory structure)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/
         DESTINATION include/chrono_synchrono
-        FILES_MATCHING PATTERN "*.h" PATTERN "fbs" EXCLUDE)
+        FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp" PATTERN "*.ipp" PATTERN "fbs" EXCLUDE)
 
 # Install 3rd party headers       
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/src/chrono_thirdparty/flatbuffers/include

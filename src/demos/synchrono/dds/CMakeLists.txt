@@ -15,8 +15,6 @@ endif()
 
 # --------------------------------------------------------------
 
-find_package(fastrtps REQUIRED)
-
 list(APPEND LIBS Chrono_core)
 list(APPEND LIBS "Chrono_vehicle")
 list(APPEND LIBS "Chrono_synchrono")
