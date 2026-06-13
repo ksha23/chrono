@@ -35,6 +35,11 @@ void SynCommunicator::Initialize() {
     m_initialized = true;
 }
 
+void SynCommunicator::SynchronizeShutdown() {
+    Synchronize();
+    Flush();
+}
+
 // -----------------------------------------------------------------------------------------------
 
 void SynCommunicator::Reset() {

@@ -37,9 +37,16 @@
 #include <fastdds/dds/publisher/Publisher.hpp>
 #include <fastdds/dds/publisher/DataWriter.hpp>
 #include <fastdds/dds/publisher/qos/DataWriterQos.hpp>
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    #include <fastdds/dds/core/Time_t.hpp>
+#else
+    #include <fastdds/rtps/common/Time_t.h>
+#endif
 
 using namespace eprosima::fastdds::dds;
-using namespace eprosima::fastrtps::rtps;
+#if !defined(CHRONO_SYNCHRONO_FASTDDS_API) || CHRONO_SYNCHRONO_FASTDDS_API < 3
+using namespace eprosima::fastrtps::types;
+#endif
 
 namespace chrono {
 namespace synchrono {
@@ -61,6 +68,15 @@ void SynDDSPublisher::DeleteDDSEntities(DomainParticipant* participant) {
 }
 
 bool SynDDSPublisher::Publish(void* message) {
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    auto ret = m_writer->write(message);
+
+    if (ret != RETCODE_OK) {
+        std::cerr << "DataWriter failed to write on topic" << m_writer->get_topic()->get_name() << std::endl;
+    }
+
+    return ret == RETCODE_OK;
+#else
     bool ret = m_writer->write(message);
 
     if (!ret) {
@@ -68,6 +84,31 @@ bool SynDDSPublisher::Publish(void* message) {
     }
 
     return ret;
+#endif
+}
+
+bool SynDDSPublisher::WaitForAcknowledgments(double max_wait) {
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    Duration_t timeout(max_wait);
+    auto ret = m_writer->wait_for_acknowledgments(timeout);
+
+    if (ret != RETCODE_OK) {
+        std::cerr << "DataWriter acknowledgments timed out on topic " << m_writer->get_topic()->get_name()
+                  << std::endl;
+    }
+
+    return ret == RETCODE_OK;
+#else
+    eprosima::fastrtps::Duration_t timeout(max_wait);
+    auto ret = m_writer->wait_for_acknowledgments(timeout);
+
+    if (ret != ReturnCode_t::RETCODE_OK) {
+        std::cerr << "DataWriter acknowledgments timed out on topic " << m_writer->get_topic()->get_name()
+                  << std::endl;
+    }
+
+    return ret == ReturnCode_t::RETCODE_OK;
+#endif
 }
 
 ///@brief Wait for the specified number of matches

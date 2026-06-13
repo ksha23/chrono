@@ -80,6 +80,10 @@ class SYN_API SynDDSPublisher {
     ///@param message the type supported message that will be distributed on the topic
     bool Publish(void* message);
 
+    ///@brief Wait until matched subscribers acknowledge reliable writes.
+    ///
+    bool WaitForAcknowledgments(double max_wait = 1.0);
+
     ///@brief Wait for the specified number of matches
     /// Each subscriber listener has a callback that will be called when a subscriber is matched with
     /// a DataWriter. This function blocks until that the matches are achieved. By default,

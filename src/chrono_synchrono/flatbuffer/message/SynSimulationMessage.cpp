@@ -7,7 +7,9 @@ namespace Simulation = SynFlatBuffers::Simulation;
 
 /// Constructors
 SynSimulationMessage::SynSimulationMessage(AgentKey source_key, AgentKey destination_key, bool quit_sim)
-    : SynMessage(source_key, destination_key), m_quit_sim(quit_sim) {}
+    : SynMessage(source_key, destination_key), m_quit_sim(quit_sim) {
+    m_msg_type = SynFlatBuffers::Type_Simulation_State;
+}
 
 SynSimulationMessage::~SynSimulationMessage() {}
 

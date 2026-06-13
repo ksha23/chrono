@@ -4,7 +4,12 @@
 #include <fastdds/dds/subscriber/SampleInfo.hpp>
 
 using namespace eprosima::fastdds::dds;
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+using namespace eprosima::fastdds::rtps;
+#else
 using namespace eprosima::fastrtps::rtps;
+using namespace eprosima::fastrtps::types;
+#endif
 
 namespace chrono {
 namespace synchrono {
@@ -38,16 +43,33 @@ int SynDDSThreadSafeCounter::GetSafe() {
 
 // -----------------------------------------------------------------------------------
 
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+void SynDDSParticipantListener::on_participant_discovery(DomainParticipant* participant,
+                                                         ParticipantDiscoveryStatus reason,
+                                                         const ParticipantBuiltinTopicData& info,
+                                                         bool& should_be_ignored) {
+    should_be_ignored = false;
+
+    const std::string participant_name = info.participant_name.to_string();
+    if (reason == ParticipantDiscoveryStatus::DISCOVERED_PARTICIPANT && CheckParticipantName(participant_name)) {
+        m_participant_names.push_back(participant_name);
+        m_counter.Increment();
+    } else if (reason == ParticipantDiscoveryStatus::REMOVED_PARTICIPANT ||
+               reason == ParticipantDiscoveryStatus::DROPPED_PARTICIPANT) {
+    }
+}
+#else
 void SynDDSParticipantListener::on_participant_discovery(DomainParticipant* participant,
                                                          ParticipantDiscoveryInfo&& info) {
-    if (info.status == ParticipantDiscoveryInfo::DISCOVERED_PARTICIPANT && 
-			CheckParticipantName(std::string(info.info.m_participantName))) {
+    if (info.status == ParticipantDiscoveryInfo::DISCOVERED_PARTICIPANT &&
+            CheckParticipantName(std::string(info.info.m_participantName))) {
         m_participant_names.push_back(std::string(info.info.m_participantName));
         m_counter.Increment();
     } else if (info.status == ParticipantDiscoveryInfo::REMOVED_PARTICIPANT ||
                info.status == ParticipantDiscoveryInfo::DROPPED_PARTICIPANT) {
     }
 }
+#endif
 
 bool SynDDSParticipantListener::CheckParticipantName(const std::string& name) {
     return name.find(this->comm_prefix) != std::string::npos;
@@ -75,7 +97,11 @@ void SynDDSDataReaderListener::on_data_available(DataReader* reader) {
     // std::cout << "Data Available" << std::endl;
 
     SampleInfo info;
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    if (reader->take_next_sample(m_message, &info) != RETCODE_OK) {
+#else
     if (reader->take_next_sample(m_message, &info) != ReturnCode_t::RETCODE_OK) {
+#endif
         std::cout << "SynDDSDataReaderListener::on_data_available: DataReader failed to read message." << std::endl;
         exit(-1);
     }

@@ -10,13 +10,18 @@
 #include <fastdds/dds/subscriber/SampleInfo.hpp>
 #include <fastdds/dds/subscriber/Subscriber.hpp>
 #include <fastdds/dds/subscriber/qos/DataReaderQos.hpp>
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    #include <fastdds/dds/core/Time_t.hpp>
+#endif
 
 #include "chrono/core/ChTypes.h"
 
-using namespace eprosima::fastrtps;
 using namespace eprosima::fastdds::dds;
+#if !defined(CHRONO_SYNCHRONO_FASTDDS_API) || CHRONO_SYNCHRONO_FASTDDS_API < 3
+using namespace eprosima::fastrtps;
 using namespace eprosima::fastrtps::rtps;
 using namespace eprosima::fastrtps::types;
+#endif
 
 namespace chrono {
 namespace synchrono {
@@ -47,31 +52,42 @@ void SynDDSSubscriber::DeleteDDSEntities(DomainParticipant* participant) {
         participant->delete_subscriber(m_subscriber);
 }
 
-void SynDDSSubscriber::Receive(long double wait_time) {
+bool SynDDSSubscriber::Receive(long double wait_time) {
     if (!m_callback) {
         std::cerr << "WARNING: Subscriber callback has not been defined! Synchronous read is ignored." << std::endl;
-        return;
+        return true;
     }
 
     if (!m_message) {
         std::cerr << "WARNING: Subscriber message has not been defined! Synchronous read is ignored." << std::endl;
-        return;
+        return true;
     }
 
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    Duration_t timeout(wait_time);
+#else
     eprosima::fastrtps::Duration_t timeout(wait_time);
+#endif
     if (m_reader->wait_for_unread_message(timeout)) {
         SampleInfo info;
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+        if (m_reader->take_next_sample(m_message, &info) == RETCODE_OK) {
+#else
         if (m_reader->take_next_sample(m_message, &info) == ReturnCode_t::RETCODE_OK) {
+#endif
             if (info.instance_state == ALIVE_INSTANCE_STATE) {
                 m_callback(m_message);
             } else {
                 std::cout << "Remote writer for topic " << m_topic->GetFullTopicName() << " is dead" << std::endl;
+                return false;
             }
         }
     } else {
         std::cerr << "WARNING: SynDDSSubscriber timed out while waiting for incoming message on topic "
                   << m_topic->GetFullTopicName() << std::endl;
     }
+
+    return true;
 }
 
 void SynDDSSubscriber::AsyncReceive() {

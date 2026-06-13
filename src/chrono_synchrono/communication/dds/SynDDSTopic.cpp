@@ -7,7 +7,9 @@
 #include <fastdds/dds/domain/DomainParticipant.hpp>
 
 using namespace eprosima::fastdds::dds;
-
+#if !defined(CHRONO_SYNCHRONO_FASTDDS_API) || CHRONO_SYNCHRONO_FASTDDS_API < 3
+using namespace eprosima::fastrtps::types;
+#endif
 
 namespace chrono {
 namespace synchrono {
@@ -76,7 +78,11 @@ bool SynDDSTopic::RegisterType(DomainParticipant* participant) {
     if (!m_dds_type)
         return false;
 
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    return m_dds_type->register_type(participant) == RETCODE_OK;
+#else
     return m_dds_type->register_type(participant) == ReturnCode_t::RETCODE_OK;
+#endif
 }
 
 }  // namespace synchrono

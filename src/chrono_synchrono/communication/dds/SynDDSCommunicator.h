@@ -120,6 +120,14 @@ class SYN_API SynDDSCommunicator : public SynCommunicator {
     ///
     virtual void Barrier() override;
 
+    ///@brief Flush outgoing DDS samples before shutdown.
+    ///
+    virtual void Flush() override;
+
+    ///@brief Publish shutdown DDS samples without entering another blocking receive.
+    ///
+    virtual void SynchronizeShutdown() override;
+
     // -----------------------------------------------------------------------------------------------
 
     ///@brief This function is responsible for blocking until the passed number of participants

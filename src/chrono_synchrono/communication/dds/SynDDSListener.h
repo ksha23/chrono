@@ -2,6 +2,7 @@
 #define SYN_DDS_LISTENER_H
 
 #include "chrono_synchrono/SynApi.h"
+#include "chrono_synchrono/SynConfig.h"
 
 #undef ALIVE
 
@@ -47,8 +48,15 @@ class SynDDSParticipantListener : public eprosima::fastdds::dds::DomainParticipa
   public:
     SynDDSParticipantListener(const std::string& commprefix) : comm_prefix(commprefix) {}
 
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    virtual void on_participant_discovery(eprosima::fastdds::dds::DomainParticipant* participant,
+                                          eprosima::fastdds::rtps::ParticipantDiscoveryStatus reason,
+                                          const eprosima::fastdds::dds::ParticipantBuiltinTopicData& info,
+                                          bool& should_be_ignored) override;
+#else
     virtual void on_participant_discovery(eprosima::fastdds::dds::DomainParticipant* participant,
                                           eprosima::fastrtps::rtps::ParticipantDiscoveryInfo&& info) override;
+#endif
 
     ///@brief Wait for the specified number of matches
     /// Each subscriber listener has a callback that will be called when a subscriber is matched with

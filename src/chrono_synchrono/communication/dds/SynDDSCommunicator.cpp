@@ -26,6 +26,7 @@
 #include "chrono_synchrono/utils/SynLog.h"
 #include "chrono_synchrono/communication/dds/SynDDSTopic.h"
 #include "chrono_synchrono/communication/dds/SynDDSListener.h"
+#include "chrono_synchrono/flatbuffer/message/SynSimulationMessage.h"
 
 #undef ALIVE
 
@@ -44,13 +45,19 @@
 #include <fastdds/dds/subscriber/DataReader.hpp>
 #include <fastdds/dds/subscriber/qos/DataReaderQos.hpp>
 
-#include <fastdds/rtps/transport/UDPv4TransportDescriptor.h>
+#if defined(CHRONO_SYNCHRONO_FASTDDS_API) && CHRONO_SYNCHRONO_FASTDDS_API >= 3
+    #include <fastdds/rtps/transport/UDPv4TransportDescriptor.hpp>
+#else
+    #include <fastdds/rtps/transport/UDPv4TransportDescriptor.h>
+#endif
 
 #include <cstdlib>
 
 using namespace eprosima::fastdds::dds;
 using namespace eprosima::fastdds::rtps;
+#if !defined(CHRONO_SYNCHRONO_FASTDDS_API) || CHRONO_SYNCHRONO_FASTDDS_API < 3
 using namespace eprosima::fastrtps::rtps;
+#endif
 
 namespace chrono {
 namespace synchrono {
@@ -156,6 +163,18 @@ void SynDDSCommunicator::Barrier() {
     for (auto subscriber : m_subscribers)
         subscriber->WaitForMatches(1);
 }
+
+void SynDDSCommunicator::Flush() {
+    for (auto publisher : m_publishers)
+        publisher->WaitForAcknowledgments();
+}
+
+void SynDDSCommunicator::SynchronizeShutdown() {
+    m_flatbuffers_manager.Finish();
+    Publish();
+    Flush();
+}
+
 // -----------------------------------------------------------------------------------------------
 
 void SynDDSCommunicator::Barrier(unsigned int num_participants) {
@@ -343,9 +362,11 @@ void SynDDSCommunicator::Publish() {
 }
 
 void SynDDSCommunicator::Listen() {
-    for (auto subscriber : m_subscribers)
-        if (subscriber->IsSynchronous())
-            subscriber->Receive();
+    for (auto subscriber : m_subscribers) {
+        if (subscriber->IsSynchronous() && !subscriber->Receive()) {
+            m_incoming_messages.push_back(chrono_types::make_shared<SynSimulationMessage>(AgentKey(), AgentKey(), true));
+        }
+    }
 }
 
 }  // namespace synchrono

@@ -237,7 +237,7 @@ void SynChronoManager::UpdateAgents() {
 void SynChronoManager::QuitSimulation() {
     if (m_is_ok) {
         m_communicator->AddQuitMessage();
-        m_communicator->Synchronize();
+        m_communicator->SynchronizeShutdown();
         m_is_ok = false;
     }
 }

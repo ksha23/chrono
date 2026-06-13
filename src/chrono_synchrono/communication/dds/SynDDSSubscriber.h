@@ -86,7 +86,7 @@ class SYN_API SynDDSSubscriber {
     /// to the callback.
     ///
     ///@param wait_time timeout of the synchronous waiting
-    void Receive(long double wait_time = 20.0);
+    bool Receive(long double wait_time = 20.0);
 
     ////@brief This function is responsible for asynchronous receiving
     /// This function will return immediately. Underlying calls are asynchronous/non-blocking.

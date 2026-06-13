@@ -69,6 +69,14 @@ class SYN_API SynCommunicator {
     ///
     virtual void Barrier() = 0;
 
+    ///@brief Flush any pending outgoing communication before shutdown.
+    ///
+    virtual void Flush() {}
+
+    ///@brief Synchronize pending shutdown communication before teardown.
+    ///
+    virtual void SynchronizeShutdown();
+
     // -----------------------------------------------------------------------------------------------
 
     ///@brief Reset the communicator
