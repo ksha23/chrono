@@ -20,7 +20,6 @@
 #include <cstdio>
 #include <cmath>
 #include <numeric>
-#include <queue>
 #include <unordered_set>
 #include <limits>
 
@@ -33,7 +32,6 @@
 #include "chrono/fea/ChContactSurfaceMesh.h"
 #include "chrono/assets/ChTexture.h"
 #include "chrono/assets/ChVisualShapeBox.h"
-#include "chrono/utils/ChConvexHull.h"
 #include "chrono/utils/ChUtils.h"
 
 #include "chrono_vehicle/ChVehicleDataPath.h"
@@ -1372,6 +1370,71 @@ static const std::vector<ChVector2i> neighbors8{
     ChVector2i(1, 1)     // NE
 };
 
+// Area and perimeter of the convex hull of a set of grid nodes, in world units.
+//
+// The input must be sorted lexicographically (by grid index i, then by j) and free of duplicates; the caller
+// supplies the per-column extremes of a contact patch, which are sorted by construction. 'scratch' only exists so
+// that its storage can be reused from call to call.
+//
+// The hull is built with Andrew's monotone chain, in grid indices rather than in world coordinates. That keeps it
+// exact: the orientation tests are integer sign tests, so no tolerance decides whether a node is a hull vertex,
+// and the doubled hull area comes out as an exact integer count of grid cells. Both matter here. A contact patch
+// has a great many nodes lying exactly on its hull edges, which is the case that tolerance-based orientation tests
+// get wrong; and the patch is a fraction of a square meter in area but may sit tens of meters from the SCM frame
+// origin, so a shoelace sum taken in world coordinates loses most of its significant digits to cancellation.
+static void GridConvexHull(const std::vector<ChVector2i>& pts,
+                           std::vector<ChVector2i>& scratch,
+                           double delta,
+                           double& area,
+                           double& perimeter) {
+    const int n = (int)pts.size();
+
+    // Cross product of (a - o) and (b - o); its sign is the orientation of the triple.
+    auto cross = [](const ChVector2i& o, const ChVector2i& a, const ChVector2i& b) {
+        return (int64_t)(a.x() - o.x()) * (b.y() - o.y()) - (int64_t)(a.y() - o.y()) * (b.x() - o.x());
+    };
+
+    scratch.clear();
+    if (n < 3) {
+        // Degenerate patch (a single node or a single pair of nodes): no area, hence no Bekker 1/b term
+        scratch.assign(pts.begin(), pts.end());
+    } else {
+        // Lower hull, then upper hull. Non-positive cross products are popped, so nodes that lie on a hull edge
+        // without being a vertex of it are dropped.
+        scratch.reserve(n + 1);
+        for (int i = 0; i < n; i++) {
+            while (scratch.size() >= 2 && cross(scratch[scratch.size() - 2], scratch.back(), pts[i]) <= 0)
+                scratch.pop_back();
+            scratch.push_back(pts[i]);
+        }
+        const size_t lower = scratch.size() + 1;
+        for (int i = n - 2; i >= 0; i--) {
+            while (scratch.size() >= lower && cross(scratch[scratch.size() - 2], scratch.back(), pts[i]) <= 0)
+                scratch.pop_back();
+            scratch.push_back(pts[i]);
+        }
+        scratch.pop_back();  // the last point closes the loop onto the first one
+    }
+
+    // Doubled hull area, as an exact integer number of grid cells (zero for a degenerate hull)
+    const size_t m = scratch.size();
+    int64_t two_cells = 0;
+    for (size_t i = 1; i + 1 < m; i++)
+        two_cells += cross(scratch[0], scratch[i], scratch[i + 1]);
+    area = 0.5 * std::abs((double)two_cells) * delta * delta;
+
+    // Hull perimeter (each edge length is the square root of an exact integer)
+    double cells = 0;
+    for (size_t i = 0; i < m; i++) {
+        const ChVector2i& a = scratch[i];
+        const ChVector2i& b = scratch[(i + 1) % m];
+        const int64_t dx = a.x() - b.x();
+        const int64_t dy = a.y() - b.y();
+        cells += std::sqrt((double)(dx * dx + dy * dy));
+    }
+    perimeter = cells * delta;
+}
+
 static const std::vector<ChVector2i> neighbors4{
     ChVector2i(0, -1),  // S
     ChVector2i(-1, 0),  // W
@@ -1602,72 +1665,168 @@ void SCMLoader::ComputeInternalForces() {
 
     // Collect hit vertices assigned to each contact patch.
     struct ContactPatchRecord {
-        std::vector<ChVector2d> points;  // points in contact patch (in reference plane)
-        std::vector<ChVector2i> nodes;   // grid nodes in the contact patch
-        double area;                     // contact patch area
-        double perimeter;                // contact patch perimeter
-        double oob;                      // approximate value of 1/b
+        std::vector<ChVector2i> nodes;  // grid nodes in the contact patch
+        double area;                    // contact patch area
+        double perimeter;               // contact patch perimeter
+        double oob;                     // approximate value of 1/b
     };
     std::vector<ContactPatchRecord> contact_patches;
 
-    // Loop through all hit nodes and determine to which contact patch they belong.
-    // Use a queue-based flood-filling algorithm based on the neighbors of each hit node.
+    // A contact patch enters the physics only through the Bekker term 1/b, and only as the product
+    // 'oob * Bekker_Kc' in the node pressure. With a zero cohesive modulus and no callback that could make it
+    // non-zero, the term drops out and the patch geometry does not have to be evaluated at all.
+    const bool need_oob = m_soil_fun || m_Bekker_Kc != 0;
+
     m_num_contact_patches = 0;
-    for (auto& h : hits) {
-        if (h.second.patch_id != -1)
-            continue;
 
-        ChVector2i ij = h.first;
+    if (!hits.empty()) {
+        // Flatten the hit map into a list, in map iteration order (this fixes the order in which patches are
+        // seeded and hence the patch numbering), and find the bounding box of the hit grid indices.
+        struct HitEntry {
+            ChVector2i ij;    // grid node
+            HitRecord* rec;   // associated hit record
+        };
+        std::vector<HitEntry> hit_list;
+        hit_list.reserve(hits.size());
+        ChVector2i bb_min = hits.begin()->first;
+        ChVector2i bb_max = bb_min;
+        for (auto& h : hits) {
+            bb_min.x() = std::min(bb_min.x(), h.first.x());
+            bb_min.y() = std::min(bb_min.y(), h.first.y());
+            bb_max.x() = std::max(bb_max.x(), h.first.x());
+            bb_max.y() = std::max(bb_max.y(), h.first.y());
+            hit_list.push_back({h.first, &h.second});
+        }
 
-        // Make a new contact patch and add this hit node to it
-        h.second.patch_id = m_num_contact_patches++;
-        ContactPatchRecord patch;
-        patch.nodes.push_back(ij);
-        patch.points.push_back(ChVector2d(m_delta * ij.x(), m_delta * ij.y()));
+        // Index the hit set by grid node, so that the flood fill below can ask "is this neighbor a hit?" without
+        // hashing. A dense array over the bounding box does that in one indexed load; it is padded by one node on
+        // each side, so the neighbors of any hit node fall inside it and the inner loop needs no bounds check, and
+        // only cells that hold a hit are ever written (they are all reset before the buffer is released, so the
+        // array never has to be cleared on entry). That array is only affordable while the bounding box is
+        // comparable in size to the hit set, which is the case for contacts belonging to a single vehicle. Should
+        // the contacts be spread far apart - several vehicles on one terrain - the box would dwarf the hit set and
+        // the hit list is indexed by a hash map instead. Both indices answer the same question, so the fill visits
+        // exactly the same nodes either way.
+        const int i0 = bb_min.x() - 1;
+        const int j0 = bb_min.y() - 1;
+        const int ni = bb_max.x() - bb_min.x() + 3;
+        const int nj = bb_max.y() - bb_min.y() + 3;
+        const double cells = (double)ni * nj;
+        const bool dense = cells <= 64.0 * hit_list.size() + 65536.0 && cells <= (1 << 24);
 
-        // Add current node to the work queue
-        std::queue<ChVector2i> todo;
-        todo.push(ij);
+        std::unordered_map<ChVector2i, int, CoordHash> sparse_index;
+        if (dense) {
+            if ((int)m_patch_grid.size() < ni * nj)
+                m_patch_grid.resize(ni * nj, -1);
+            for (int c = 0; c < (int)hit_list.size(); c++)
+                m_patch_grid[(hit_list[c].ij.x() - i0) * nj + (hit_list[c].ij.y() - j0)] = c;
+        } else {
+            sparse_index.reserve(2 * hit_list.size());
+            for (int c = 0; c < (int)hit_list.size(); c++)
+                sparse_index.insert(std::make_pair(hit_list[c].ij, c));
+        }
 
-        while (!todo.empty()) {
-            auto crt = hits.find(todo.front());  // Current hit node is first element in queue
-            todo.pop();                          // Remove first element from queue
+        // Offsets in the dense grid of the four neighbors, in the same order as 'neighbors4'
+        const int nbr_offset[4] = {-1, -nj, +nj, +1};
 
-            ChVector2i crt_ij = crt->first;
-            int crt_patch = crt->second.patch_id;
+        // Loop through all hit nodes and determine to which contact patch they belong.
+        // Use a queue-based flood-filling algorithm based on the neighbors of each hit node.
+        std::vector<int> todo;                 // work queue, holding positions in the hit list
+        std::vector<int> col_min;              // per-column lowest node of the current patch
+        std::vector<int> col_max;              // per-column highest node of the current patch
+        std::vector<ChVector2i> hull_pts;      // convex hull input for the current patch
+        std::vector<ChVector2i> hull_scratch;  // convex hull working storage
+        for (int s = 0; s < (int)hit_list.size(); s++) {
+            if (hit_list[s].rec->patch_id != -1)
+                continue;
 
-            // Loop through the neighbors of the current hit node
-            for (int k = 0; k < 4; k++) {
-                ChVector2i nbr_ij = crt_ij + neighbors4[k];
-                // If neighbor is not a hit node, move on
-                auto nbr = hits.find(nbr_ij);
-                if (nbr == hits.end())
+            // Make a new contact patch and add this hit node to it
+            const int patch_id = m_num_contact_patches++;
+            contact_patches.push_back(ContactPatchRecord());
+            auto& patch = contact_patches.back();
+            hit_list[s].rec->patch_id = patch_id;
+            patch.nodes.push_back(hit_list[s].ij);
+
+            // Add current node to the work queue
+            todo.clear();
+            todo.push_back(s);
+
+            for (size_t head = 0; head < todo.size(); head++) {
+                const ChVector2i crt_ij = hit_list[todo[head]].ij;  // current hit node
+                const int crt_cell = (crt_ij.x() - i0) * nj + (crt_ij.y() - j0);
+
+                // Loop through the neighbors of the current hit node
+                for (int k = 0; k < 4; k++) {
+                    // If neighbor is not a hit node, move on
+                    int nbr;
+                    if (dense) {
+                        nbr = m_patch_grid[crt_cell + nbr_offset[k]];
+                    } else {
+                        auto it = sparse_index.find(crt_ij + neighbors4[k]);
+                        nbr = (it == sparse_index.end()) ? -1 : it->second;
+                    }
+                    if (nbr < 0)
+                        continue;
+                    // If neighbor already assigned to a contact patch, move on
+                    if (hit_list[nbr].rec->patch_id != -1)
+                        continue;
+                    // Assign neighbor to the same contact patch
+                    hit_list[nbr].rec->patch_id = patch_id;
+                    // Add neighbor node to patch list
+                    patch.nodes.push_back(hit_list[nbr].ij);
+                    // Add neighbor to end of work queue
+                    todo.push_back(nbr);
+                }
+            }
+
+            if (!need_oob) {
+                patch.area = 0;
+                patch.perimeter = 0;
+                patch.oob = 0;
+                continue;
+            }
+
+            // Calculate area and perimeter of this contact patch, and the approximation to the Bekker term 1/b.
+            // Any node (i,j) of the patch lies on the segment joining the lowest and the highest patch node in
+            // column i, and both of those are patch nodes themselves. The convex hull of the per-column extremes
+            // is therefore exactly the convex hull of the patch, and it is built from O(columns) points instead of
+            // from all O(nodes) of them. A 4-connected patch spans no more columns than it has nodes, so the two
+            // scans below stay linear in the size of the patch.
+            int imin = std::numeric_limits<int>::max();
+            int imax = std::numeric_limits<int>::lowest();
+            for (const auto& ij : patch.nodes) {
+                imin = std::min(imin, ij.x());
+                imax = std::max(imax, ij.x());
+            }
+            col_min.assign(imax - imin + 1, std::numeric_limits<int>::max());
+            col_max.assign(imax - imin + 1, std::numeric_limits<int>::lowest());
+            for (const auto& ij : patch.nodes) {
+                const int c = ij.x() - imin;
+                col_min[c] = std::min(col_min[c], ij.y());
+                col_max[c] = std::max(col_max[c], ij.y());
+            }
+
+            hull_pts.clear();
+            for (int c = 0; c <= imax - imin; c++) {
+                if (col_min[c] == std::numeric_limits<int>::max())  // 4-connectivity leaves no empty column, but do not rely on it
                     continue;
-                // If neighbor already assigned to a contact patch, move on
-                if (nbr->second.patch_id != -1)
-                    continue;
-                // Assign neighbor to the same contact patch
-                nbr->second.patch_id = crt_patch;
-                // Add neighbor point to patch lists
-                patch.nodes.push_back(nbr_ij);
-                patch.points.push_back(ChVector2d(m_delta * nbr_ij.x(), m_delta * nbr_ij.y()));
-                // Add neighbor to end of work queue
-                todo.push(nbr_ij);
+                hull_pts.push_back(ChVector2i(c + imin, col_min[c]));
+                if (col_max[c] != col_min[c])
+                    hull_pts.push_back(ChVector2i(c + imin, col_max[c]));
+            }
+
+            GridConvexHull(hull_pts, hull_scratch, m_delta, patch.area, patch.perimeter);
+            if (patch.area < 1e-6) {
+                patch.oob = 0;
+            } else {
+                patch.oob = patch.perimeter / (2 * patch.area);
             }
         }
-        contact_patches.push_back(patch);
-    }
 
-    // Calculate area and perimeter of each contact patch.
-    // Calculate approximation to Bekker term 1/b.
-    for (auto& p : contact_patches) {
-        utils::ChConvexHull2D ch(p.points);
-        p.area = ch.GetArea();
-        p.perimeter = ch.GetPerimeter();
-        if (p.area < 1e-6) {
-            p.oob = 0;
-        } else {
-            p.oob = p.perimeter / (2 * p.area);
+        // Return the dense grid to its empty state
+        if (dense) {
+            for (const auto& e : hit_list)
+                m_patch_grid[(e.ij.x() - i0) * nj + (e.ij.y() - j0)] = -1;
         }
     }
 
@@ -1881,7 +2040,7 @@ void SCMLoader::ComputeInternalForces() {
         m_timer_bulldozing_boundary.start();
 
         NodeSet boundary;  // union of contact patch boundaries
-        for (auto p : contact_patches) {
+        for (const auto& p : contact_patches) {
             NodeSet p_boundary;  // boundary of effective contact patch
 
             // Calculate the displaced material from all touched nodes and identify boundary

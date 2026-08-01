@@ -681,6 +681,12 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
     std::vector<ActiveDomainInfo> m_active_domains;  ///< set of active domains
     bool m_user_domains;                             ///< user-specified active domains?
 
+    /// Dense (i,j) -> hit index lookup over the bounding box of the current ray-cast hit set, used to identify
+    /// contact patches (see ComputeInternalForces). Held as a member only so that its storage is reused from one
+    /// step to the next; it carries no state between steps, since every cell it uses is reset to -1 before it is
+    /// released and so it always starts out empty.
+    std::vector<int> m_patch_grid;
+
     double m_test_offset_down;  ///< offset for ray start
     double m_test_offset_up;    ///< offset for ray end
 
