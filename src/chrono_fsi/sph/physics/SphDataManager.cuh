@@ -301,6 +301,11 @@ struct FsiDataManager {
     /// Initializes device vectors to zero.
     void ResetData();
 
+    /// Zero the unsorted marker derivatives (derivVelRhoOriginalD) for the markers currently in the
+    /// active set. Must be called before the proximity search of the current step, while
+    /// gridMarkerIndexD still lists the previous step's active set.
+    void ResetDerivVelRhoOriginal();
+
     /// Resize data arrays based on particle activity.
     void ResizeArrays(uint numExtended);
 
@@ -380,9 +385,15 @@ struct FsiDataManager {
     thrust::device_vector<int32_t> activityIdentifierOriginalD;          ///< active particle flags - unsorted
     thrust::device_vector<int32_t> activityIdentifierSortedD;            ///< active particle flags - sorted
     thrust::device_vector<int32_t> extendedActivityIdentifierOriginalD;  ///< active particle flags - unsorted
-    thrust::device_vector<uint> prefixSumExtendedActivityIdD;            ///< prefix sum of extended particles
     thrust::device_vector<uint> activeListD;                             ///< active list of particles
     thrust::device_vector<uint> numNeighborsPerPart;                     ///< number of neighbors for each particle
+
+    // Per-chunk cache used to skip the activity update for regions of the world that cannot change.
+    // A "chunk" is a fixed-size run of *slots* in activityOrderD. See UpdateActivityChunkedD.
+    thrust::device_vector<uint> activityOrderD;          ///< marker indices in spatial (Morton) order
+    thrust::device_vector<Real3> activityChunkAabbMin;   ///< per-chunk marker AABB (valid while dormant)
+    thrust::device_vector<Real3> activityChunkAabbMax;   ///< per-chunk marker AABB (valid while dormant)
+    thrust::device_vector<int32_t> activityChunkDormant;  ///< 1 if no marker of the chunk is in the extended active set
 
     // List of all neighbors (indexed with information from numNeighborsPerPart)
     thrust::device_vector<uint> neighborList;    ///< neighbor list for all particles

@@ -16,7 +16,9 @@
 // =============================================================================
 
 #include <thrust/execution_policy.h>
-#include <thrust/scan.h>
+#include <thrust/sort.h>
+#include <thrust/copy.h>
+#include <thrust/iterator/counting_iterator.h>
 #include <thrust/logical.h>
 
 #include "chrono/utils/ChConstants.h"
@@ -41,7 +43,7 @@ void CopyParametersToDevice_SphFluidDynamics(std::shared_ptr<ChFsiParamsSPH> par
 }
 
 SphFluidDynamics::SphFluidDynamics(FsiDataManager& data_mgr, SphBceManager& bce_mgr, bool verbose, bool check_errors)
-    : m_data_mgr(data_mgr), m_verbose(verbose), m_check_errors(check_errors), m_errflagD(nullptr) {
+    : m_data_mgr(data_mgr), m_verbose(verbose), m_check_errors(check_errors), m_errflagD(nullptr), m_activity_chunks_valid(false) {
     collisionSystem = chrono_types::make_shared<SphCollisionSystem>(data_mgr);
 
     if (m_data_mgr.paramsH->integration_scheme == IntegrationScheme::IMPLICIT_SPH)
@@ -167,23 +169,24 @@ void SphFluidDynamics::DoStepDynamics(std::shared_ptr<SphMarkerDataD> y, Real t,
 
 // -----------------------------------------------------------------------------
 
-__global__ void UpdateActivityD(const Real4* posRadD,
-                                Real3* velMasD,
-                                const Real3* pos_bodies_D,
-                                const Real3* pos_nodes1D_D,
-                                const Real3* pos_nodes2D_D,
-                                int32_t* activityIdentifierD,
-                                int32_t* extendedActivityIdD,
-                                const Real4* rhoPreMuD,
-                                double time) {
-    uint index = blockIdx.x * blockDim.x + threadIdx.x;
-    if (index >= countersD.numAllMarkers) {
-        return;
-    }
-
+// Decide the activity of a single marker. Shared by the flat and the chunked launcher so the two
+// paths cannot drift apart. Writes activityIdentifierD/extendedActivityIdD (and zeroes the velocity
+// of a marker that is not active) exactly as the original single-kernel version did.
+__device__ inline void EvalMarkerActivity(uint index,
+                                          const Real4* posRadD,
+                                          Real3* velMasD,
+                                          const Real3* pos_bodies_D,
+                                          const Real3* pos_nodes1D_D,
+                                          const Real3* pos_nodes2D_D,
+                                          int32_t* activityIdentifierD,
+                                          int32_t* extendedActivityIdD,
+                                          bool isFluid,
+                                          double time,
+                                          Real3& posOut,
+                                          int32_t& extendedOut) {
     // Set the particle as an active particle
-    activityIdentifierD[index] = 1;
-    extendedActivityIdD[index] = 1;
+    int32_t activity = 1;
+    int32_t extended = 1;
     Real3 domainDims = paramsD.boxDims;
     Real3 domainOrigin = paramsD.worldOrigin;
     bool x_periodic = paramsD.x_periodic;
@@ -229,14 +232,14 @@ __global__ void UpdateActivityD(const Real4* posRadD,
 
         // Set the particle as an inactive particle if needed
         if (isNotActive == numTotal && numTotal > 0) {
-            activityIdentifierD[index] = 0;
+            activity = 0;
             velMasD[index] = mR3(0.0);
         }
         if (isNotExtended == numTotal && numTotal > 0)
-            extendedActivityIdD[index] = 0;
+            extended = 0;
     }
     // Check if the particle is outside the zombie domain
-    if (IsFluidParticle(rhoPreMuD[index].w)) {
+    if (isFluid) {
         bool outside_domain = false;
 
         // Check X boundaries - only inactivate if not periodic
@@ -255,55 +258,323 @@ __global__ void UpdateActivityD(const Real4* posRadD,
         }
 
         if (outside_domain) {
-            activityIdentifierD[index] = -1;
-            extendedActivityIdD[index] = -1;
+            activity = -1;
+            extended = -1;
             velMasD[index] = mR3(0.0);
         }
     }
 
-    return;
+    activityIdentifierD[index] = activity;
+    extendedActivityIdD[index] = extended;
+
+    posOut = posRadA;
+    extendedOut = extended;
 }
 
-void SphFluidDynamics::UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkersD, double time) {
-    uint numBlocks, numThreads;
-    computeGridSize((uint)m_data_mgr.countersH->numAllMarkers, 1024, numBlocks, numThreads);
+__global__ void UpdateActivityD(const Real4* posRadD,
+                                Real3* velMasD,
+                                const Real3* pos_bodies_D,
+                                const Real3* pos_nodes1D_D,
+                                const Real3* pos_nodes2D_D,
+                                int32_t* activityIdentifierD,
+                                int32_t* extendedActivityIdD,
+                                const Real4* rhoPreMuD,
+                                double time) {
+    uint index = blockIdx.x * blockDim.x + threadIdx.x;
+    if (index >= countersD.numAllMarkers) {
+        return;
+    }
 
-    UpdateActivityD<<<numBlocks, numThreads>>>(mR4CAST(sphMarkersD->posRadD), mR3CAST(sphMarkersD->velMasD), mR3CAST(m_data_mgr.fsiBodyState_D->pos),
-                                               mR3CAST(m_data_mgr.fsiMesh1DState_D->pos), mR3CAST(m_data_mgr.fsiMesh2DState_D->pos),
-                                               INT_32CAST(m_data_mgr.activityIdentifierOriginalD), INT_32CAST(m_data_mgr.extendedActivityIdentifierOriginalD),
-                                               mR4CAST(sphMarkersD->rhoPresMuD), time);
+    Real3 pos;
+    int32_t extended;
+    EvalMarkerActivity(index, posRadD, velMasD, pos_bodies_D, pos_nodes1D_D, pos_nodes2D_D, activityIdentifierD, extendedActivityIdD, IsFluidParticle(rhoPreMuD[index].w), time,
+                       pos, extended);
+}
+
+// -----------------------------------------------------------------------------
+// Chunked activity update.
+//
+// The flat kernel above reads the position of every marker in the world on every step, so its cost
+// grows with terrain extent even though the physics does not. The markers that dominate that count
+// are, by construction, the ones nowhere near a solid - and a marker that is not in the extended
+// active set is not in the sorted arrays at all, so it is never integrated and never moves. That
+// makes it possible to remember, per fixed-size block of marker indices ("chunk"):
+//   - whether every marker in the chunk was outside the extended active domain last time it was
+//     looked at ("dormant"), and
+//   - the bounding box of the chunk's marker positions, which stays valid for exactly as long as the
+//     chunk is dormant.
+// A dormant chunk whose box does not touch the (extended) active region cannot contain a marker
+// whose activity would change, so it is skipped without reading a single position.
+//
+// Anything that moves or reorders markers outside the solver invalidates the cached boxes; the
+// caller signals that with force_full.
+//
+// A chunk is a run of slots in activityOrderD, not a run of marker indices. Marker index order is
+// arbitrary - ChFsiProblemSPH emits markers in hash-set iteration order, which spreads consecutive
+// indices over the whole world - so index-contiguous chunks would have world-sized boxes and nothing
+// could ever be skipped. activityOrderD is the marker list in Morton order, which makes the boxes
+// tight without touching the marker arrays themselves (so nothing downstream sees a different
+// ordering, and results are unchanged).
+#define ACTIVITY_BLOCK_SIZE 256
+#define ACTIVITY_CHUNK_SIZE 512
+
+// Spread the low 10 bits of v out with 2-bit gaps, for a 30-bit Morton code.
+__device__ inline uint ExpandBits10(uint v) {
+    v = (v * 0x00010001u) & 0xFF0000FFu;
+    v = (v * 0x00000101u) & 0x0F00F00Fu;
+    v = (v * 0x00000011u) & 0xC30C30C3u;
+    v = (v * 0x00000005u) & 0x49249249u;
+    return v;
+}
+
+// Morton key of each marker on a 1024^3 lattice fitted to the computational domain. Per-axis
+// normalization means a long thin terrain patch still gets 1024 divisions along its length.
+__global__ void ComputeActivityKeysD(const Real4* __restrict__ posRadD, const Real4* __restrict__ rhoPreMuD, uint* __restrict__ keys, uint* __restrict__ order, uint numAllMarkers,
+                                     Real3 origin, Real3 invCell) {
+    uint i = blockIdx.x * blockDim.x + threadIdx.x;
+    if (i >= numAllMarkers)
+        return;
+
+    Real3 p = mR3(posRadD[i]);
+    int ix = (int)((p.x - origin.x) * invCell.x);
+    int iy = (int)((p.y - origin.y) * invCell.y);
+    int iz = (int)((p.z - origin.z) * invCell.z);
+    ix = min(max(ix, 0), 1023);
+    iy = min(max(iy, 0), 1023);
+    iz = min(max(iz, 0), 1023);
+
+    keys[i] = (ExpandBits10((uint)ix) << 2) | (ExpandBits10((uint)iy) << 1) | ExpandBits10((uint)iz);
+    // Marker type never changes, so cache it in the top bit of the order entry. That entry is read
+    // coalesced by the chunked update, which saves it a scattered load of rhoPresMu per marker.
+    order[i] = i | (IsFluidParticle(rhoPreMuD[i].w) ? 0x80000000u : 0u);
+}
+
+__global__ void UpdateActivityChunkedD(const Real4* posRadD,
+                                       Real3* velMasD,
+                                       const Real3* pos_bodies_D,
+                                       const Real3* pos_nodes1D_D,
+                                       const Real3* pos_nodes2D_D,
+                                       int32_t* activityIdentifierD,
+                                       int32_t* extendedActivityIdD,
+                                       double time,
+                                       Real3 regionMin,
+                                       Real3 regionMax,
+                                       Real3* chunkAabbMin,
+                                       Real3* chunkAabbMax,
+                                       int32_t* chunkDormant,
+                                       const uint* __restrict__ activityOrder,
+                                       int forceFull) {
+    __shared__ Real3 s_lo[ACTIVITY_BLOCK_SIZE];
+    __shared__ Real3 s_hi[ACTIVITY_BLOCK_SIZE];
+    __shared__ int32_t s_act[ACTIVITY_BLOCK_SIZE];
+    __shared__ int s_skip;
+
+    const uint chunk = blockIdx.x;
+    const uint tid = threadIdx.x;
+
+    if (tid == 0) {
+        int skip = 0;
+        if (!forceFull && chunkDormant[chunk]) {
+            Real3 lo = chunkAabbMin[chunk];
+            Real3 hi = chunkAabbMax[chunk];
+            skip = (hi.x < regionMin.x || lo.x > regionMax.x ||  //
+                    hi.y < regionMin.y || lo.y > regionMax.y ||  //
+                    hi.z < regionMin.z || lo.z > regionMax.z)
+                       ? 1
+                       : 0;
+        }
+        s_skip = skip;
+    }
+    __syncthreads();
+    if (s_skip)
+        return;
+
+    const Real big = Real(3.4e38);
+    Real3 lo = mR3(big);
+    Real3 hi = mR3(-big);
+    int32_t numExtended = 0;
+
+    for (uint k = tid; k < ACTIVITY_CHUNK_SIZE; k += ACTIVITY_BLOCK_SIZE) {
+        uint slot = chunk * ACTIVITY_CHUNK_SIZE + k;
+        if (slot >= countersD.numAllMarkers)
+            break;
+        uint packed = activityOrder[slot];
+        uint index = packed & 0x7FFFFFFFu;
+        Real3 pos;
+        int32_t extended;
+        EvalMarkerActivity(index, posRadD, velMasD, pos_bodies_D, pos_nodes1D_D, pos_nodes2D_D, activityIdentifierD, extendedActivityIdD, (packed >> 31) != 0, time, pos, extended);
+        lo = mR3(fmin(lo.x, pos.x), fmin(lo.y, pos.y), fmin(lo.z, pos.z));
+        hi = mR3(fmax(hi.x, pos.x), fmax(hi.y, pos.y), fmax(hi.z, pos.z));
+        numExtended += (extended > 0) ? 1 : 0;
+    }
+
+    s_lo[tid] = lo;
+    s_hi[tid] = hi;
+    s_act[tid] = numExtended;
+    __syncthreads();
+
+    for (uint s = ACTIVITY_BLOCK_SIZE / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            Real3 a = s_lo[tid], b = s_lo[tid + s];
+            s_lo[tid] = mR3(fmin(a.x, b.x), fmin(a.y, b.y), fmin(a.z, b.z));
+            Real3 c = s_hi[tid], d = s_hi[tid + s];
+            s_hi[tid] = mR3(fmax(c.x, d.x), fmax(c.y, d.y), fmax(c.z, d.z));
+            s_act[tid] += s_act[tid + s];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        chunkAabbMin[chunk] = s_lo[0];
+        chunkAabbMax[chunk] = s_hi[0];
+        // A chunk is dormant only if no marker in it is in the *extended* active set. Those markers
+        // are absent from the sorted arrays, so nothing in the step can move them or write their
+        // state - which is what keeps the cached box above valid while the chunk stays dormant.
+        chunkDormant[chunk] = (s_act[0] == 0) ? 1 : 0;
+    }
+}
+
+void SphFluidDynamics::BuildActivityOrder(std::shared_ptr<SphMarkerDataD> sphMarkersD) {
+    const auto& paramsH = m_data_mgr.paramsH;
+    uint numAllMarkers = (uint)m_data_mgr.countersH->numAllMarkers;
+
+    // Lattice fitted to the computational domain, 1024 divisions per axis.
+    Real3 dims = paramsH->boxDims;
+    Real3 invCell = mR3(Real(1024) / fmax(dims.x, Real(1e-6)),  //
+                        Real(1024) / fmax(dims.y, Real(1e-6)),  //
+                        Real(1024) / fmax(dims.z, Real(1e-6)));
+
+    m_data_mgr.activityOrderD.resize(numAllMarkers);
+    thrust::device_vector<uint> keys(numAllMarkers);
+
+    uint numBlocks, numThreads;
+    computeGridSize(numAllMarkers, 256, numBlocks, numThreads);
+    ComputeActivityKeysD<<<numBlocks, numThreads>>>(mR4CAST(sphMarkersD->posRadD), mR4CAST(sphMarkersD->rhoPresMuD), U1CAST(keys), U1CAST(m_data_mgr.activityOrderD), numAllMarkers,
+                                                   paramsH->worldOrigin, invCell);
+    if (m_check_errors) {
+        gpuCheckError();
+    }
+
+    thrust::sort_by_key(keys.begin(), keys.end(), m_data_mgr.activityOrderD.begin());
+}
+
+void SphFluidDynamics::UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkersD, double time, bool force_full) {
+    const auto& countersH = m_data_mgr.countersH;
+    const auto& paramsH = m_data_mgr.paramsH;
+
+    uint numAllMarkers = (uint)countersH->numAllMarkers;
+    size_t numTotal = countersH->numFsiBodies + countersH->numFsiNodes1D + countersH->numFsiNodes2D;
+
+    // The chunk shortcut only has anything to skip once markers can actually go inactive.
+    bool chunked = (numTotal > 0) && (time >= paramsH->settlingTime);
+
+    if (!chunked) {
+        m_activity_chunks_valid = false;
+
+        uint numBlocks, numThreads;
+        computeGridSize(numAllMarkers, 1024, numBlocks, numThreads);
+        UpdateActivityD<<<numBlocks, numThreads>>>(mR4CAST(sphMarkersD->posRadD), mR3CAST(sphMarkersD->velMasD), mR3CAST(m_data_mgr.fsiBodyState_D->pos),
+                                                   mR3CAST(m_data_mgr.fsiMesh1DState_D->pos), mR3CAST(m_data_mgr.fsiMesh2DState_D->pos),
+                                                   INT_32CAST(m_data_mgr.activityIdentifierOriginalD), INT_32CAST(m_data_mgr.extendedActivityIdentifierOriginalD),
+                                                   mR4CAST(sphMarkersD->rhoPresMuD), time);
+        if (m_check_errors) {
+            gpuCheckError();
+        }
+        return;
+    }
+
+    // Bounding box of the union of the per-solid extended active domains. Conservative with respect
+    // to the per-solid test done inside the kernel: a chunk rejected against this box is outside
+    // every solid's domain. The solid states live on the host as well (the device copies are always
+    // filled from them), so this costs nothing on the device.
+    Real3 ExAcdomain = paramsH->bodyActiveDomain + mR3(2 * paramsH->h_multiplier * paramsH->h);
+    Real3 regionMin = mR3(Real(3.4e38));
+    Real3 regionMax = mR3(Real(-3.4e38));
+    auto accum = [&](const thrust::host_vector<Real3>& pts, size_t n) {
+        for (size_t i = 0; i < n; i++) {
+            const Real3& p = pts[i];
+            regionMin = mR3(fmin(regionMin.x, p.x), fmin(regionMin.y, p.y), fmin(regionMin.z, p.z));
+            regionMax = mR3(fmax(regionMax.x, p.x), fmax(regionMax.y, p.y), fmax(regionMax.z, p.z));
+        }
+    };
+    accum(m_data_mgr.fsiBodyState_H->pos, countersH->numFsiBodies);
+    accum(m_data_mgr.fsiMesh1DState_H->pos, countersH->numFsiNodes1D);
+    accum(m_data_mgr.fsiMesh2DState_H->pos, countersH->numFsiNodes2D);
+    regionMin = regionMin - ExAcdomain;
+    regionMax = regionMax + ExAcdomain;
+
+    // If the active region already spans the whole computational domain - which is the case when the
+    // active-domain feature is simply not in use (bodyActiveDomain defaults to 1e10) - no chunk can
+    // ever be dormant. Fall back to the flat kernel rather than pay for the per-chunk bookkeeping and
+    // the indirection through activityOrderD on every marker, every step.
+    Real3 worldMin = paramsH->worldOrigin;
+    Real3 worldMax = paramsH->worldOrigin + paramsH->boxDims;
+    if (regionMin.x <= worldMin.x && regionMin.y <= worldMin.y && regionMin.z <= worldMin.z &&  //
+        regionMax.x >= worldMax.x && regionMax.y >= worldMax.y && regionMax.z >= worldMax.z) {
+        m_activity_chunks_valid = false;
+
+        uint numBlocks, numThreads;
+        computeGridSize(numAllMarkers, 1024, numBlocks, numThreads);
+        UpdateActivityD<<<numBlocks, numThreads>>>(mR4CAST(sphMarkersD->posRadD), mR3CAST(sphMarkersD->velMasD), mR3CAST(m_data_mgr.fsiBodyState_D->pos),
+                                                   mR3CAST(m_data_mgr.fsiMesh1DState_D->pos), mR3CAST(m_data_mgr.fsiMesh2DState_D->pos),
+                                                   INT_32CAST(m_data_mgr.activityIdentifierOriginalD), INT_32CAST(m_data_mgr.extendedActivityIdentifierOriginalD),
+                                                   mR4CAST(sphMarkersD->rhoPresMuD), time);
+        if (m_check_errors) {
+            gpuCheckError();
+        }
+        return;
+    }
+
+    uint numChunks = (numAllMarkers + ACTIVITY_CHUNK_SIZE - 1) / ACTIVITY_CHUNK_SIZE;
+    if (m_data_mgr.activityChunkDormant.size() != numChunks) {
+        m_data_mgr.activityChunkDormant.resize(numChunks);
+        m_data_mgr.activityChunkAabbMin.resize(numChunks);
+        m_data_mgr.activityChunkAabbMax.resize(numChunks);
+        m_activity_chunks_valid = false;
+    }
+
+    if (!m_activity_chunks_valid || force_full) {
+        // Either the cache has never been filled or markers have moved behind the solver's back.
+        // Rebuild the spatial ordering and visit every chunk to refill the boxes.
+        BuildActivityOrder(sphMarkersD);
+        force_full = true;
+        m_activity_chunks_valid = true;
+    }
+
+    UpdateActivityChunkedD<<<numChunks, ACTIVITY_BLOCK_SIZE>>>(
+        mR4CAST(sphMarkersD->posRadD), mR3CAST(sphMarkersD->velMasD), mR3CAST(m_data_mgr.fsiBodyState_D->pos), mR3CAST(m_data_mgr.fsiMesh1DState_D->pos),
+        mR3CAST(m_data_mgr.fsiMesh2DState_D->pos), INT_32CAST(m_data_mgr.activityIdentifierOriginalD), INT_32CAST(m_data_mgr.extendedActivityIdentifierOriginalD),
+        time, regionMin, regionMax, mR3CAST(m_data_mgr.activityChunkAabbMin), mR3CAST(m_data_mgr.activityChunkAabbMax), INT_32CAST(m_data_mgr.activityChunkDormant),
+        U1CAST(m_data_mgr.activityOrderD), force_full ? 1 : 0);
+    if (m_check_errors) {
+        gpuCheckError();
+    }
 }
 
 // -----------------------------------------------------------------------------
 
 // Resize data based on the active particles
 // Custom functor for exclusive scan that treats -1 (zombie particles) the same as 0 (sleep particles)
-struct ActivityScanOp {
-    __host__ __device__ int operator()(const int& a, const int& b) const {
-        // Treat -1 the same as 0 (only add positive values)
-        int b_value = (b <= 0) ? 0 : b;
-        return a + b_value;
-    }
+// Marker is in the extended active set. Zombie markers carry -1 and, like sleeping ones, do not count.
+struct is_extended_active {
+    __host__ __device__ bool operator()(const int32_t& v) const { return v > 0; }
 };
 
 bool SphFluidDynamics::CheckActivityArrayResize() {
     auto& countersH = m_data_mgr.countersH;
 
-    // Exclusive scan for extended activity identifier using custom functor to handle -1 values
-    thrust::exclusive_scan(thrust::device,                                          // execution policy
-                           m_data_mgr.extendedActivityIdentifierOriginalD.begin(),  // in start
-                           m_data_mgr.extendedActivityIdentifierOriginalD.end(),    // in end
-                           m_data_mgr.prefixSumExtendedActivityIdD.begin(),         // out start
-                           0,                                                       // initial value
-                           ActivityScanOp());
+    // Build the active list directly by stream compaction. This used to be an exclusive scan over the
+    // per-marker flags followed by a separate scatter kernel (fillActiveListD) - two full passes over
+    // an array sized for the whole world, of which the scan also wrote a second world-sized array.
+    // copy_if is stable, so the list comes out in ascending marker index, exactly as before.
+    auto end = thrust::copy_if(thrust::device,                                                                //
+                               thrust::counting_iterator<uint>(0),                                            //
+                               thrust::counting_iterator<uint>((uint)countersH->numAllMarkers),                //
+                               m_data_mgr.extendedActivityIdentifierOriginalD.begin(),                        // stencil
+                               m_data_mgr.activeListD.begin(),                                                //
+                               is_extended_active());
 
-    // Copy the last element of prefixSumD to host and since we used exclusive scan, need to add the last flag
-    uint lastPrefixVal = m_data_mgr.prefixSumExtendedActivityIdD[countersH->numAllMarkers - 1];
-    int32_t lastFlagInt32;
-    gpuMemcpy(&lastFlagInt32, thrust::raw_pointer_cast(&m_data_mgr.extendedActivityIdentifierOriginalD[countersH->numAllMarkers - 1]), sizeof(int32_t), gpuMemcpyDeviceToHost);
-    uint lastFlag = (lastFlagInt32 > 0) ? 1 : 0;  // Only count positive values
-
-    countersH->numExtendedParticles = lastPrefixVal + lastFlag;
+    countersH->numExtendedParticles = (size_t)(end - m_data_mgr.activeListD.begin());
 
     return countersH->numExtendedParticles < countersH->numAllMarkers;
 }

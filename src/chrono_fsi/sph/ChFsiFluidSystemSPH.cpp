@@ -1824,8 +1824,16 @@ void ChFsiFluidSystemSPH::PrintTimeSteps(const std::string& path) const {
 
 void ChFsiFluidSystemSPH::OnDoStepDynamics(double time, double step) {
     SynchronizeCopyStream();
-    // Update particle activity
-    m_fluid_dynamics->UpdateActivity(m_data_mgr->sphMarkers_D, time);
+    // Update particle activity. A forced proximity search means markers were moved or reordered from
+    // outside the solver (the particle relocator), so the activity update cannot trust anything it
+    // cached about where markers are.
+    m_fluid_dynamics->UpdateActivity(m_data_mgr->sphMarkers_D, time, m_frame == 0 || m_force_proximity_search);
+
+    // Zero the unsorted derivative output for the markers of the outgoing active set. This has to
+    // happen here, before the proximity search rebuilds that set: a marker leaving the active set
+    // must be zeroed on the last step it is still listed, since nothing writes it afterwards.
+    if (m_frame > 0)
+        m_data_mgr->ResetDerivVelRhoOriginal();
 
     // Perform proximity search
     bool proximity_search = m_frame % m_paramsH->num_proximity_search_steps == 0 || m_force_proximity_search;

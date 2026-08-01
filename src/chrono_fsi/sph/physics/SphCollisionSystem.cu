@@ -34,22 +34,6 @@ void CopyParametersToDevice_SphCollisionSystem(std::shared_ptr<ChFsiParamsSPH> p
 
 // =============================================================================
 
-// Create the active list
-// Writes only if active - thus active list has all active particles at the front
-// The index's are the index of the original particle arrangement
-// After the active particles, random values that were initialized are stored
-__global__ void fillActiveListD(const uint* __restrict__ prefixSum, const int32_t* __restrict__ extendedActivityIdD, uint* __restrict__ activeListD, uint numAllMarkers) {
-    uint tid = blockIdx.x * blockDim.x + threadIdx.x;
-    if (tid >= numAllMarkers)
-        return;
-
-    // Check if the value is 1 (active)
-    if (extendedActivityIdD[tid] == 1) {
-        uint writePos = prefixSum[tid];  // an integer in [0..(numActive-1)]
-        activeListD[writePos] = tid;
-    }
-}
-
 // calcHashD :
 // 1. Get particle index determined by the block and thread we are in.
 // 2. From x, y, z position, determine which bin it is in.
@@ -333,12 +317,10 @@ void SphCollisionSystem::ArrangeData(std::shared_ptr<SphMarkerDataD> sphMarkersD
 
     m_sphMarkersD = sphMarkersD;  //// TODO RADU: why is this cached?!?!
 
-    // Create active list where all active particles are at the front of the array
+    // activeListD (the active particles, at the front, in ascending marker index) has already been
+    // built by SphFluidDynamics::CheckActivityArrayResize, which runs immediately before this on
+    // every proximity-search step.
     uint numThreads, numBlocks;
-    computeGridSize((uint)m_data_mgr.countersH->numAllMarkers, 1024, numBlocks, numThreads);
-
-    fillActiveListD<<<numBlocks, numThreads>>>(U1CAST(m_data_mgr.prefixSumExtendedActivityIdD), INT_32CAST(m_data_mgr.extendedActivityIdentifierOriginalD),
-                                               U1CAST(m_data_mgr.activeListD), (uint)m_data_mgr.countersH->numAllMarkers);
 
     // Reset cell size
     int3 cellsDim = m_data_mgr.paramsH->gridSize;
@@ -391,8 +373,16 @@ void SphCollisionSystem::NeighborSearch(std::shared_ptr<SphMarkerDataD> sortedSp
     uint numBlocksShort, numThreadsShort;
     computeGridSize(numActive, 1024, numBlocksShort, numThreadsShort);
 
+    // numNeighborsPerPart is allocated for every marker in the world, but only entries [0,numActive]
+    // are ever read (the neighbor kernels index it with a *sorted* index and its successor). Clearing
+    // and scanning the tail would make the neighbor bookkeeping scale with terrain extent rather than
+    // with the active set. ISPH indexes this array over all markers, so it keeps the full range.
+    bool implicit = (m_data_mgr.paramsH->integration_scheme == IntegrationScheme::IMPLICIT_SPH);
+    auto nn_begin = m_data_mgr.numNeighborsPerPart.begin();
+    auto nn_end = implicit ? m_data_mgr.numNeighborsPerPart.end() : nn_begin + numActive + 1;
+
     // Execute the kernel
-    thrust::fill(m_data_mgr.numNeighborsPerPart.begin(), m_data_mgr.numNeighborsPerPart.end(), 0);
+    thrust::fill(nn_begin, nn_end, 0);
 
     // start neighbor search
     // first pass
@@ -400,10 +390,12 @@ void SphCollisionSystem::NeighborSearch(std::shared_ptr<SphMarkerDataD> sortedSp
                                                            U1CAST(m_data_mgr.markersProximity_D->cellStartD), U1CAST(m_data_mgr.markersProximity_D->cellEndD), numActive,
                                                            U1CAST(m_data_mgr.numNeighborsPerPart));
 
-    // In-place exclusive scan for num of neighbors
-    thrust::exclusive_scan(m_data_mgr.numNeighborsPerPart.begin(), m_data_mgr.numNeighborsPerPart.end(), m_data_mgr.numNeighborsPerPart.begin());
-    if (m_data_mgr.numNeighborsPerPart.back() > 0) {
-        m_data_mgr.neighborList.resize(m_data_mgr.numNeighborsPerPart.back());
+    // In-place exclusive scan for num of neighbors. The last scanned entry holds the total neighbor
+    // count (entries past numActive are all zero, so this is the same value the full-range scan gave).
+    thrust::exclusive_scan(nn_begin, nn_end, nn_begin);
+    uint numNeighborsTotal = m_data_mgr.numNeighborsPerPart[(nn_end - nn_begin) - 1];
+    if (numNeighborsTotal > 0) {
+        m_data_mgr.neighborList.resize(numNeighborsTotal);
         thrust::fill(m_data_mgr.neighborList.begin(), m_data_mgr.neighborList.end(), 0);
 
         // second pass

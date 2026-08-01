@@ -370,12 +370,43 @@ void FsiDataManager::ConstructReferenceArray() {
     numComponentMarkers.clear();
 }
 
+// Zero the unsorted derivative output for exactly the markers of the *current* (i.e. previous
+// step's) active set - the ones CopySortedToOriginal wrote on the previous step. Must be called
+// before the proximity search rebuilds gridMarkerIndexD, so that a marker which drops out of the
+// active set is zeroed on the last step it is still listed. Markers outside the active set are
+// never written by CopySortedToOriginal, so once zeroed they stay zeroed; that is what makes it
+// unnecessary to sweep the whole (world-sized) array every step.
+__global__ void ZeroDerivVelRhoOriginalD(Real4* derivVelRhoOriginalD, const uint* __restrict__ gridMarkerIndexD, uint numActive) {
+    uint tid = blockIdx.x * blockDim.x + threadIdx.x;
+    if (tid >= numActive)
+        return;
+    derivVelRhoOriginalD[gridMarkerIndexD[tid]] = mR4(0);
+}
+
+void FsiDataManager::ResetDerivVelRhoOriginal() {
+    size_t numActive = countersH->numExtendedParticles;
+    if (numActive == 0)
+        return;
+
+    // The scatter is a win only while the active set is a small part of the world. Once most markers
+    // are active (no active domain in use, say) a straight fill moves less memory and moves it
+    // sequentially; it is also equivalent, since the entries it additionally clears are already zero.
+    if (numActive * 2 >= countersH->numAllMarkers) {
+        thrust::fill(derivVelRhoOriginalD.begin(), derivVelRhoOriginalD.end(), mR4(0));
+        return;
+    }
+
+    uint numBlocks, numThreads;
+    computeGridSize((uint)numActive, 1024, numBlocks, numThreads);
+    ZeroDerivVelRhoOriginalD<<<numBlocks, numThreads>>>(mR4CAST(derivVelRhoOriginalD), U1CAST(markersProximity_D->gridMarkerIndexD), (uint)numActive);
+}
+
 void FsiDataManager::ResetData() {
     auto zero4 = mR4(0);
     auto zero3 = mR3(0);
 
     thrust::fill(derivVelRhoD.begin(), derivVelRhoD.end(), zero4);
-    thrust::fill(derivVelRhoOriginalD.begin(), derivVelRhoOriginalD.end(), zero4);
+    // derivVelRhoOriginalD is handled by ResetDerivVelRhoOriginal(), called earlier in the step.
     thrust::fill(freeSurfaceIdD.begin(), freeSurfaceIdD.end(), 0);
 
     thrust::fill(vel_XSPH_D.begin(), vel_XSPH_D.end(), zero3);
@@ -384,7 +415,11 @@ void FsiDataManager::ResetData() {
         thrust::fill(sr_tau_I_mu_i.begin(), sr_tau_I_mu_i.end(), zero4);
 
     //// TODO: ISPH only
-    thrust::fill(bceAcc.begin(), bceAcc.end(), zero3);
+    // bceAcc is allocated for every marker in the world but is *indexed by sorted index* (both
+    // where it is written, in SphBceManager::updateBCEAcc, and where it is read, in the Adami /
+    // Holmes BC kernels). Only the first numExtendedParticles entries can ever be read, so the
+    // tail is left alone rather than being cleared over the whole world every step.
+    thrust::fill(bceAcc.begin(), bceAcc.begin() + std::min(countersH->numExtendedParticles, bceAcc.size()), zero3);
 
     //// TODO: elasticSPH only
     thrust::fill(derivTauXxYyZzD.begin(), derivTauXxYyZzD.end(), zero3);
@@ -520,7 +555,6 @@ void FsiDataManager::Initialize(unsigned int num_fsi_bodies,
     activityIdentifierOriginalD.resize(countersH->numAllMarkers, 1);
     activityIdentifierSortedD.resize(countersH->numAllMarkers, 1);
     extendedActivityIdentifierOriginalD.resize(countersH->numAllMarkers, 1);
-    prefixSumExtendedActivityIdD.resize(countersH->numAllMarkers, 1);
     activeListD.resize(countersH->numAllMarkers, 1);
     // Number of neighbors for the particle of given index
     numNeighborsPerPart.resize(countersH->numAllMarkers + 1, 0);
@@ -874,9 +908,12 @@ size_t FsiDataManager::GetCurrentGPUMemoryUsage() const {
     total_bytes += activityIdentifierOriginalD.capacity() * sizeof(int32_t);
     total_bytes += activityIdentifierSortedD.capacity() * sizeof(int32_t);
     total_bytes += extendedActivityIdentifierOriginalD.capacity() * sizeof(int32_t);
-    total_bytes += prefixSumExtendedActivityIdD.capacity() * sizeof(uint);
     total_bytes += activeListD.capacity() * sizeof(uint);
     total_bytes += numNeighborsPerPart.capacity() * sizeof(uint);
+    total_bytes += activityOrderD.capacity() * sizeof(uint);
+    total_bytes += activityChunkAabbMin.capacity() * sizeof(Real3);
+    total_bytes += activityChunkAabbMax.capacity() * sizeof(Real3);
+    total_bytes += activityChunkDormant.capacity() * sizeof(int32_t);
     total_bytes += neighborList.capacity() * sizeof(uint);
     total_bytes += freeSurfaceIdD.capacity() * sizeof(uint);
 
