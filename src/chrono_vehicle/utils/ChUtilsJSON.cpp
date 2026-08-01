@@ -761,7 +761,7 @@ std::shared_ptr<ChEngine> ReadEngineJSON(const std::string& filename) {
     } else if (subtype.compare("EngineShafts") == 0) {
         engine = chrono_types::make_shared<EngineShafts>(d);
     } else {
-        throw std::invalid_argument("Engine type not supported in ReadEngineJSON.");
+        throw std::invalid_argument(std::string("Engine type not supported in ReadEngineJSON: ") + subtype);
     }
 
     return engine;

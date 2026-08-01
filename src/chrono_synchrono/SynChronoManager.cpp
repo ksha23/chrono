@@ -4,6 +4,7 @@
 #include "chrono_synchrono/utils/SynLog.h"
 #include "chrono_synchrono/agent/SynAgentFactory.h"
 #include "chrono_synchrono/flatbuffer/message/SynSimulationMessage.h"
+#include "chrono_synchrono/agent/SynWheeledVehicleAgent.h"
 
 #ifdef CHRONO_FASTDDS
     #undef ALIVE
@@ -225,6 +226,24 @@ void SynChronoManager::Synchronize(double time) {
 void SynChronoManager::UpdateAgents() {
     for (auto& agent_pair : m_agents)
         agent_pair.second->Update();
+}
+
+void SynChronoManager::InterpolateZombies(double time) {
+    for (auto& zombie_pair : m_zombies) {
+        // Try to cast to SynWheeledVehicleAgent which supports interpolation
+        if (auto wheeled_zombie = std::dynamic_pointer_cast<SynWheeledVehicleAgent>(zombie_pair.second)) {
+            wheeled_zombie->InterpolateZombie(time);
+        }
+        // Add other agent types here as interpolation support is added
+    }
+}
+
+void SynChronoManager::SetInterpolate(bool enable) {
+    for (auto& zombie_pair : m_zombies) {
+        if (auto wheeled_zombie = std::dynamic_pointer_cast<SynWheeledVehicleAgent>(zombie_pair.second)) {
+            wheeled_zombie->SetInterpolate(enable);
+        }
+    }
 }
 
 void SynChronoManager::QuitSimulation() {

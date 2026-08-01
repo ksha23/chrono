@@ -677,6 +677,12 @@ TerrainForce ChTireTestRig::ReportTireForce() const {
     return m_tire->ReportTireForce(m_terrain.get());
 }
 
+double ChTireTestRig::GetAngSpeed() const {
+    if (m_rs_actuated && m_rot_motor)
+        return m_rot_motor->GetMotorAngleDt();
+    return 0;
+}
+
 // -----------------------------------------------------------------------------
 
 double ChTireTestRig::GetDBP() const {

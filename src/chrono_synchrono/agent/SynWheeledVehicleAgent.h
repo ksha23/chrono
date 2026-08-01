@@ -109,6 +109,24 @@ class SYN_API SynWheeledVehicleAgent : public SynAgent {
     /// @return A ChQuaternion describing the rotation of the zombie
     ChQuaternion<> GetZombieRot() { return m_zombie_body->GetRot(); }
 
+    ///@brief Update zombie position using velocity-based extrapolation
+    /// Call this every physics/render step to smooth zombie motion between sync updates.
+    /// Uses the velocity from the last received state to extrapolate position.
+    ///
+    ///@param time current simulation time
+    void InterpolateZombie(double time);
+
+    ///@brief Enable or disable zombie interpolation
+    /// When enabled, SynchronizeZombie stores state for interpolation and
+    /// InterpolateZombie should be called each step.
+    /// When disabled (default), zombies snap to received positions.
+    ///
+    ///@param enable true to enable interpolation
+    void SetInterpolate(bool enable) { m_interpolate = enable; }
+
+    ///@brief Check if interpolation is enabled
+    bool GetInterpolate() const { return m_interpolate; }
+
     ///@brief Set the Agent ID
     ///
     virtual void SetKey(AgentKey agent_key) override;
@@ -138,6 +156,12 @@ class SYN_API SynWheeledVehicleAgent : public SynAgent {
 
     std::shared_ptr<ChBodyAuxRef> m_zombie_body;              ///< agent's zombie body reference
     std::vector<std::shared_ptr<ChBodyAuxRef>> m_wheel_list;  ///< vector of this agent's zombie wheels
+
+    // Interpolation support
+    bool m_interpolate = false;             ///< whether to use velocity-based interpolation
+    double m_last_sync_time = 0.0;          ///< time of last received sync message
+    ChFrameMoving<> m_chassis_state;        ///< chassis state from last sync (with velocity)
+    std::vector<ChFrameMoving<>> m_wheel_states;  ///< wheel states from last sync (with velocity)
 };
 
 /// @} synchrono_agent

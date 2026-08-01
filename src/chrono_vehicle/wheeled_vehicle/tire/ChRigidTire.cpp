@@ -82,8 +82,25 @@ void ChRigidTire::Synchronize(double time, const ChTerrain& terrain) {
     ChCoordsys<> tire_frame;
     double depth;
     float mu;
-    ChTire::DiscTerrainCollision1pt(terrain, wheel_state.pos, wheel_state.rot.GetAxisY(), GetRadius(), tire_frame,
-                                    depth, mu);
+    bool contact = ChTire::DiscTerrainCollision1pt(terrain, wheel_state.pos, wheel_state.rot.GetAxisY(), GetRadius(),
+                                                   tire_frame, depth, mu);
+
+    if (!contact) {
+        // Fallback: construct tire frame from wheel geometry on a flat ground plane.
+        // This happens frequently on SCM terrain where the deformation bowl confuses
+        // the simple disc-plane intersection in DiscTerrainCollision1pt.
+        ChVector3d disc_normal = wheel_state.rot.GetAxisY();
+        ChVector3d longitudinal = Vcross(disc_normal, ChWorldFrame::Vertical());
+        double len2 = longitudinal.Length2();
+        if (len2 > 1e-6) {
+            longitudinal /= std::sqrt(len2);
+            ChVector3d lateral = Vcross(ChWorldFrame::Vertical(), longitudinal);
+            ChMatrix33<> rot;
+            rot.SetFromDirectionAxes(longitudinal, lateral, ChWorldFrame::Vertical());
+            tire_frame.pos = wheel_state.pos - GetRadius() * ChWorldFrame::Vertical();
+            tire_frame.rot = rot.GetQuaternion();
+        }
+    }
 
     // Calculate tire kinematics
     CalculateKinematics(wheel_state, tire_frame);

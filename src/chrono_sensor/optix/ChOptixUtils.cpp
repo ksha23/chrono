@@ -83,6 +83,11 @@ void GetShaderFromFile(OptixDeviceContext context,
         nvrtc_compiler_flag_list.push_back(nvrtc_flags[i]);
     }
 
+    // CUDA 13's libcu++ requires C++17; ensure NVRTC uses it.
+    nvrtc_compiler_flag_list.push_back("--std=c++17");
+    // (Optional) silence the dialect guard if anything still tries older std
+    nvrtc_compiler_flag_list.push_back("-DCCCL_IGNORE_DEPRECATED_CPP_DIALECT");
+
     // runtime compile CU to PTX with NVRTC
     const nvrtcResult compile_result =
         nvrtcCompileProgram(nvrtc_program, (int)nvrtc_compiler_flag_list.size(), nvrtc_compiler_flag_list.data());

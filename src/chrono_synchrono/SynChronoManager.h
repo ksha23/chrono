@@ -83,6 +83,23 @@ class SYN_API SynChronoManager {
     ///
     void SetHeartbeat(double heartbeat) { m_heartbeat = heartbeat; }
 
+    ///@brief Get the current heartbeat interval
+    double GetHeartbeat() const { return m_heartbeat; }
+
+    ///@brief Interpolate all zombie agents using velocity-based extrapolation
+    /// Call this every physics/render step to smooth zombie motion between sync updates.
+    /// This only affects agents that have interpolation enabled via SetInterpolate(true).
+    ///
+    ///@param time current simulation time
+    void InterpolateZombies(double time);
+
+    ///@brief Enable interpolation on all zombie agents
+    /// When enabled, zombie positions are extrapolated between sync updates
+    /// using velocity data, resulting in smoother motion.
+    ///
+    ///@param enable true to enable interpolation on all zombies
+    void SetInterpolate(bool enable);
+
     /// @brief Should the simulation still be running?
     bool IsOk() { return m_is_ok; }
 

@@ -80,12 +80,78 @@ void SynWheeledVehicleAgent::InitializeZombie(ChSystem* system) {
 
 void SynWheeledVehicleAgent::SynchronizeZombie(std::shared_ptr<SynMessage> message) {
     if (auto state = std::dynamic_pointer_cast<SynWheeledVehicleStateMessage>(message)) {
-        m_zombie_body->SetFrameRefToAbs(state->chassis.GetFrame());
-        for (int i = 0; i < state->wheels.size(); i++)
-            m_wheel_list[i]->SetFrameRefToAbs(state->wheels[i].GetFrame());
+        if (m_interpolate) {
+            // Store state for interpolation - extract time and full frame data
+            m_last_sync_time = state->time;
+            m_chassis_state = state->chassis.GetFrame();
+            
+            m_wheel_states.resize(state->wheels.size());
+            for (size_t i = 0; i < state->wheels.size(); i++) {
+                m_wheel_states[i] = state->wheels[i].GetFrame();
+            }
+        } else {
+            // Original behavior: snap to position
+            m_zombie_body->SetFrameRefToAbs(state->chassis.GetFrame());
+            for (size_t i = 0; i < state->wheels.size(); i++)
+                m_wheel_list[i]->SetFrameRefToAbs(state->wheels[i].GetFrame());
+        }
     }
 }
 
+void SynWheeledVehicleAgent::InterpolateZombie(double time) {
+    if (!m_interpolate)
+        return;
+
+    // Extrapolate based on time elapsed since last sync
+    double dt = time - m_last_sync_time;
+    
+    // Clamp dt to avoid runaway extrapolation if sync is delayed
+    const double max_extrapolation = 0.1;  // 100ms max
+    if (dt > max_extrapolation)
+        dt = max_extrapolation;
+    if (dt < 0)
+        dt = 0;
+
+    // Extrapolate chassis position using velocity
+    ChVector3d chassis_pos = m_chassis_state.GetPos() + m_chassis_state.GetPosDt() * dt;
+    
+    // For rotation, use angular velocity to extrapolate
+    ChQuaternion<> chassis_rot = m_chassis_state.GetRot();
+    ChVector3d omega = m_chassis_state.GetAngVelLocal();
+    if (omega.Length() > 1e-6) {
+        ChQuaternion<> omega_quat(0, omega.x(), omega.y(), omega.z());
+        ChQuaternion<> q_dot = (omega_quat * chassis_rot) * 0.5;
+        chassis_rot.e0() += q_dot.e0() * dt;
+        chassis_rot.e1() += q_dot.e1() * dt;
+        chassis_rot.e2() += q_dot.e2() * dt;
+        chassis_rot.e3() += q_dot.e3() * dt;
+        chassis_rot.Normalize();
+    }
+    
+    // Use SetFrameRefToAbs to properly handle ChBodyAuxRef offset
+    ChFrameMoving<> chassis_frame(chassis_pos, chassis_rot);
+    m_zombie_body->SetFrameRefToAbs(chassis_frame);
+
+    // Extrapolate wheels
+    for (size_t i = 0; i < m_wheel_states.size() && i < m_wheel_list.size(); i++) {
+        ChVector3d wheel_pos = m_wheel_states[i].GetPos() + m_wheel_states[i].GetPosDt() * dt;
+        
+        ChQuaternion<> wheel_rot = m_wheel_states[i].GetRot();
+        ChVector3d wheel_omega = m_wheel_states[i].GetAngVelLocal();
+        if (wheel_omega.Length() > 1e-6) {
+            ChQuaternion<> omega_quat(0, wheel_omega.x(), wheel_omega.y(), wheel_omega.z());
+            ChQuaternion<> q_dot = (omega_quat * wheel_rot) * 0.5;
+            wheel_rot.e0() += q_dot.e0() * dt;
+            wheel_rot.e1() += q_dot.e1() * dt;
+            wheel_rot.e2() += q_dot.e2() * dt;
+            wheel_rot.e3() += q_dot.e3() * dt;
+            wheel_rot.Normalize();
+        }
+        
+        ChFrameMoving<> wheel_frame(wheel_pos, wheel_rot);
+        m_wheel_list[i]->SetFrameRefToAbs(wheel_frame);
+    }
+}
 void SynWheeledVehicleAgent::Update() {
     if (!m_vehicle)
         return;

@@ -99,6 +99,9 @@
 
 #include "chrono_vehicle/wheeled_vehicle/test_rig/ChSuspensionTestRig.h"
 #include "chrono_vehicle/wheeled_vehicle/test_rig/ChSuspensionTestRigDriver.h"
+#include "chrono_vehicle/wheeled_vehicle/test_rig/ChTireTestRig.h"
+#include "chrono/functions/ChFunctionConst.h"
+#include "chrono/functions/ChFunctionInterp.h"
 
 // Tracked vehicle
 #include "chrono_vehicle/tracked_vehicle/ChTrackedVehicle.h"
@@ -178,6 +181,10 @@ using namespace chrono::vehicle::m113;
 
 //from core module:
 %shared_ptr(chrono::ChFunction)
+%shared_ptr(chrono::ChFunctionConst)
+%shared_ptr(chrono::ChFunctionInterp)
+%shared_ptr(chrono::ChFunctionPoly)
+%shared_ptr(chrono::ChFunctionRamp)
 %shared_ptr(chrono::ChFrame<double>) 
 %shared_ptr(chrono::ChFrameMoving<double>)
 %shared_ptr(chrono::ChPhysicsItem)
@@ -185,7 +192,6 @@ using namespace chrono::vehicle::m113;
 %shared_ptr(chrono::ChNodeXYZ) 
 %shared_ptr(chrono::ChVisualShapeTriangleMesh)
 %shared_ptr(chrono::ChTriangleMeshConnected)
-%shared_ptr(chrono::ChFunctionInterp)
 %shared_ptr(chrono::ChBezierCurve)
 %shared_ptr(chrono::ChLinkMarkers)
 %shared_ptr(chrono::ChContactable)
@@ -390,6 +396,25 @@ Before adding a shared_ptr, mark as shared ptr all its inheritance tree in the m
 
 %include "../../../chrono_vehicle/wheeled_vehicle/test_rig/ChSuspensionTestRig.h"
 %include "../../../chrono_vehicle/wheeled_vehicle/test_rig/ChSuspensionTestRigDriver.h"
+
+// ChTireTestRig: add Python-friendly helpers to bypass cross-module shared_ptr issue
+%extend chrono::vehicle::ChTireTestRig {
+    void SetConstantLongSpeed(double val) {
+        $self->SetLongSpeedFunction(chrono_types::make_shared<ChFunctionConst>(val));
+    }
+    void SetConstantAngSpeed(double val) {
+        $self->SetAngSpeedFunction(chrono_types::make_shared<ChFunctionConst>(val));
+    }
+    void SetSlipAngleInterp(const std::vector<double>& times, const std::vector<double>& values) {
+        auto f = chrono_types::make_shared<ChFunctionInterp>();
+        for (size_t i = 0; i < times.size() && i < values.size(); i++) {
+            f->AddPoint(times[i], values[i]);
+        }
+        $self->SetSlipAngleFunction(f);
+    }
+}
+
+%include "../../../chrono_vehicle/wheeled_vehicle/test_rig/ChTireTestRig.h"
 
 // Tracked vehicles
 %include "ChTrackAssembly.i"

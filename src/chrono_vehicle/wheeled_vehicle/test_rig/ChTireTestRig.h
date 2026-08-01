@@ -224,6 +224,18 @@ class CH_VEHICLE_API ChTireTestRig {
     /// Get current carrier body position.
     const ChVector3d& GetPos() const { return m_carrier_body->GetPos(); }
 
+    /// Get current carrier body longitudinal velocity (x-direction).
+    double GetLongSpeed() const { return m_carrier_body->GetPosDt().x(); }
+
+    /// Get current wheel angular velocity (rad/s).
+    double GetAngSpeed() const;
+
+    /// Get the tire's internally-computed longitudinal slip.
+    double GetLongitudinalSlip() const { return m_tire->GetLongitudinalSlip(); }
+
+    /// Get the tire's internally-computed slip angle (rad).
+    double GetSlipAngle() const { return m_tire->GetSlipAngle(); }
+
     /// Get the current tire forces
     TerrainForce ReportTireForce() const;
 
