@@ -124,9 +124,10 @@ class CH_SENSOR_API ChOptixPipeline {
 
     /// Function to update all the deformable meshes in the optix scene based on their chrono meshes.
     ///
-    /// @param sim_step_count the owning system's ChSystem::GetNumSteps(). Used only to decide whether
-    /// a mesh producer's per-step list of modified vertices can be trusted to describe everything
-    /// that changed since the previous call; see the implementation for why.
+    /// Each mesh tracks the change-log version it was last uploaded at, so only what has actually
+    /// changed since is restaged; see the implementation.
+    ///
+    /// @param sim_step_count unused, retained for call-site compatibility.
     void UpdateDeformableMeshes(size_t sim_step_count);
 
     /// Function to update all the shader binding tables associated with this optix scene
@@ -284,8 +285,11 @@ class CH_SENSOR_API ChOptixPipeline {
     /// keep track of chrono meshes we've added and their corresponding mesh pool id
     std::vector<std::tuple<std::shared_ptr<ChTriangleMeshConnected>, unsigned int>> m_known_meshes;
 
-    /// list of deformable meshes <mesh shape, dvertices, dnormals, num prev triangles>
-    std::vector<std::tuple<std::shared_ptr<ChVisualShapeTriangleMesh>, CUdeviceptr, CUdeviceptr, unsigned int>>
+    /// list of deformable meshes <mesh shape, dvertices, dnormals, num prev triangles, synced dirty version>
+    /// The last element is the shape's change-log version at the time this mesh was last uploaded, so the
+    /// next update can ask for exactly what changed since -- see UpdateDeformableMeshes.
+    std::vector<std::tuple<std::shared_ptr<ChVisualShapeTriangleMesh>, CUdeviceptr, CUdeviceptr, unsigned int,
+                           uint64_t>>
         m_deformable_meshes;
 
     // --- Reused staging for deformable mesh uploads; see UpdateDeformableMeshes ---
@@ -297,11 +301,6 @@ class CH_SENSOR_API ChOptixPipeline {
     CUdeviceptr md_deformable_values = {};     ///< device staging, values, m_deformable_capacity entries
     size_t m_deformable_capacity = 0;          ///< entries the device staging buffers can hold
 
-    /// ChSystem::GetNumSteps() at the previous UpdateDeformableMeshes call, and whether one happened.
-    /// Used to tell a per-step modified-vertex list that is complete from one that has been
-    /// overwritten by intervening steps.
-    size_t m_last_deformable_step = 0;
-    bool m_have_deformable_step = false;
 
     /// Ensure the device staging buffers can hold at least `count` scattered vertex updates.
     void ReserveDeformableStaging(size_t count);

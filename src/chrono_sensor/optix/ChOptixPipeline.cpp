@@ -275,8 +275,6 @@ void ChOptixPipeline::CleanMaterials() {
     m_deformable_values.shrink_to_fit();
     m_deformable_indices.clear();
     m_deformable_indices.shrink_to_fit();
-    // A rebuilt scene has no continuity with the step counts seen before it.
-    m_have_deformable_step = false;
 
     // reset material pool
     if (md_material_pool) {
@@ -1220,7 +1218,9 @@ unsigned int ChOptixPipeline::GetDeformableMeshMaterial(CUdeviceptr& d_vertices,
     unsigned int mesh_id = m_material_records[mat_id].data.mesh_pool_id;
     CUdeviceptr d_normals = reinterpret_cast<CUdeviceptr>(m_mesh_pool[mesh_id].normal_buffer);
     unsigned int num_triangles = static_cast<unsigned int>(mesh_shape->GetMesh()->GetIndicesVertices().size());
-    m_deformable_meshes.push_back(std::make_tuple(mesh_shape, d_vertices, d_normals, num_triangles));
+    // The full mesh has just been uploaded, so this mesh is in sync with the shape's current version.
+    m_deformable_meshes.push_back(
+        std::make_tuple(mesh_shape, d_vertices, d_normals, num_triangles, mesh_shape->GetModifiedVerticesVersion()));
 
     return mat_id;
 }
@@ -1244,19 +1244,16 @@ void ChOptixPipeline::UpdateDeformableMeshes(size_t sim_step_count) {
     // previous one.
     //
     // This function does not run every step. ChOptixEngine::UpdateSensors only reaches it when some
-    // sensor is due to render, so with a 30 Hz camera and a 2 ms step it runs once per ~16 steps and
-    // the lists from the 15 steps in between are gone. Trusting the surviving list would leave the
-    // vertices they touched stale on the device: not a transient artifact but a permanently wrong
-    // surface, until something happens to touch those vertices again on a step this function does
-    // observe.
+    // sensor is due to render, so with a 30 Hz camera and a 2 ms step it runs once per ~16 steps.
+    // GetModifiedVertices() describes only the most recent publication, so acting on it here would
+    // leave everything the intervening steps touched stale on the device -- not a transient artifact
+    // but a permanently wrong surface.
     //
-    // The step counter makes the difference observable. Exactly one step since the previous call
-    // means the list in hand is the only one that was ever produced, so it is complete. Anything
-    // else -- several steps, no steps, or a first call with no baseline -- falls back to restating
-    // the whole mesh, which is always correct.
-    const bool steps_contiguous = m_have_deformable_step && (sim_step_count == m_last_deformable_step + 1);
-    m_last_deformable_step = sim_step_count;
-    m_have_deformable_step = true;
+    // GetModifiedVerticesSince() spans the whole interval instead. Each mesh remembers the version it
+    // was last uploaded at and asks for the delta since; the shape reports a miss once a caller has
+    // fallen further behind than patching is worth, and then the mesh is restated in full, which is
+    // always correct.
+    (void)sim_step_count;
 
     for (int i = 0; i < m_deformable_meshes.size(); i++) {
         std::shared_ptr<ChVisualShapeTriangleMesh> mesh_shape = std::get<0>(m_deformable_meshes[i]);
@@ -1279,8 +1276,12 @@ void ChOptixPipeline::UpdateDeformableMeshes(size_t sim_step_count) {
         // An empty list is not a claim that nothing moved: producers that never populate it, such as
         // ChVisualShapeFEA, leave it empty on every step while rewriting the whole mesh. Only a
         // non-empty list carries information, so an empty one takes the full path.
-        const auto& modified = mesh_shape->GetModifiedVertices();
-        const bool incremental = steps_contiguous && !modified.empty() &&
+        const uint64_t synced_version = std::get<4>(m_deformable_meshes[i]);
+        const uint64_t current_version = mesh_shape->GetModifiedVerticesVersion();
+        std::vector<int> delta;
+        const bool have_delta = mesh_shape->GetModifiedVerticesSince(synced_version, delta);
+        const std::vector<int>& modified = delta;
+        const bool incremental = have_delta && !modified.empty() &&
                                  modified.size() * kDeformableIncrementalDenominator < num_vertices;
 
         if (incremental) {
@@ -1360,9 +1361,12 @@ void ChOptixPipeline::UpdateDeformableMeshes(size_t sim_step_count) {
                 CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_normals), m_deformable_values.data(),
                                             sizeof(float4) * normals.size(), cudaMemcpyHostToDevice));
             }
-
         }
 
+        // Either branch leaves the device holding this shape as of current_version, so the next update
+        // asks for the delta from here. Recorded on the full path too: that path is exact, so nothing
+        // is outstanding after it either.
+        std::get<4>(m_deformable_meshes[i]) = current_version;
     }
 }
 

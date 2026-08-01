@@ -15,6 +15,8 @@
 #include <filesystem>
 #include <map>
 
+#include <algorithm>
+
 #include "chrono/assets/ChVisualShapeTriangleMesh.h"
 
 #include "chrono_thirdparty/tinyobjloader/tiny_obj_loader.h"
@@ -165,6 +167,36 @@ void ChVisualShapeTriangleMesh::ArchiveOut(ChArchiveOut& archive_out) {
     archive_out << CHNVP(scale);
     archive_out << CHNVP(fixed_connectivity);
     archive_out << CHNVP(modified_vertices);
+}
+
+void ChVisualShapeTriangleMesh::SetModifiedVertices(const std::vector<int>& vertices) {
+    modified_vertices = vertices;
+    ++dirty_version;
+
+    dirty_log.insert(dirty_log.end(), vertices.begin(), vertices.end());
+    dirty_log_ends.push_back(dirty_log.size());
+
+    // Once patching would cost more than a wholesale refresh, drop the log and restart it at the
+    // current version. Consumers that were keeping up are unaffected: their next query asks for the
+    // delta since the version we just moved the base to, which is empty. Consumers further behind get
+    // a miss and refresh everything, which is the correct outcome and the cheaper one.
+    const size_t budget = trimesh ? std::max<size_t>(1024, trimesh->GetCoordsVertices().size() / 2) : 1024;
+    if (dirty_log.size() > budget) {
+        dirty_log.clear();
+        dirty_log_ends.clear();
+        dirty_log_base = dirty_version;
+    }
+}
+
+bool ChVisualShapeTriangleMesh::GetModifiedVerticesSince(uint64_t since_version, std::vector<int>& vertices) const {
+    if (since_version < dirty_log_base || since_version > dirty_version)
+        return false;
+
+    const size_t start = (since_version == dirty_log_base)  //
+                             ? 0
+                             : dirty_log_ends[since_version - dirty_log_base - 1];
+    vertices.assign(dirty_log.begin() + start, dirty_log.end());
+    return true;
 }
 
 void ChVisualShapeTriangleMesh::ArchiveIn(ChArchiveIn& archive_in) {
