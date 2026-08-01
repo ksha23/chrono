@@ -122,8 +122,12 @@ class CH_SENSOR_API ChOptixPipeline {
     unsigned int GetNVDBMaterial(std::vector<std::shared_ptr<ChVisualMaterial>> mat_list = {});
 
 
-    /// Function to update all the deformable meshes in the optix scene based on their chrono meshes
-    void UpdateDeformableMeshes();
+    /// Function to update all the deformable meshes in the optix scene based on their chrono meshes.
+    ///
+    /// @param sim_step_count the owning system's ChSystem::GetNumSteps(). Used only to decide whether
+    /// a mesh producer's per-step list of modified vertices can be trusted to describe everything
+    /// that changed since the previous call; see the implementation for why.
+    void UpdateDeformableMeshes(size_t sim_step_count);
 
     /// Function to update all the shader binding tables associated with this optix scene
     void UpdateAllSBTs();
@@ -283,6 +287,24 @@ class CH_SENSOR_API ChOptixPipeline {
     /// list of deformable meshes <mesh shape, dvertices, dnormals, num prev triangles>
     std::vector<std::tuple<std::shared_ptr<ChVisualShapeTriangleMesh>, CUdeviceptr, CUdeviceptr, unsigned int>>
         m_deformable_meshes;
+
+    // --- Reused staging for deformable mesh uploads; see UpdateDeformableMeshes ---
+    // Members rather than locals so the per-frame update stops reallocating: these settle at the
+    // high-water mark after a few frames and are then pure reuse.
+    std::vector<float4> m_deformable_values;   ///< host staging for vertex/normal values
+    std::vector<int> m_deformable_indices;     ///< host staging for scattered vertex indices
+    CUdeviceptr md_deformable_indices = {};    ///< device staging, indices, m_deformable_capacity entries
+    CUdeviceptr md_deformable_values = {};     ///< device staging, values, m_deformable_capacity entries
+    size_t m_deformable_capacity = 0;          ///< entries the device staging buffers can hold
+
+    /// ChSystem::GetNumSteps() at the previous UpdateDeformableMeshes call, and whether one happened.
+    /// Used to tell a per-step modified-vertex list that is complete from one that has been
+    /// overwritten by intervening steps.
+    size_t m_last_deformable_step = 0;
+    bool m_have_deformable_step = false;
+
+    /// Ensure the device staging buffers can hold at least `count` scattered vertex updates.
+    void ReserveDeformableStaging(size_t count);
 
     // default material in the material pool
     bool m_default_material_inst = false;

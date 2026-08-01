@@ -173,6 +173,7 @@ if(CH_USE_SENSOR_OPTIX)
       cuda/radarprocess.cu
       cuda/cuda_utils.cu
       cuda/phys_cam_ops.cu
+      cuda/mesh_update.cu
   )
 
   set(Chrono_sensor_CUDA_HEADERS
@@ -188,6 +189,7 @@ if(CH_USE_SENSOR_OPTIX)
       cuda/radarprocess.cuh
       cuda/cuda_utils.cuh
       cuda/phys_cam_ops.cuh
+      cuda/mesh_update.cuh
   )
 
   if(CH_ENABLE_MODULE_FSI_SPH)

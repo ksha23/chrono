@@ -218,6 +218,21 @@ class CH_SENSOR_API ChOptixGeometry {
     // GAS buffers, handles, and transforms
     std::vector<CUdeviceptr> m_gas_buffers;                       ///< all the gas buffers
     std::vector<OptixTraversableHandle> m_gas_handles;            ///< all the gas handles
+
+    /// Build scratch retained per GAS, populated only for structures that are rebuilt or refit every
+    /// frame. Parallel to m_gas_buffers; entry is null for GASes that are built once.
+    std::vector<CUdeviceptr> m_gas_temp_buffers;
+    std::vector<size_t> m_gas_temp_buffer_sizes;  ///< allocated size of each entry in m_gas_temp_buffers
+
+    /// Number of times each GAS has been re-entered, used to space out full rebuilds among refits.
+    std::vector<unsigned int> m_gas_refit_counts;
+
+    /// Refits between full rebuilds of a deformable mesh's acceleration structure.
+    /// See the rationale in BuildTrianglesGAS.
+    static constexpr unsigned int kGasRebuildInterval = 64;
+
+    /// Grow the per-GAS side tables above to cover every id currently in m_gas_handles.
+    void SyncGasSideTables();
     std::vector<OptixMatrixMotionTransform> m_motion_transforms;  ///< vector of all the motion transforms
     CUdeviceptr md_motion_transforms = {};                        ///< solid block of motion transforms on the device
     std::vector<OptixTraversableHandle> m_motion_handles;         ///< vector of all the motion transforms

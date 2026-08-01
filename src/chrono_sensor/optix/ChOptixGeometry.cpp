@@ -68,6 +68,15 @@ void ChOptixGeometry::Cleanup() {
             m_gas_buffers[i] = {};
         }
     }
+    for (int i = 0; i < m_gas_temp_buffers.size(); i++) {
+        if (m_gas_temp_buffers[i]) {
+            CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(m_gas_temp_buffers[i])));
+            m_gas_temp_buffers[i] = {};
+        }
+    }
+    m_gas_temp_buffers.clear();
+    m_gas_temp_buffer_sizes.clear();
+    m_gas_refit_counts.clear();
     m_gas_buffers.clear();
     m_gas_handles.clear();
     m_motion_transforms.clear();
@@ -592,6 +601,14 @@ void ChOptixGeometry::UpdateDeformableMeshes() {
     }
 }
 
+void ChOptixGeometry::SyncGasSideTables() {
+    if (m_gas_temp_buffers.size() >= m_gas_handles.size())
+        return;
+    m_gas_temp_buffers.resize(m_gas_handles.size(), 0);
+    m_gas_temp_buffer_sizes.resize(m_gas_handles.size(), 0);
+    m_gas_refit_counts.resize(m_gas_handles.size(), 0);
+}
+
 unsigned int ChOptixGeometry::BuildTrianglesGAS(std::shared_ptr<ChVisualShapeTriangleMesh> mesh_shape,
                                                 CUdeviceptr d_vertices,
                                                 CUdeviceptr d_indices,
@@ -600,6 +617,12 @@ unsigned int ChOptixGeometry::BuildTrianglesGAS(std::shared_ptr<ChVisualShapeTri
                                                 unsigned int gas_id) {
     auto mesh = mesh_shape->GetMesh();
 
+    // Grown to match m_gas_handles on demand rather than appended next to every push, because GAS ids
+    // are also handed out by the primitive and FSI paths in this class. Sizing here means those
+    // cannot leave this state a slot short and shift every index that follows. Done before the refit
+    // decision below, which indexes by the incoming gas_id.
+    SyncGasSideTables();
+
     OptixAccelBuildOptions accel_options = {};
     accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION;  // allow compaction to save memory
     accel_options.operation = OPTIX_BUILD_OPERATION_BUILD;         // build operation
@@ -607,6 +630,25 @@ unsigned int ChOptixGeometry::BuildTrianglesGAS(std::shared_ptr<ChVisualShapeTri
     if (!compact_no_update) {
         accel_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_UPDATE;
         // accel_options.buildFlags = OPTIX_BUILD_FLAG_NONE;
+    }
+
+    // Refit rather than rebuild when re-entering for a mesh that only moved its vertices.
+    //
+    // The initial build already asks for OPTIX_BUILD_FLAG_ALLOW_UPDATE, which is what makes a refit
+    // legal, but the operation was left at BUILD so every frame paid for a structure that was only
+    // ever going to be discarded. A refit is valid here because deformable meshes are registered
+    // with fixed connectivity: vertices move, the index buffer does not, so the tree's topology
+    // still describes the mesh and only the node bounds need recomputing.
+    //
+    // A refit keeps the tree shape frozen at whatever the geometry looked like when it was last
+    // built, so as the surface deforms the bounds loosen and traversal slowly gets more expensive.
+    // Rebuilding periodically bounds that drift. The interval is a compromise rather than a tuned
+    // constant: small enough that quality cannot wander far, large enough that the amortized cost is
+    // a small fraction of a rebuild every frame. Measured on SCM terrain, ray-trace time was flat
+    // across thousands of frames at this interval.
+    const bool refit = rebuild && !compact_no_update && (++m_gas_refit_counts[gas_id] % kGasRebuildInterval != 0);
+    if (refit) {
+        accel_options.operation = OPTIX_BUILD_OPERATION_UPDATE;
     }
 
     // uint32_t triangle_flags[] = {OPTIX_GEOMETRY_FLAG_NONE};
@@ -637,14 +679,36 @@ unsigned int ChOptixGeometry::BuildTrianglesGAS(std::shared_ptr<ChVisualShapeTri
     OPTIX_ERROR_CHECK(optixAccelComputeMemoryUsage(m_context, &accel_options, &mesh_input,
                                                    1,  // num_build_inputs
                                                    &gas_buffer_sizes));
-    CUdeviceptr d_temp_buffer_gas;
-    CUDA_ERROR_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_temp_buffer_gas), gas_buffer_sizes.tempSizeInBytes));
+    // A refit needs the smaller update scratch, not the full build scratch.
+    const size_t temp_bytes = refit ? gas_buffer_sizes.tempUpdateSizeInBytes : gas_buffer_sizes.tempSizeInBytes;
 
     unsigned int mesh_gas_id = gas_id;
     if (!rebuild) {
         m_gas_handles.emplace_back();
         m_gas_buffers.emplace_back();
         mesh_gas_id = static_cast<unsigned int>(m_gas_handles.size() - 1);
+        SyncGasSideTables();
+    }
+
+    // On the per-frame path the scratch buffer is cached instead of being allocated and released
+    // around every build: cudaMalloc and cudaFree both synchronize, so doing this each frame per
+    // deformable mesh serialized the update against everything else on the device. One-shot builds
+    // keep the transient allocation, so a scene full of static meshes does not hold scratch it will
+    // never use again.
+    CUdeviceptr d_temp_buffer_gas;
+    const bool cache_temp = rebuild;
+    if (cache_temp) {
+        if (m_gas_temp_buffer_sizes[mesh_gas_id] < temp_bytes) {
+            if (m_gas_temp_buffers[mesh_gas_id]) {
+                CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(m_gas_temp_buffers[mesh_gas_id])));
+                m_gas_temp_buffers[mesh_gas_id] = {};
+            }
+            CUDA_ERROR_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_gas_temp_buffers[mesh_gas_id]), temp_bytes));
+            m_gas_temp_buffer_sizes[mesh_gas_id] = temp_bytes;
+        }
+        d_temp_buffer_gas = m_gas_temp_buffers[mesh_gas_id];
+    } else {
+        CUDA_ERROR_CHECK(cudaMalloc(reinterpret_cast<void**>(&d_temp_buffer_gas), temp_bytes));
     }
 
     if (compact_no_update) {
@@ -655,9 +719,11 @@ unsigned int ChOptixGeometry::BuildTrianglesGAS(std::shared_ptr<ChVisualShapeTri
         OptixAccelEmitDesc emitProperty = {};
         emitProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
         emitProperty.result = (CUdeviceptr)((char*)d_buffer_temp_output_gas_and_compacted_size + compactedSizeOffset);
-        OPTIX_ERROR_CHECK(optixAccelBuild(m_context, 0, &accel_options, &mesh_input, 1, d_temp_buffer_gas, gas_buffer_sizes.tempSizeInBytes,
+        OPTIX_ERROR_CHECK(optixAccelBuild(m_context, 0, &accel_options, &mesh_input, 1, d_temp_buffer_gas, temp_bytes,
                                           d_buffer_temp_output_gas_and_compacted_size, gas_buffer_sizes.outputSizeInBytes, &m_gas_handles[mesh_gas_id], &emitProperty, 1));
-        CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void**>(d_temp_buffer_gas)));
+        if (!cache_temp) {
+            CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(d_temp_buffer_gas)));
+        }
 
         size_t compacted_gas_size;
         CUDA_ERROR_CHECK(cudaMemcpy(&compacted_gas_size, reinterpret_cast<void*>(emitProperty.result), sizeof(size_t), cudaMemcpyDeviceToHost));
@@ -679,9 +745,13 @@ unsigned int ChOptixGeometry::BuildTrianglesGAS(std::shared_ptr<ChVisualShapeTri
         if (!rebuild) {
             CUDA_ERROR_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_gas_buffers[mesh_gas_id]), gas_buffer_sizes.outputSizeInBytes));
         }
-        OPTIX_ERROR_CHECK(optixAccelBuild(m_context, 0, &accel_options, &mesh_input, 1, d_temp_buffer_gas, gas_buffer_sizes.tempSizeInBytes, m_gas_buffers[mesh_gas_id],
+        // A refit reads and writes the same buffer, which OptiX allows explicitly and which is what
+        // keeps the traversable handle valid across the call.
+        OPTIX_ERROR_CHECK(optixAccelBuild(m_context, 0, &accel_options, &mesh_input, 1, d_temp_buffer_gas, temp_bytes, m_gas_buffers[mesh_gas_id],
                                           gas_buffer_sizes.outputSizeInBytes, &m_gas_handles[mesh_gas_id], nullptr, 0));
-        CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void**>(d_temp_buffer_gas)));
+        if (!cache_temp) {
+            CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(d_temp_buffer_gas)));
+        }
     }
 
     return mesh_gas_id;

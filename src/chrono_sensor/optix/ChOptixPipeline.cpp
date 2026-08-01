@@ -19,6 +19,7 @@
 
 #include "chrono_sensor/optix/ChOptixPipeline.h"
 #include "chrono_sensor/optix/ChOptixUtils.h"
+#include "chrono_sensor/cuda/mesh_update.cuh"
 
 #include "chrono/core/ChDataPath.h"
 
@@ -259,6 +260,23 @@ void ChOptixPipeline::CleanMaterials() {
     m_known_meshes.clear();
     // clear our deformable meshes
     m_deformable_meshes.clear();
+
+    // release the staging used for incremental deformable mesh updates
+    if (md_deformable_indices) {
+        CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(md_deformable_indices)));
+        md_deformable_indices = {};
+    }
+    if (md_deformable_values) {
+        CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(md_deformable_values)));
+        md_deformable_values = {};
+    }
+    m_deformable_capacity = 0;
+    m_deformable_values.clear();
+    m_deformable_values.shrink_to_fit();
+    m_deformable_indices.clear();
+    m_deformable_indices.shrink_to_fit();
+    // A rebuilt scene has no continuity with the step counts seen before it.
+    m_have_deformable_step = false;
 
     // reset material pool
     if (md_material_pool) {
@@ -1207,7 +1225,39 @@ unsigned int ChOptixPipeline::GetDeformableMeshMaterial(CUdeviceptr& d_vertices,
     return mat_id;
 }
 
-void ChOptixPipeline::UpdateDeformableMeshes() {
+// Fraction of a mesh above which restating every vertex beats scattering the changed ones.
+//
+// The scattered path moves 20 bytes per touched vertex (a 4-byte index plus a 16-byte value) where
+// the full path moves 16 bytes per vertex of the whole mesh, so on transfer volume alone the two
+// break even near 80%. The useful threshold is well below that: the scattered path also pays two
+// kernel launches and loses the perfectly coalesced writes of a straight copy, while the full path
+// pays a double-to-float conversion over every vertex whether or not it moved. Half the mesh sits
+// clear of the crossover in both directions and needs no tuning per producer. In practice the
+// producers that populate the list are nowhere near it -- SCM touches well under 1% of an active
+// terrain per step -- so the exact value matters far less than having a fallback at all.
+static constexpr size_t kDeformableIncrementalDenominator = 2;
+
+void ChOptixPipeline::UpdateDeformableMeshes(size_t sim_step_count) {
+    // A mesh producer's modified-vertex list describes one simulation step. SCMLoader, the only
+    // producer that fills it today, rebuilds it from scratch inside each ComputeInternalForces and
+    // hands it over with SetModifiedVertices, so a step's list replaces rather than extends the
+    // previous one.
+    //
+    // This function does not run every step. ChOptixEngine::UpdateSensors only reaches it when some
+    // sensor is due to render, so with a 30 Hz camera and a 2 ms step it runs once per ~16 steps and
+    // the lists from the 15 steps in between are gone. Trusting the surviving list would leave the
+    // vertices they touched stale on the device: not a transient artifact but a permanently wrong
+    // surface, until something happens to touch those vertices again on a step this function does
+    // observe.
+    //
+    // The step counter makes the difference observable. Exactly one step since the previous call
+    // means the list in hand is the only one that was ever produced, so it is complete. Anything
+    // else -- several steps, no steps, or a first call with no baseline -- falls back to restating
+    // the whole mesh, which is always correct.
+    const bool steps_contiguous = m_have_deformable_step && (sim_step_count == m_last_deformable_step + 1);
+    m_last_deformable_step = sim_step_count;
+    m_have_deformable_step = true;
+
     for (int i = 0; i < m_deformable_meshes.size(); i++) {
         std::shared_ptr<ChVisualShapeTriangleMesh> mesh_shape = std::get<0>(m_deformable_meshes[i]);
         CUdeviceptr d_vertices = std::get<1>(m_deformable_meshes[i]);
@@ -1221,33 +1271,122 @@ void ChOptixPipeline::UpdateDeformableMeshes() {
             throw std::runtime_error("Error: changing mesh size not supported by Chrono::Sensor");
         }
 
-        // update all the vertex locations
+        const auto& vertices = mesh->GetCoordsVertices();
+        const auto& normals = mesh->GetCoordsNormals();
+        const size_t num_vertices = vertices.size();
+        const bool has_normals = normals.size() > 0;
 
-        std::vector<float4> vertex_buffer = std::vector<float4>(mesh->GetCoordsVertices().size());
-        for (int j = 0; j < mesh->GetCoordsVertices().size(); j++) {
-            vertex_buffer[j] = make_float4((float)mesh->GetCoordsVertices()[j].x(),  //
-                                           (float)mesh->GetCoordsVertices()[j].y(),  //
-                                           (float)mesh->GetCoordsVertices()[j].z(),  //
-                                           0.f);                                     // padding for alignment
-        }
-        CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_vertices), vertex_buffer.data(),
-                                    sizeof(float4) * vertex_buffer.size(), cudaMemcpyHostToDevice));
+        // An empty list is not a claim that nothing moved: producers that never populate it, such as
+        // ChVisualShapeFEA, leave it empty on every step while rewriting the whole mesh. Only a
+        // non-empty list carries information, so an empty one takes the full path.
+        const auto& modified = mesh_shape->GetModifiedVertices();
+        const bool incremental = steps_contiguous && !modified.empty() &&
+                                 modified.size() * kDeformableIncrementalDenominator < num_vertices;
 
-        // update all the normals if normal exist
-        if (mesh_shape->GetMesh()->GetCoordsNormals().size() > 0) {
-            std::vector<float4> normal_buffer = std::vector<float4>(mesh->GetCoordsNormals().size());
-            for (int j = 0; j < mesh->GetCoordsNormals().size(); j++) {
-                normal_buffer[j] = make_float4((float)mesh->GetCoordsNormals()[j].x(),  //
-                                               (float)mesh->GetCoordsNormals()[j].y(),  //
-                                               (float)mesh->GetCoordsNormals()[j].z(),  //
-                                               0.f);                                    // padding for alignment
+        if (incremental) {
+            const size_t count = modified.size();
+            ReserveDeformableStaging(count);
+
+            m_deformable_indices.resize(count);
+            m_deformable_values.resize(count);
+
+            for (size_t k = 0; k < count; k++) {
+                const int idx = modified[k];
+                m_deformable_indices[k] = idx;
+                // Guarded because the index reaches the device, where a bad value would be an
+                // out-of-bounds write. The kernel rejects it too; this keeps the staged value sane.
+                const size_t src = (idx >= 0 && (size_t)idx < num_vertices) ? (size_t)idx : 0;
+                m_deformable_values[k] = make_float4((float)vertices[src].x(),  //
+                                                     (float)vertices[src].y(),  //
+                                                     (float)vertices[src].z(),  //
+                                                     0.f);                      // padding for alignment
             }
-            CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_normals), normal_buffer.data(),
-                                        sizeof(float4) * normal_buffer.size(), cudaMemcpyHostToDevice));
+
+            CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(md_deformable_indices), m_deformable_indices.data(),
+                                        sizeof(int) * count, cudaMemcpyHostToDevice));
+            CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(md_deformable_values), m_deformable_values.data(),
+                                        sizeof(float4) * count, cudaMemcpyHostToDevice));
+            // Issued on the legacy default stream, which is what orders it against everything that
+            // later reads these vertices: the acceleration structure refit in ChOptixGeometry uses
+            // stream 0 as well, and the sensors' render streams come from cudaStreamCreate with
+            // default flags, so they are blocking streams and cannot start work ahead of pending
+            // stream-0 work. The full-upload branch below relies on the same property, having
+            // previously got it from a blocking cudaMemcpy instead.
+            CUstream default_stream = 0;
+            cuda_scatter_float4(reinterpret_cast<void*>(md_deformable_indices),
+                                reinterpret_cast<void*>(md_deformable_values), reinterpret_cast<void*>(d_vertices),
+                                static_cast<unsigned int>(count), static_cast<unsigned int>(num_vertices),
+                                default_stream);
+
+            if (has_normals) {
+                // Same indices, so only the values need restaging.
+                for (size_t k = 0; k < count; k++) {
+                    const int idx = modified[k];
+                    const size_t src = (idx >= 0 && (size_t)idx < normals.size()) ? (size_t)idx : 0;
+                    m_deformable_values[k] = make_float4((float)normals[src].x(),  //
+                                                         (float)normals[src].y(),  //
+                                                         (float)normals[src].z(),  //
+                                                         0.f);                     // padding for alignment
+                }
+                CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(md_deformable_values), m_deformable_values.data(),
+                                            sizeof(float4) * count, cudaMemcpyHostToDevice));
+                cuda_scatter_float4(reinterpret_cast<void*>(md_deformable_indices),
+                                    reinterpret_cast<void*>(md_deformable_values), reinterpret_cast<void*>(d_normals),
+                                    static_cast<unsigned int>(count), static_cast<unsigned int>(normals.size()),
+                                    default_stream);
+            }
+
+        } else {
+            // update all the vertex locations
+            m_deformable_values.resize(num_vertices);
+            for (size_t j = 0; j < num_vertices; j++) {
+                m_deformable_values[j] = make_float4((float)vertices[j].x(),  //
+                                                     (float)vertices[j].y(),  //
+                                                     (float)vertices[j].z(),  //
+                                                     0.f);                    // padding for alignment
+            }
+            CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_vertices), m_deformable_values.data(),
+                                        sizeof(float4) * num_vertices, cudaMemcpyHostToDevice));
+
+            // update all the normals if normal exist
+            if (has_normals) {
+                m_deformable_values.resize(normals.size());
+                for (size_t j = 0; j < normals.size(); j++) {
+                    m_deformable_values[j] = make_float4((float)normals[j].x(),  //
+                                                         (float)normals[j].y(),  //
+                                                         (float)normals[j].z(),  //
+                                                         0.f);                   // padding for alignment
+                }
+                CUDA_ERROR_CHECK(cudaMemcpy(reinterpret_cast<void*>(d_normals), m_deformable_values.data(),
+                                            sizeof(float4) * normals.size(), cudaMemcpyHostToDevice));
+            }
+
         }
 
-        // TODO: for SCM terrain, make use of the list of modified vertices
     }
+}
+
+void ChOptixPipeline::ReserveDeformableStaging(size_t count) {
+    if (count <= m_deformable_capacity)
+        return;
+
+    // Grown geometrically and never shrunk, so a mesh whose touched set fluctuates settles after a
+    // few frames instead of reallocating device memory inside the render loop.
+    size_t new_capacity = m_deformable_capacity ? m_deformable_capacity : 1024;
+    while (new_capacity < count)
+        new_capacity *= 2;
+
+    if (md_deformable_indices) {
+        CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(md_deformable_indices)));
+        md_deformable_indices = {};
+    }
+    if (md_deformable_values) {
+        CUDA_ERROR_CHECK(cudaFree(reinterpret_cast<void*>(md_deformable_values)));
+        md_deformable_values = {};
+    }
+    CUDA_ERROR_CHECK(cudaMalloc(reinterpret_cast<void**>(&md_deformable_indices), sizeof(int) * new_capacity));
+    CUDA_ERROR_CHECK(cudaMalloc(reinterpret_cast<void**>(&md_deformable_values), sizeof(float4) * new_capacity));
+    m_deformable_capacity = new_capacity;
 }
 
 void ChOptixPipeline::UpdateObjectVelocity() {

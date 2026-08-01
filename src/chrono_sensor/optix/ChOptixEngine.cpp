@@ -813,7 +813,9 @@ void ChOptixEngine::UpdateSensorTransforms(std::vector<int>& to_be_updated, std:
 
 void ChOptixEngine::UpdateDeformableMeshes() {
     // update the mesh in the pipeline
-    m_pipeline->UpdateDeformableMeshes();
+    // The step count lets the pipeline tell a complete per-step list of modified vertices from one
+    // that intervening steps have already overwritten; see ChOptixPipeline::UpdateDeformableMeshes.
+    m_pipeline->UpdateDeformableMeshes(m_system->GetNumSteps());
     // update the meshes in the geometric scene
     m_geometry->UpdateDeformableMeshes();
 }
