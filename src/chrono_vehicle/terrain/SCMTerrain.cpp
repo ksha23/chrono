@@ -93,12 +93,16 @@ SCMTerrain::NodeInfo SCMTerrain::GetNodeInfo(const ChVector3d& loc) const {
 
 // Set the color of the visualization assets.
 void SCMTerrain::SetColor(const ChColor& color) {
+    if (m_loader->m_trimesh_shape)
+        m_loader->m_trimesh_shape->SetColor(color);
     for (auto& shape : m_loader->m_trimesh_shapes)
         shape->SetColor(color);
 }
 
 // Set the texture and texture scaling.
 void SCMTerrain::SetTexture(const std::string tex_file, float scale_x, float scale_y) {
+    if (m_loader->m_trimesh_shape)
+        m_loader->m_trimesh_shape->SetTexture(tex_file, scale_x, scale_y);
     for (auto& shape : m_loader->m_trimesh_shapes)
         shape->SetTexture(tex_file, scale_x, scale_y);
 }
@@ -116,6 +120,10 @@ const ChCoordsys<>& SCMTerrain::GetReferenceFrame() const {
 
 // Set the visualization mesh as wireframe or as solid.
 void SCMTerrain::SetMeshWireframe(bool val) {
+    // m_trimesh_shapes is not populated until Initialize, but this is routinely called before it -- e.g.
+    // ChVehicleCosimTerrainNodeSCM. Set the prototype too; CreateTilePool copies its state onto each tile.
+    if (m_loader->m_trimesh_shape)
+        m_loader->m_trimesh_shape->SetWireframe(val);
     for (auto& shape : m_loader->m_trimesh_shapes)
         shape->SetWireframe(val);
 }
@@ -741,9 +749,21 @@ void SCMLoader::SetVisualizationWindow(double size_x, double size_y, int tile_ce
                   << std::endl;
         return;
     }
-    if (size_x <= 0 || size_y <= 0 || tile_cells < 1) {
+    if (size_x <= 0 || size_y <= 0) {
         std::cerr << "SCMTerrain::SetVisualizationWindow -- invalid window (" << size_x << " x " << size_y
-                  << ", " << tile_cells << " cells/tile); ignored." << std::endl;
+                  << "); ignored." << std::endl;
+        return;
+    }
+    // Upper bound keeps (tile_cells+1)^2 and 2*tile_cells^2 well inside int; beyond a few hundred a tile
+    // also stops being a useful unit of eviction. Lower bound avoids one asset per grid cell.
+    if (tile_cells < 4 || tile_cells > 1024) {
+        std::cerr << "SCMTerrain::SetVisualizationWindow -- tile_cells must be in [4, 1024], got "
+                  << tile_cells << "; ignored." << std::endl;
+        return;
+    }
+    if (!m_trimesh_shapes.empty()) {
+        std::cerr << "SCMTerrain::SetVisualizationWindow -- must be called before Initialize; ignored."
+                  << std::endl;
         return;
     }
 
@@ -935,16 +955,16 @@ void SCMLoader::RepaintTile(int slot) {
 void SCMLoader::UpdateVisualizationWindow() {
     const int T = m_tile_cells;
 
-    // Half-window in grid cells. Active domains are typically much smaller than the window the user asked to
-    // see (a per-wheel domain is on the order of a metre), so the window has to be grown out to what was
-    // asked for rather than merely padded -- otherwise only the few tiles under the wheels are ever drawn.
+    // Half-window in grid cells. Active domains are typically much smaller than the window the user asked
+    // to see (a per-wheel domain is on the order of a metre), so the drawn region is the window, centred
+    // on the domains -- not the domains merely padded, which would draw only the tiles under the wheels.
     const int half_i = (int)std::ceil((m_win_x / 2) / m_delta);
     const int half_j = (int)std::ceil((m_win_y / 2) / m_delta);
 
-    // Grow the union of the active domains, once. Growing each domain to a full window separately would
-    // demand window-plus-spread rather than window: a wheeled vehicle contributes one domain per wheel,
-    // spread over several metres, and the union of eight individually grown windows overruns a pool sized
-    // for one. That reported pool exhaustion in an entirely ordinary configuration.
+    // The union of the active domains sets the window's *centre* only. It must not also set its size:
+    // growing the box to contain the union makes the tile count quadratic in domain separation, so two
+    // vehicles a few hundred metres apart on one terrain enumerate the whole gap every step. Terrain
+    // outside the window is not drawn -- which is the documented contract -- so the box stays bounded.
     bool any = false;
     int umin_i = 0, umax_i = 0, umin_j = 0, umax_j = 0;
     for (const auto& ad : m_active_domains) {
@@ -965,18 +985,42 @@ void SCMLoader::UpdateVisualizationWindow() {
     }
 
     std::unordered_set<ChVector2i, CoordHash> required;
+    std::vector<ChVector2i> priority;  // tiles an active domain actually covers
     if (any) {
-        // Symmetric about the union centre, but never shrinking the union itself: domains further apart
-        // than the window are still covered, at the cost of more tiles than the pool may hold.
         const int ci = (umin_i + umax_i) / 2;
         const int cj = (umin_j + umax_j) / 2;
-        const int I0 = TileOfIndex(std::min(umin_i, ci - half_i), T);
-        const int I1 = TileOfIndex(std::max(umax_i, ci + half_i), T);
-        const int J0 = TileOfIndex(std::min(umin_j, cj - half_j), T);
-        const int J1 = TileOfIndex(std::max(umax_j, cj + half_j), T);
+
+        // Clamped to the declared extent: there is no terrain to draw beyond it, and without this a
+        // window wider than the patch demands more tiles than the pool -- which is sized from the extent
+        // -- can ever hold.
+        auto clamp_i = [&](int i) { return ChClamp(i, -m_nx, +m_nx); };
+        auto clamp_j = [&](int j) { return ChClamp(j, -m_ny, +m_ny); };
+
+        const int I0 = TileOfIndex(clamp_i(ci - half_i), T);
+        const int I1 = TileOfIndex(clamp_i(ci + half_i), T);
+        const int J0 = TileOfIndex(clamp_j(cj - half_j), T);
+        const int J1 = TileOfIndex(clamp_j(cj + half_j), T);
         for (int I = I0; I <= I1; I++)
             for (int J = J0; J <= J1; J++)
                 required.insert(ChVector2i(I, J));
+
+        // Tiles under a domain are where deformation is actually happening, so they must win if the pool
+        // cannot satisfy everything. Without this the survivors are whichever the hash order reached
+        // first, which in an exhausted pool routinely means drawing bare terrain and not the rut.
+        for (const auto& ad : m_active_domains) {
+            if (ad.m_range.empty())
+                continue;
+            const int i0 = TileOfIndex(clamp_i(ad.m_range_min.x()), T);
+            const int i1 = TileOfIndex(clamp_i(ad.m_range_max.x()), T);
+            const int j0 = TileOfIndex(clamp_j(ad.m_range_min.y()), T);
+            const int j1 = TileOfIndex(clamp_j(ad.m_range_max.y()), T);
+            for (int I = i0; I <= i1; I++)
+                for (int J = j0; J <= j1; J++) {
+                    const ChVector2i c(I, J);
+                    if (required.insert(c).second || m_tile_index.find(c) == m_tile_index.end())
+                        priority.push_back(c);
+                }
+        }
     }
 
     // Release tiles that have scrolled out. Collected first: ReleaseTile mutates m_tile_index.
@@ -988,7 +1032,11 @@ void SCMLoader::UpdateVisualizationWindow() {
     for (int slot : to_release)
         ReleaseTile(slot);
 
-    // Bring in tiles that have scrolled into the window.
+    // Bring in tiles that have scrolled into the window, domain-covered ones first.
+    for (const auto& coord : priority) {
+        if (m_tile_index.find(coord) == m_tile_index.end())
+            AcquireTile(coord);
+    }
     for (const auto& coord : required) {
         if (m_tile_index.find(coord) == m_tile_index.end())
             AcquireTile(coord);
@@ -1773,7 +1821,9 @@ void SCMLoader::ComputeInternalForces() {
 
             for (size_t head = 0; head < todo.size(); head++) {
                 const ChVector2i crt_ij = hit_list[todo[head]].ij;  // current hit node
-                const int crt_cell = (crt_ij.x() - i0) * nj + (crt_ij.y() - j0);
+                // Only meaningful on the dense path, and only computable there: the sparse path is chosen
+                // precisely when ni*nj overflows an int, so evaluating this unconditionally is UB.
+                const int crt_cell = dense ? (crt_ij.x() - i0) * nj + (crt_ij.y() - j0) : 0;
 
                 // Loop through the neighbors of the current hit node
                 for (int k = 0; k < 4; k++) {
