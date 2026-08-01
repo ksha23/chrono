@@ -19,6 +19,7 @@
 
 #include <cstdio>
 #include <cmath>
+#include <numeric>
 #include <queue>
 #include <unordered_set>
 #include <limits>
@@ -94,16 +95,14 @@ SCMTerrain::NodeInfo SCMTerrain::GetNodeInfo(const ChVector3d& loc) const {
 
 // Set the color of the visualization assets.
 void SCMTerrain::SetColor(const ChColor& color) {
-    if (m_loader->GetVisualModel()) {
-        m_loader->GetVisualShape(0)->SetColor(color);
-    }
+    for (auto& shape : m_loader->m_trimesh_shapes)
+        shape->SetColor(color);
 }
 
 // Set the texture and texture scaling.
 void SCMTerrain::SetTexture(const std::string tex_file, float scale_x, float scale_y) {
-    if (m_loader->GetVisualModel()) {
-        m_loader->GetVisualShape(0)->SetTexture(tex_file, scale_x, scale_y);
-    }
+    for (auto& shape : m_loader->m_trimesh_shapes)
+        shape->SetTexture(tex_file, scale_x, scale_y);
 }
 
 // Set the SCM reference plane.
@@ -119,8 +118,8 @@ const ChCoordsys<>& SCMTerrain::GetReferenceFrame() const {
 
 // Set the visualization mesh as wireframe or as solid.
 void SCMTerrain::SetMeshWireframe(bool val) {
-    if (m_loader->m_trimesh_shape)
-        m_loader->m_trimesh_shape->SetWireframe(val);
+    for (auto& shape : m_loader->m_trimesh_shapes)
+        shape->SetWireframe(val);
 }
 
 // Get the trimesh that defines the ground shape.
@@ -128,15 +127,27 @@ std::shared_ptr<ChVisualShapeTriangleMesh> SCMTerrain::GetMesh() const {
     return m_loader->m_trimesh_shape;
 }
 
+// Get all trimeshes used to draw the terrain.
+const std::vector<std::shared_ptr<ChVisualShapeTriangleMesh>>& SCMTerrain::GetMeshes() const {
+    return m_loader->m_trimesh_shapes;
+}
+
+// Restrict visualization to a window that follows the active domains.
+void SCMTerrain::SetVisualizationWindow(double size_x, double size_y, int tile_cells, bool verbose) {
+    m_loader->SetVisualizationWindow(size_x, size_y, tile_cells, verbose);
+}
+
 // Save the visualization mesh as a Wavefront OBJ file.
 void SCMTerrain::WriteMesh(const std::string& filename) const {
-    if (!m_loader->m_trimesh_shape) {
+    if (m_loader->m_trimesh_shapes.empty()) {
         std::cout << "SCMTerrain::WriteMesh  -- visualization mesh not created.";
         return;
     }
-    auto trimesh = m_loader->m_trimesh_shape->GetMesh();
-    std::vector<ChTriangleMeshConnected> meshes = {*trimesh};
-    trimesh->WriteWavefront(filename, meshes);
+    // In windowed mode this writes only the tiles currently resident, which is all the geometry that exists.
+    std::vector<ChTriangleMeshConnected> meshes;
+    for (const auto& shape : m_loader->m_trimesh_shapes)
+        meshes.push_back(*shape->GetMesh());
+    meshes[0].WriteWavefront(filename, meshes);
 }
 
 // Enable/disable co-simulation mode.
@@ -388,6 +399,14 @@ SCMLoader::SCMLoader(ChSystem* system, bool visualization_mesh) : m_soil_fun(nul
         m_trimesh_shape->SetFixedConnectivity();
     }
 
+    // Windowed visualization (disabled unless the user calls SetVisualizationWindow)
+    m_vis_windowed = false;
+    m_vis_verbose = false;
+    m_win_x = 0;
+    m_win_y = 0;
+    m_tile_cells = 64;
+    m_pool_exhausted_warned = false;
+
     // Default SCM plane and plane normal
     m_frame = ChCoordsys<>(VNULL, QUNIT);
     m_Z = m_frame.rot.GetAxisZ();
@@ -436,8 +455,7 @@ void SCMLoader::Initialize(double sizeX, double sizeY, double delta) {
     if (!m_trimesh_shape)
         return;
 
-    CreateVisualizationMesh(sizeX, sizeY);
-    this->AddVisualShape(m_trimesh_shape);
+    SetupVisualization(sizeX, sizeY);
 
     SetupInitial();
 }
@@ -512,8 +530,8 @@ void SCMLoader::Initialize(const std::string& heightmap_file, double sizeX, doub
     if (!m_trimesh_shape)
         return;
 
-    CreateVisualizationMesh(sizeX, sizeY);
-    this->AddVisualShape(m_trimesh_shape);
+    SetupVisualization(sizeX, sizeY);
+
     SetupInitial();
 }
 
@@ -603,8 +621,8 @@ void SCMLoader::Initialize(const ChTriangleMeshConnected& trimesh, double delta)
     if (!m_trimesh_shape)
         return;
 
-    CreateVisualizationMesh(sizeX, sizeY);
-    this->AddVisualShape(m_trimesh_shape);
+    SetupVisualization(sizeX, sizeY);
+
     SetupInitial();
 }
 
@@ -706,6 +724,301 @@ void SCMLoader::CreateVisualizationMesh(double sizeX, double sizeY) {
     for (int in = 0; in < n_verts; in++) {
         normals[in] /= (double)accumulators[in];
     }
+}
+
+// -----------------------------------------------------------------------------
+// Windowed visualization
+//
+// Rather than one mesh spanning the whole terrain, keep a fixed pool of square mesh tiles and move them to
+// follow the active domains. Visualization memory then depends on the window, not the terrain extent.
+//
+// Tile (I,J) owns grid nodes [I*T, I*T+T] x [J*T, J*T+T] inclusive, so neighbouring tiles duplicate the nodes
+// along their shared edge. Both copies are written whenever that node changes, and vertex normals come from
+// grid heights rather than incident mesh faces, so the duplication is invisible.
+// -----------------------------------------------------------------------------
+
+void SCMLoader::SetVisualizationWindow(double size_x, double size_y, int tile_cells, bool verbose) {
+    if (!m_trimesh_shape) {
+        std::cerr << "SCMTerrain::SetVisualizationWindow -- visualization disabled at construction; ignored."
+                  << std::endl;
+        return;
+    }
+    if (size_x <= 0 || size_y <= 0 || tile_cells < 1) {
+        std::cerr << "SCMTerrain::SetVisualizationWindow -- invalid window (" << size_x << " x " << size_y
+                  << ", " << tile_cells << " cells/tile); ignored." << std::endl;
+        return;
+    }
+
+    m_vis_windowed = true;
+    m_vis_verbose = verbose;
+    m_win_x = size_x;
+    m_win_y = size_y;
+    m_tile_cells = tile_cells;
+}
+
+void SCMLoader::SetupVisualization(double sizeX, double sizeY) {
+    if (m_vis_windowed) {
+        CreateTilePool();
+        return;
+    }
+
+    CreateVisualizationMesh(sizeX, sizeY);
+    this->AddVisualShape(m_trimesh_shape);
+    m_trimesh_shapes.push_back(m_trimesh_shape);
+}
+
+void SCMLoader::CreateTilePool() {
+    m_colormap = chrono_types::make_unique<ChColormap>(m_colormap_type);
+
+    const int T = m_tile_cells;
+    const double tile_span = T * m_delta;
+
+    // Enough tiles to cover the window, plus a one-tile ring so a tile is resident before anything drives
+    // onto it. Never more tiles than would cover the whole terrain.
+    int ntx = (int)std::ceil(m_win_x / tile_span) + 2;
+    int nty = (int)std::ceil(m_win_y / tile_span) + 2;
+    ntx = std::min(ntx, (int)std::ceil((double)(2 * m_nx + 1) / T) + 1);
+    nty = std::min(nty, (int)std::ceil((double)(2 * m_ny + 1) / T) + 1);
+    const int n_tiles = std::max(1, ntx) * std::max(1, nty);
+
+    const int nv = T + 1;             // vertices per tile edge
+    const int n_verts = nv * nv;      // vertices per tile
+    const int n_faces = 2 * T * T;    // faces per tile
+
+    m_tiles.resize(n_tiles);
+    m_free_tiles.clear();
+    m_tile_index.clear();
+    m_trimesh_shapes.clear();
+
+    for (int t = 0; t < n_tiles; t++) {
+        auto shape = chrono_types::make_shared<ChVisualShapeTriangleMesh>();
+        shape->SetMutable(true);
+        shape->SetWireframe(m_trimesh_shape->IsWireframe());
+        shape->SetDoubleFaced(true);
+        shape->SetFixedConnectivity();
+
+        auto trimesh = shape->GetMesh();
+        trimesh->Clear();
+        trimesh->GetCoordsVertices().resize(n_verts);
+        trimesh->GetCoordsNormals().resize(n_verts);
+        trimesh->GetCoordsUV().resize(n_verts);
+        trimesh->GetCoordsColors().assign(n_verts, ChColor(1, 1, 1));
+        trimesh->GetIndicesVertices().resize(n_faces);
+        trimesh->GetIndicesNormals().resize(n_faces);
+
+        // Connectivity is identical for every tile and never changes.
+        auto& idx_v = trimesh->GetIndicesVertices();
+        auto& idx_n = trimesh->GetIndicesNormals();
+        int it = 0;
+        for (int jy = 0; jy < T; jy++) {
+            for (int ix = 0; ix < T; ix++) {
+                int v0 = ix + nv * jy;
+                idx_v[it] = ChVector3i(v0, v0 + 1, v0 + nv + 1);
+                idx_n[it] = idx_v[it];
+                ++it;
+                idx_v[it] = ChVector3i(v0, v0 + nv + 1, v0 + nv);
+                idx_n[it] = idx_v[it];
+                ++it;
+            }
+        }
+
+        // A tile that is not yet resident must not be drawn anywhere visible. Park it degenerate: every
+        // vertex at the origin collapses all of its faces to zero area.
+        std::fill(trimesh->GetCoordsVertices().begin(), trimesh->GetCoordsVertices().end(), ChVector3d(0, 0, 0));
+        std::fill(trimesh->GetCoordsNormals().begin(), trimesh->GetCoordsNormals().end(), ChVector3d(0, 0, 1));
+
+        m_tiles[t].shape = shape;
+        m_tiles[t].resident = false;
+        m_tiles[t].coord = ChVector2i(0, 0);
+        m_tiles[t].modified.reserve(n_verts);
+
+        this->AddVisualShape(shape);
+        m_trimesh_shapes.push_back(shape);
+        m_free_tiles.push_back(t);
+    }
+
+    if (m_vis_verbose) {
+        double mib = n_tiles * (n_verts * (sizeof(ChVector3d) * 2 + sizeof(ChVector2d) + sizeof(ChColor)) +
+                                n_faces * sizeof(ChVector3i) * 2) / (1024.0 * 1024.0);
+        std::cout << "SCM visualization window: " << ntx << " x " << nty << " tiles of " << T << " cells ("
+                  << tile_span << " m), " << n_tiles << " total, ~" << mib << " MiB" << std::endl;
+    }
+}
+
+int SCMLoader::TileVertexIndex(const ChVector2i& tile_coord, const ChVector2i& loc) const {
+    const int T = m_tile_cells;
+    int li = loc.x() - tile_coord.x() * T;
+    int lj = loc.y() - tile_coord.y() * T;
+    if (li < 0 || li > T || lj < 0 || lj > T)
+        return -1;
+    return li + (T + 1) * lj;
+}
+
+bool SCMLoader::AcquireTile(const ChVector2i& tile_coord) {
+    if (m_free_tiles.empty()) {
+        if (!m_pool_exhausted_warned) {
+            std::cerr << "SCMTerrain: visualization tile pool exhausted; some terrain will not be drawn. "
+                      << "Enlarge the window passed to SetVisualizationWindow. "
+                      << "(Physics is unaffected.)" << std::endl;
+            m_pool_exhausted_warned = true;
+        }
+        return false;
+    }
+
+    int slot = m_free_tiles.back();
+    m_free_tiles.pop_back();
+
+    m_tiles[slot].coord = tile_coord;
+    m_tiles[slot].resident = true;
+    m_tile_index[tile_coord] = slot;
+
+    RepaintTile(slot);
+    return true;
+}
+
+void SCMLoader::ReleaseTile(int slot) {
+    auto& tile = m_tiles[slot];
+    if (!tile.resident)
+        return;
+
+    m_tile_index.erase(tile.coord);
+    tile.resident = false;
+
+    // Collapse the tile so it draws nothing until reassigned.
+    auto trimesh = tile.shape->GetMesh();
+    auto& vertices = trimesh->GetCoordsVertices();
+    std::fill(vertices.begin(), vertices.end(), ChVector3d(0, 0, 0));
+
+    tile.modified.resize(vertices.size());
+    std::iota(tile.modified.begin(), tile.modified.end(), 0);
+
+    m_free_tiles.push_back(slot);
+}
+
+void SCMLoader::RepaintTile(int slot) {
+    auto& tile = m_tiles[slot];
+    const int T = m_tile_cells;
+    const int nv = T + 1;
+
+    auto trimesh = tile.shape->GetMesh();
+    auto& vertices = trimesh->GetCoordsVertices();
+    auto& normals = trimesh->GetCoordsNormals();
+    auto& uv = trimesh->GetCoordsUV();
+    auto& colors = trimesh->GetCoordsColors();
+
+    const int i0 = tile.coord.x() * T;
+    const int j0 = tile.coord.y() * T;
+    const bool wireframe = tile.shape->IsWireframe();
+    const bool plotting = (m_plot_type != SCMTerrain::PLOT_NONE);
+
+    for (int lj = 0; lj < nv; lj++) {
+        for (int li = 0; li < nv; li++) {
+            const ChVector2i ij(i0 + li, j0 + lj);
+            const int iv = li + nv * lj;
+
+            auto p = m_grid_map.find(ij);
+            const double level = (p != m_grid_map.end()) ? p->second.level : GetInitHeight(ij);
+
+            vertices[iv] = m_frame.TransformPointLocalToParent(ChVector3d(ij.x() * m_delta, ij.y() * m_delta, level));
+            if (!wireframe)
+                normals[iv] = m_frame.TransformDirectionLocalToParent(ComputeVisNormal(ij));
+
+            // Texture coordinates run in world units so that a tile's texture lines up with its neighbours'.
+            uv[iv] = ChVector2d(ij.x() * m_delta, ij.y() * m_delta);
+
+            colors[iv] = plotting && p != m_grid_map.end() ? ComputeVisColor(p->second) : ChColor(1, 1, 1);
+        }
+    }
+
+    tile.modified.resize(vertices.size());
+    std::iota(tile.modified.begin(), tile.modified.end(), 0);
+}
+
+void SCMLoader::UpdateVisualizationWindow() {
+    const int T = m_tile_cells;
+
+    // Half-window in grid cells. Active domains are typically much smaller than the window the user asked to
+    // see (a per-wheel domain is on the order of a metre), so grow each one out to the requested window
+    // rather than merely padding it -- otherwise only the few tiles under the wheels would ever be drawn.
+    const int half_i = (int)std::ceil((m_win_x / 2) / m_delta);
+    const int half_j = (int)std::ceil((m_win_y / 2) / m_delta);
+
+    // Each domain contributes its own window. Distant domains therefore get their own patch of drawn terrain
+    // rather than one huge box spanning the gap between them; the pool is sized for a single window, so
+    // several widely separated domains may exhaust it (reported once, physics unaffected).
+    std::unordered_set<ChVector2i, CoordHash> required;
+    for (const auto& ad : m_active_domains) {
+        if (ad.m_range.empty())
+            continue;
+        const int ci = (ad.m_range_min.x() + ad.m_range_max.x()) / 2;
+        const int cj = (ad.m_range_min.y() + ad.m_range_max.y()) / 2;
+        const int I0 = TileOfIndex(ci - half_i, T);
+        const int I1 = TileOfIndex(ci + half_i, T);
+        const int J0 = TileOfIndex(cj - half_j, T);
+        const int J1 = TileOfIndex(cj + half_j, T);
+        for (int I = I0; I <= I1; I++)
+            for (int J = J0; J <= J1; J++)
+                required.insert(ChVector2i(I, J));
+    }
+
+    // Release tiles that have scrolled out. Collected first: ReleaseTile mutates m_tile_index.
+    std::vector<int> to_release;
+    for (const auto& entry : m_tile_index) {
+        if (required.find(entry.first) == required.end())
+            to_release.push_back(entry.second);
+    }
+    for (int slot : to_release)
+        ReleaseTile(slot);
+
+    // Bring in tiles that have scrolled into the window.
+    for (const auto& coord : required) {
+        if (m_tile_index.find(coord) == m_tile_index.end())
+            AcquireTile(coord);
+    }
+}
+
+void SCMLoader::UpdateTilesAtNode(const ChVector2i& loc, const NodeRecord& nr) {
+    const int T = m_tile_cells;
+    const int Ip = TileOfIndex(loc.x(), T);
+    const int Jp = TileOfIndex(loc.y(), T);
+
+    // A node on a tile's lower edge also belongs to the preceding tile's upper edge.
+    const bool dup_i = (loc.x() - Ip * T) == 0;
+    const bool dup_j = (loc.y() - Jp * T) == 0;
+
+    for (int di = 0; di <= (dup_i ? 1 : 0); di++) {
+        for (int dj = 0; dj <= (dup_j ? 1 : 0); dj++) {
+            const ChVector2i coord(Ip - di, Jp - dj);
+            auto it = m_tile_index.find(coord);
+            if (it == m_tile_index.end())
+                continue;
+
+            auto& tile = m_tiles[it->second];
+            const int iv = TileVertexIndex(coord, loc);
+            if (iv < 0)
+                continue;
+
+            auto trimesh = tile.shape->GetMesh();
+            trimesh->GetCoordsVertices()[iv] =
+                m_frame.TransformPointLocalToParent(ChVector3d(loc.x() * m_delta, loc.y() * m_delta, nr.level));
+            if (m_plot_type != SCMTerrain::PLOT_NONE)
+                trimesh->GetCoordsColors()[iv] = ComputeVisColor(nr);
+            if (!tile.shape->IsWireframe())
+                trimesh->GetCoordsNormals()[iv] = m_frame.TransformDirectionLocalToParent(ComputeVisNormal(loc));
+
+            tile.modified.push_back(iv);
+        }
+    }
+}
+
+ChVector3d SCMLoader::ComputeVisNormal(const ChVector2i& loc) const {
+    // Central differences on current heights. GetNormal short-circuits to +Z for a flat patch, which would
+    // leave ruts in flat terrain unshaded, so do not defer to it here.
+    auto hE = GetHeight(loc + ChVector2i(1, 0));
+    auto hW = GetHeight(loc - ChVector2i(1, 0));
+    auto hN = GetHeight(loc + ChVector2i(0, 1));
+    auto hS = GetHeight(loc - ChVector2i(0, 1));
+    return ChVector3d(hW - hE, hS - hN, 2 * m_delta).GetNormalized();
 }
 
 void SCMLoader::SetupInitial() {
@@ -967,6 +1280,8 @@ void SCMLoader::UpdateActiveDomain(ActiveDomainInfo& ad, const ChVector3d& Z) {
             ad.m_range[j * n_x + i] = ChVector2i(i + x_min, j + y_min);
         }
     }
+    ad.m_range_min = ChVector2i(x_min, y_min);
+    ad.m_range_max = ChVector2i(x_max, y_max);
 
     // Calculate inverse of SCM normal expressed in body frame (for optimization of ray-OBB test)
     ChVector3d dir = ad.m_body->GetFrameRefToAbs().TransformDirectionParentToLocal(Z);
@@ -1018,6 +1333,8 @@ void SCMLoader::UpdateDefaultActiveDomain(ActiveDomainInfo& ad) {
             ad.m_range[j * n_x + i] = ChVector2i(i + x_min, j + y_min);
         }
     }
+    ad.m_range_min = ChVector2i(x_min, y_min);
+    ad.m_range_max = ChVector2i(x_max, y_max);
 }
 
 // Ray-OBB intersection test
@@ -1083,7 +1400,9 @@ void SCMLoader::ComputeInternalForces() {
         nr.hit_level = 1e9;
 
         // Update visualization (only color changes relevant here)
-        if (m_trimesh_shape && CheckMeshBounds(ij)) {
+        if (m_vis_windowed) {
+            UpdateTilesAtNode(ij, nr);
+        } else if (m_trimesh_shape && CheckMeshBounds(ij)) {
             int iv = GetMeshVertexIndex(ij);          // mesh vertex index
             UpdateMeshVertexCoordinates(ij, iv, nr);  // update vertex coordinates and color
             modified_vertices.push_back(iv);
@@ -1695,7 +2014,23 @@ void SCMLoader::ComputeInternalForces() {
 
     m_timer_visualization.start();
 
-    if (m_trimesh_shape) {
+    if (m_vis_windowed) {
+        // Move the tile window to follow the active domains. Tiles brought in are painted in full, so they
+        // already carry the deformation retained for their region; only nodes modified this step remain.
+        UpdateVisualizationWindow();
+
+        for (const auto& ij : m_modified_nodes)
+            UpdateTilesAtNode(ij, m_grid_map.at(ij));
+
+        // Single publication point: tiles accumulate touched vertices from the reset loop at the top of this
+        // function, from SetModifiedNodes between steps, and from the loop just above.
+        for (auto& tile : m_tiles) {
+            if (tile.modified.empty())
+                continue;
+            tile.shape->SetModifiedVertices(tile.modified);
+            tile.modified.clear();
+        }
+    } else if (m_trimesh_shape) {
         // Loop over list of modified nodes and adjust corresponding mesh vertices.
         // If not rendering a wireframe mesh, also update normals.
         for (const auto& ij : m_modified_nodes) {
@@ -1746,8 +2081,14 @@ void SCMLoader::UpdateMeshVertexCoordinates(const ChVector2i ij, int iv, const N
     vertices[iv] = m_frame.TransformPointLocalToParent(ChVector3d(ij.x() * m_delta, ij.y() * m_delta, nr.level));
 
     // Update visualization mesh vertex color
-    if (m_plot_type != SCMTerrain::PLOT_NONE) {
-        ChColor color;
+    if (m_plot_type != SCMTerrain::PLOT_NONE)
+        colors[iv] = ComputeVisColor(nr);
+}
+
+// False-coloring for a node under the current plot type.
+ChColor SCMLoader::ComputeVisColor(const NodeRecord& nr) const {
+    ChColor color;
+    {
         switch (m_plot_type) {
             case SCMTerrain::PLOT_LEVEL:
                 color = m_colormap->Get(nr.level, m_plot_v_min, m_plot_v_max);
@@ -1797,8 +2138,8 @@ void SCMLoader::UpdateMeshVertexCoordinates(const ChVector2i ij, int iv, const N
             case SCMTerrain::PLOT_NONE:
                 break;
         }
-        colors[iv] = color;
     }
+    return color;
 }
 
 // Update vertex normal in visualization mesh.
@@ -1846,7 +2187,11 @@ void SCMLoader::SetModifiedNodes(const std::vector<SCMTerrain::NodeLevel>& nodes
     }
 
     // Update visualization
-    if (m_trimesh_shape) {
+    if (m_vis_windowed) {
+        // Tiles accumulate touched vertices; they are published at the end of the next ComputeInternalForces.
+        for (const auto& n : nodes)
+            UpdateTilesAtNode(n.first, m_grid_map.at(n.first));
+    } else if (m_trimesh_shape) {
         for (const auto& n : nodes) {
             auto ij = n.first;                           // grid location
             if (!CheckMeshBounds(ij))                    // if outside mesh

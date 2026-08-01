@@ -233,7 +233,35 @@ class CH_VEHICLE_API SCMTerrain : public ChTerrain {
     NodeInfo GetNodeInfo(const ChVector3d& loc) const;
 
     /// Get the visualization triangular mesh.
+    /// In windowed visualization mode (see SetVisualizationWindow) the terrain is drawn with several meshes
+    /// rather than one; this function then returns the first tile mesh, which is rarely what a caller wants.
+    /// Use GetMeshes() instead.
     std::shared_ptr<ChVisualShapeTriangleMesh> GetMesh() const;
+
+    /// Get all visualization triangular meshes.
+    /// Without a visualization window this holds the single, full-extent mesh. With one, it holds the pool of
+    /// tile meshes. Empty if visualization was disabled at construction.
+    const std::vector<std::shared_ptr<ChVisualShapeTriangleMesh>>& GetMeshes() const;
+
+    /// Restrict visualization to a moving window that follows the active domains.
+    ///
+    /// By default SCM builds a single visualization mesh spanning the whole terrain extent. That mesh costs
+    /// O(extent / delta^2) memory whether or not the terrain is ever touched -- roughly 120 MiB per 50x50 m
+    /// at 5 cm resolution, which puts a 1 km patch far out of reach. With a visualization window, SCM instead
+    /// keeps a fixed pool of square mesh tiles and moves them to follow the active domains, so visualization
+    /// memory depends on the window size and not at all on the terrain extent.
+    ///
+    /// Physics is unaffected. Node deformation is stored sparsely, persists for the whole simulation, and is
+    /// exact everywhere regardless of the window. Only drawing is windowed: terrain that scrolls out of the
+    /// window stops being drawn, and is drawn again -- with its retained deformation -- if an active domain
+    /// comes back to it.
+    ///
+    /// Must be called before Initialize(). Has no effect if visualization was disabled at construction.
+    void SetVisualizationWindow(double size_x,        ///< [in] window dimension in the X direction [m]
+                                double size_y,        ///< [in] window dimension in the Y direction [m]
+                                int tile_cells = 64,  ///< [in] grid cells per tile edge
+                                bool verbose = false  ///< [in] report tile pool sizing and exhaustion
+    );
 
     /// Set the visualization mesh as wireframe or as solid (default: wireframe).
     /// Note: in wireframe mode, normals for the visualization mesh are not calculated.
@@ -419,7 +447,21 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
         ChVector3d m_center;              // OOBB center, relative to body
         ChVector3d m_hdims;               // OOBB half-dimensions
         std::vector<ChVector2i> m_range;  // current grid nodes covered by the domain
+        ChVector2i m_range_min;           // lower corner of the grid index range (inclusive)
+        ChVector2i m_range_max;           // upper corner of the grid index range (inclusive)
         ChVector3d m_ooN;                 // current inverse of SCM normal in body frame
+    };
+
+    // One tile of the windowed visualization mesh.
+    // A tile owns a (T+1)x(T+1) block of grid nodes, where T is the number of cells per tile edge. Tiles
+    // that are adjacent duplicate the grid nodes along their shared edge; both copies are kept in step,
+    // and vertex normals are computed from grid heights rather than from incident mesh faces, so the
+    // duplication does not produce a visible seam.
+    struct VisTile {
+        std::shared_ptr<ChVisualShapeTriangleMesh> shape;  // mesh asset for this tile
+        ChVector2i coord;                                  // tile coordinate, if resident
+        bool resident;                                     // currently assigned to a tile coordinate
+        std::vector<int> modified;                         // vertices touched this step
     };
 
     // Information at contacted node
@@ -479,6 +521,45 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
 
     // Create visualization mesh
     void CreateVisualizationMesh(double sizeX, double sizeY);
+
+    // Create either the single full-extent mesh or the tile pool, and attach to the visual model.
+    void SetupVisualization(double sizeX, double sizeY);
+
+    // Enable windowed visualization (see SCMTerrain::SetVisualizationWindow).
+    void SetVisualizationWindow(double size_x, double size_y, int tile_cells, bool verbose);
+
+    // Allocate the fixed pool of visualization tiles. Called from Initialize when windowed.
+    void CreateTilePool();
+
+    // Tile coordinate owning a grid index along one axis, and the local offset within that tile.
+    static int TileOfIndex(int i, int cells) { return (i >= 0) ? i / cells : -(((-i) + cells - 1) / cells); }
+
+    // Vertex index within a tile for a grid node, given the tile's own coordinate. Returns -1 if the node
+    // is not covered by that tile.
+    int TileVertexIndex(const ChVector2i& tile_coord, const ChVector2i& loc) const;
+
+    // Assign a pool slot to a tile coordinate and paint all of its vertices. Returns false if the pool is
+    // exhausted.
+    bool AcquireTile(const ChVector2i& tile_coord);
+
+    // Return a pool slot to the free list.
+    void ReleaseTile(int slot);
+
+    // Paint every vertex of a resident tile from the current grid state.
+    void RepaintTile(int slot);
+
+    // Move the tile window to cover the current active domains.
+    void UpdateVisualizationWindow();
+
+    // Write one grid node into every resident tile that covers it.
+    void UpdateTilesAtNode(const ChVector2i& loc, const NodeRecord& nr);
+
+    // Vertex normal for visualization, from central differences of current grid heights. Unlike GetNormal,
+    // this does not special-case a flat patch -- a rut in flat terrain still needs a shaded normal.
+    ChVector3d ComputeVisNormal(const ChVector2i& loc) const;
+
+    // Color for a node under the current plot type.
+    ChColor ComputeVisColor(const NodeRecord& nr) const;
 
     // Get the initial undeformed terrain height (relative to the SCM plane) at the specified grid node.
     double GetInitHeight(const ChVector2i& loc) const;
@@ -606,6 +687,20 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
     std::shared_ptr<ChVisualShapeTriangleMesh> m_trimesh_shape;  ///< mesh visualization asset
     std::unique_ptr<ChColormap> m_colormap;                      ///< colormap for mesh false coloring
     ChColormap::Type m_colormap_type;                            ///< colormap type
+
+    /// All visualization meshes: the single full-extent mesh, or the tile pool when windowed.
+    std::vector<std::shared_ptr<ChVisualShapeTriangleMesh>> m_trimesh_shapes;
+
+    // Windowed visualization (see SCMTerrain::SetVisualizationWindow)
+    bool m_vis_windowed;                                          ///< tile pool instead of one full-extent mesh
+    bool m_vis_verbose;                                           ///< report pool sizing and exhaustion
+    double m_win_x;                                               ///< window dimension in X [m]
+    double m_win_y;                                               ///< window dimension in Y [m]
+    int m_tile_cells;                                             ///< grid cells per tile edge
+    std::vector<VisTile> m_tiles;                                 ///< fixed pool of tiles
+    std::unordered_map<ChVector2i, int, CoordHash> m_tile_index;  ///< tile coordinate -> pool slot
+    std::vector<int> m_free_tiles;                                ///< unassigned pool slots
+    bool m_pool_exhausted_warned;                                 ///< pool-exhaustion warning already issued
 
     bool m_cosim_mode;  ///< co-simulation mode
 
