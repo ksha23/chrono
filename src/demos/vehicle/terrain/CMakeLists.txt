@@ -10,6 +10,7 @@
 set(DEMOS ${DEMOS}
     demo_VEH_SCMTerrain_WheeledVehicle
     demo_VEH_SCMTerrain_TrackedVehicle
+    demo_VEH_SCMTerrain_LargeWorld
 )
 
 if(CH_ENABLE_MODULE_FSI_SPH)
