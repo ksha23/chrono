@@ -20,6 +20,7 @@
 #ifndef SCM_TERRAIN_H
 #define SCM_TERRAIN_H
 
+#include <cstdint>
 #include <string>
 #include <ostream>
 #include <unordered_map>
@@ -458,11 +459,22 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
               step_plastic_flow(0) {}
     };
 
-    // Hash function for a pair of integer grid coordinates
+    // Hash function for a pair of integer grid coordinates.
+    // SCM keys are always a dense rectangular block of grid indices, so a linear combination such as
+    // 31*x + y aliases heavily: (x, y) and (x-1, y+31) land in the same bucket. Instead, pack the two
+    // indices into a 64-bit word and run it through the murmur3 finalizer, which spreads a contiguous
+    // 2D block uniformly over the bucket array.
     struct CoordHash {
       public:
-        // 31 is just a decently-sized prime number to reduce bucket collisions
-        std::size_t operator()(const ChVector2i& p) const { return p.x() * 31 + p.y(); }
+        std::size_t operator()(const ChVector2i& p) const {
+            uint64_t k = (uint64_t)(uint32_t)p.x() << 32 | (uint32_t)p.y();
+            k ^= k >> 33;
+            k *= 0xff51afd7ed558ccdULL;
+            k ^= k >> 33;
+            k *= 0xc4ceb9fe1a85ec53ULL;
+            k ^= k >> 33;
+            return (std::size_t)k;
+        }
     };
 
     // Create visualization mesh
