@@ -36,6 +36,10 @@ class SphParticleRelocator {
     struct DefaultProperties {
         Real rho0;
         Real mu0;
+        /// Virgin MCC hardening state (preconsolidation pressure, volumetric strain rate, specific volume).
+        /// Only meaningful when the CRM rheology is MCC; ignored otherwise.
+        Real3 pcEvSv0;
+        bool reset_pcEvSv;
     };
 
     SphParticleRelocator(FsiDataManager& data_mgr, const DefaultProperties& props);

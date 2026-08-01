@@ -591,6 +591,31 @@ void ChFsiProblemSPH::CreateParticleRelocator() {
     props.rho0 = m_sysSPH->GetDensity();
     props.mu0 = m_sysSPH->GetViscosity();
 
+    // Relocated markers are reinitialized as virgin material. Under MCC that has to include the
+    // hardening state: leaving it behind gives a marker with zero stress and an inherited deformation
+    // history, which is not a state the model can be in.
+    //
+    // The virgin state is taken from the same particle-properties callback the markers were created
+    // with, evaluated once at the origin. Relocation already applies uniform defaults for density,
+    // pressure, viscosity and stress rather than re-evaluating the callback per destination, so a
+    // single representative value is consistent with the rest of the reset.
+    const auto& params = m_sysSPH->GetParams();
+    props.reset_pcEvSv = params.elastic_SPH && params.rheology_model_crm == RheologyCRM::MCC;
+    props.pcEvSv0 = mR3(0);
+    if (props.reset_pcEvSv) {
+        auto cb = m_props_cb ? m_props_cb
+                             : chrono_types::make_shared<ChFsiFluidSystemSPH::ParticlePropertiesCallback>();
+        cb->set(*m_sysSPH, ChVector3d(0, 0, 0));
+
+        // Mirrors FsiDataManager::AddSphParticle.
+        const Real pc = (Real)cb->consolidation_pressure;
+        const Real confining_stress = (Real)cb->p0;
+        const Real p1 = 1000;
+        const Real Sv = params.mcc_v_lambda - params.mcc_lambda * std::log(pc / p1) +
+                        params.mcc_kappa * std::log(pc / confining_stress);
+        props.pcEvSv0 = mR3(pc, 0.0, Sv);
+    }
+
     m_relocator = chrono_types::make_unique<SphParticleRelocator>(*m_sysSPH->m_data_mgr, props);
 }
 

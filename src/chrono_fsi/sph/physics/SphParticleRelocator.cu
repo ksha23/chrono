@@ -149,6 +149,13 @@ struct togrid_op {
         thrust::get<3>(a) = zero;                                        // tau diagonal
         thrust::get<4>(a) = zero;                                        // tau off-diagonal
 
+        // Element 5 is the MCC hardening state. It must be reset with everything else: a relocated
+        // marker is virgin material, and leaving the preconsolidation pressure of the soil it used to
+        // be gives a particle with zero stress but a deformation history, which is not a state the
+        // model can be in. Only reset under MCC -- other rheologies do not allocate this array.
+        if (p.reset_pcEvSv)
+            thrust::get<5>(a) = p.pcEvSv0;
+
         return t;
     }
 
