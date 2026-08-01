@@ -936,24 +936,44 @@ void SCMLoader::UpdateVisualizationWindow() {
     const int T = m_tile_cells;
 
     // Half-window in grid cells. Active domains are typically much smaller than the window the user asked to
-    // see (a per-wheel domain is on the order of a metre), so grow each one out to the requested window
-    // rather than merely padding it -- otherwise only the few tiles under the wheels would ever be drawn.
+    // see (a per-wheel domain is on the order of a metre), so the window has to be grown out to what was
+    // asked for rather than merely padded -- otherwise only the few tiles under the wheels are ever drawn.
     const int half_i = (int)std::ceil((m_win_x / 2) / m_delta);
     const int half_j = (int)std::ceil((m_win_y / 2) / m_delta);
 
-    // Each domain contributes its own window. Distant domains therefore get their own patch of drawn terrain
-    // rather than one huge box spanning the gap between them; the pool is sized for a single window, so
-    // several widely separated domains may exhaust it (reported once, physics unaffected).
-    std::unordered_set<ChVector2i, CoordHash> required;
+    // Grow the union of the active domains, once. Growing each domain to a full window separately would
+    // demand window-plus-spread rather than window: a wheeled vehicle contributes one domain per wheel,
+    // spread over several metres, and the union of eight individually grown windows overruns a pool sized
+    // for one. That reported pool exhaustion in an entirely ordinary configuration.
+    bool any = false;
+    int umin_i = 0, umax_i = 0, umin_j = 0, umax_j = 0;
     for (const auto& ad : m_active_domains) {
         if (ad.m_range.empty())
             continue;
-        const int ci = (ad.m_range_min.x() + ad.m_range_max.x()) / 2;
-        const int cj = (ad.m_range_min.y() + ad.m_range_max.y()) / 2;
-        const int I0 = TileOfIndex(ci - half_i, T);
-        const int I1 = TileOfIndex(ci + half_i, T);
-        const int J0 = TileOfIndex(cj - half_j, T);
-        const int J1 = TileOfIndex(cj + half_j, T);
+        if (!any) {
+            umin_i = ad.m_range_min.x();
+            umax_i = ad.m_range_max.x();
+            umin_j = ad.m_range_min.y();
+            umax_j = ad.m_range_max.y();
+            any = true;
+        } else {
+            umin_i = std::min(umin_i, ad.m_range_min.x());
+            umax_i = std::max(umax_i, ad.m_range_max.x());
+            umin_j = std::min(umin_j, ad.m_range_min.y());
+            umax_j = std::max(umax_j, ad.m_range_max.y());
+        }
+    }
+
+    std::unordered_set<ChVector2i, CoordHash> required;
+    if (any) {
+        // Symmetric about the union centre, but never shrinking the union itself: domains further apart
+        // than the window are still covered, at the cost of more tiles than the pool may hold.
+        const int ci = (umin_i + umax_i) / 2;
+        const int cj = (umin_j + umax_j) / 2;
+        const int I0 = TileOfIndex(std::min(umin_i, ci - half_i), T);
+        const int I1 = TileOfIndex(std::max(umax_i, ci + half_i), T);
+        const int J0 = TileOfIndex(std::min(umin_j, cj - half_j), T);
+        const int J1 = TileOfIndex(std::max(umax_j, cj + half_j), T);
         for (int I = I0; I <= I1; I++)
             for (int J = J0; J <= J1; J++)
                 required.insert(ChVector2i(I, J));
