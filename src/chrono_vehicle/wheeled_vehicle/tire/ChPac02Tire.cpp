@@ -1772,6 +1772,17 @@ void ChPac02Tire::Synchronize(double time, const ChTerrain& terrain) {
     // Calculate tire kinematics
     CalculateKinematics(wheel_state, m_data.frame);
 
+    // Inclination (camber) angle of the tire.
+    // ChTire::CalculateKinematics reports the camber angle in the ISO tire frame, whereas the Magic Formula is
+    // evaluated here in the SAE-like frame used by the MF parameter sets (see the ISO conversion of the resulting
+    // force and moment at the end of Advance). Lateral force and slip angle change sign between the two frames but
+    // the inclination angle does not, so the sign of the camber angle must be reversed here for the camber terms to
+    // produce a thrust in the direction of the wheel lean.
+    // Set before the normal force evaluation below, which uses it through QFZ3.
+    // Clamp |gamma| to specified value: Limit due to tire testing, avoids erratic extrapolation. m_gamma_limit is
+    // in rad too.
+    m_states.gamma = ChClamp(-GetCamberAngle(), -m_gamma_limit, m_gamma_limit);
+
     if (m_data.in_contact) {
         // Wheel velocity in the ISO-C Frame
         ChVector3d vel = wheel_state.lin_vel;
@@ -1809,9 +1820,6 @@ void ChPac02Tire::Synchronize(double time, const ChTerrain& terrain) {
         ChClampValue(m_states.kappa, -1.0, 1.0);
         // Ensure that alpha stays between -pi()/2 & pi()/2 (a little less to prevent tan from going to infinity)
         ChClampValue(m_states.alpha, -CH_PI_2 + 0.01, CH_PI_2 - 0.01);
-        // Clamp |gamma| to specified value: Limit due to tire testing, avoids erratic extrapolation. m_gamma_limit is
-        // in rad too.
-        ChClampValue(m_states.gamma, -m_gamma_limit, m_gamma_limit);
     } else {
         // Reset all states if the tire comes off the ground.
         m_data.normal_force = 0;
