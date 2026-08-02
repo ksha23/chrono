@@ -349,10 +349,15 @@ double ChPac02Tire::CalcMx(double Fy, double Fz, double gamma) {
 
 double ChPac02Tire::CalcMy(double Fx, double Fz, double gamma) {
     // in most cases only QSY1 is used.
+    // V0 = sqrt(g*R0) is the reference speed of the speed-dependent rolling resistance terms. It is zero if the
+    // system had no gravitational acceleration set when this tire was initialized (a ChWheelTestRig, for instance,
+    // sets gravity only when the rig mechanism is created, after the tire is initialized), which would turn
+    // vx/V0 into inf and the whole rolling resistance moment into NaN. Drop the speed-dependent terms in that case.
     double V0 = std::sqrt(m_g * m_par.UNLOADED_RADIUS);
+    double vn = (V0 > 0) ? m_states.vx / V0 : 0;
     double My = Fz * m_par.UNLOADED_RADIUS *
-                (m_par.QSY1 + m_par.QSY2 * Fx / m_par.FNOMIN + m_par.QSY3 * fabs(m_states.vx / V0) +
-                 m_par.QSY4 * std::pow(m_states.vx / V0, 4) + m_par.QSY5 * std::pow(gamma, 2) +
+                (m_par.QSY1 + m_par.QSY2 * Fx / m_par.FNOMIN + m_par.QSY3 * fabs(vn) +
+                 m_par.QSY4 * std::pow(vn, 4) + m_par.QSY5 * std::pow(gamma, 2) +
                  m_par.QSY6 * std::pow(gamma, 2) * Fz / m_par.FNOMIN) *
                 (std::pow(Fz / m_par.FNOMIN, m_par.QSY7) * std::pow(m_par.IP / m_par.IP_NOM, m_par.QSY8)) * m_par.LMY;
     return My;
