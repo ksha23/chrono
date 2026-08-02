@@ -256,11 +256,15 @@ void ChTMeasyTire::Advance(double step) {
     double My = 0;
     double Mz = 0;
 
-    // The pneumatic trail trails the contact point, i.e. it lies on the opposite side of the direction of travel,
-    // so the self aligning torque changes sign when the wheel runs backwards.
-    if (std::abs(m_data.vel.x()) >= m_frblend_begin) {
-        Mz = ChSignum(m_data.vel.x()) * AlignmentTorque(Fy);
-    }
+    // The pneumatic trail trails the contact point, i.e. it lies on the opposite side of the direction of
+    // travel, so the self aligning torque changes sign when the wheel runs backwards.
+    //
+    // Faded out with the same blend as the forces rather than switched on at a threshold. A hard gate steps
+    // the aligning torque by the whole of its value as the wheel crosses m_frblend_begin -- 119 Nm at 1 deg
+    // slip and 5886 N load -- in both directions of travel. Below the blend the tire model is replaced by a
+    // Coulomb/Dahl stand-still model that has no pneumatic trail, so the torque genuinely belongs to the
+    // tire-model side of the blend and should vanish with it.
+    Mz = frblend * ChSignum(m_data.vel.x()) * AlignmentTorque(Fy);
 
     // Rolling Resistance, Ramp Like Signum inhibits 'switching' of My
     My = -m_rolling_resistance * m_data.normal_force * m_unloaded_radius * tanh(m_states.omega);
