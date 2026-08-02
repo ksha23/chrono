@@ -70,5 +70,11 @@ void ChTrackSuspension::SaveCheckpoint(ChCheckpoint& database) const {
     m_road_wheel->SaveCheckpoint(database);
 }
 
+void ChTrackSuspension::LoadCheckpoint(ChCheckpoint& database) {
+    ChPart::LoadCheckpoint(database);
+
+    m_road_wheel->LoadCheckpoint(database);
+}
+
 }  // end namespace vehicle
 }  // end namespace chrono

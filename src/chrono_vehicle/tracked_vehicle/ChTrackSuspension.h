@@ -123,7 +123,12 @@ class CH_VEHICLE_API ChTrackSuspension : public ChPart {
                            ) = 0;
 
     virtual void ExportComponentList(rapidjson::Document& jsonDocument) const override;
+
+    /// Save/load the state of this suspension *and* of its road wheel.
+    /// These two must stay symmetric: a checkpoint database is a positional stream, so any record written by
+    /// SaveCheckpoint() and not consumed by LoadCheckpoint() shifts every subsequent record in the file.
     virtual void SaveCheckpoint(ChCheckpoint& database) const override;
+    virtual void LoadCheckpoint(ChCheckpoint& database) override;
 
     GuidePinType m_type;  ///< type of the track shoe matching this road wheel
     bool m_has_shock;     ///< specifies whether or not the suspension has a damper

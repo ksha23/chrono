@@ -99,14 +99,25 @@ class CH_VEHICLE_API ChTrackAssemblyBandANCF : public ChTrackAssemblyBand {
 
   private:
     /// Custom callback class for culling broadphase collisions.
+    /// A ChSystem holds a single broadphase callback, but a vehicle has one ANCF band track assembly per side (and,
+    /// in general, several vehicles may share a system). A single instance of this class is therefore shared by all
+    /// ANCF band track assemblies in a given collision system; each assembly registers itself with the instance
+    /// already present (if any) instead of replacing it. Any callback previously registered by other code is chained.
     class BroadphaseCulling : public ChCollisionSystem::BroadphaseCallback {
       public:
         BroadphaseCulling(ChTrackAssemblyBandANCF* assembly);
 
+        /// Add another track assembly whose shoe/web pairs must also be culled.
+        void AddAssembly(ChTrackAssemblyBandANCF* assembly);
+
+        /// Set a previously registered broadphase callback, which is still consulted for every pair.
+        void SetChainedCallback(std::shared_ptr<ChCollisionSystem::BroadphaseCallback> callback);
+
       private:
         virtual bool OnBroadphase(ChCollisionModel* modelA, ChCollisionModel* modelB) override;
 
-        ChTrackAssemblyBandANCF* m_assembly;
+        std::vector<ChTrackAssemblyBandANCF*> m_assemblies;
+        std::shared_ptr<ChCollisionSystem::BroadphaseCallback> m_chained;
     };
 
     /// Assemble track shoes over wheels.

@@ -20,6 +20,7 @@
 //
 // =============================================================================
 
+#include <algorithm>
 #include <cmath>
 
 #include "chrono_vehicle/tracked_vehicle/track_assembly/ChTrackAssemblyBandANCF.h"
@@ -36,29 +37,42 @@ namespace vehicle {
 // Implementation of the custom callback class for culling broadphase collisions
 // -----------------------------------------------------------------------------
 ChTrackAssemblyBandANCF::BroadphaseCulling::BroadphaseCulling(ChTrackAssemblyBandANCF* assembly)
-    : m_assembly(assembly) {}
+    : m_assemblies(1, assembly) {}
+
+void ChTrackAssemblyBandANCF::BroadphaseCulling::AddAssembly(ChTrackAssemblyBandANCF* assembly) {
+    if (std::find(m_assemblies.begin(), m_assemblies.end(), assembly) == m_assemblies.end())
+        m_assemblies.push_back(assembly);
+}
+
+void ChTrackAssemblyBandANCF::BroadphaseCulling::SetChainedCallback(
+    std::shared_ptr<ChCollisionSystem::BroadphaseCallback> callback) {
+    m_chained = callback;
+}
 
 bool ChTrackAssemblyBandANCF::BroadphaseCulling::OnBroadphase(ChCollisionModel* modelA, ChCollisionModel* modelB) {
     auto contactableA = modelA->GetContactable();
     auto contactableB = modelB->GetContactable();
 
-    if (dynamic_cast<fea::ChContactNodeXYZ*>(contactableA) ||
-        dynamic_cast<fea::ChContactTriangleXYZ*>(contactableA)) {
-        // Reject this candidate pair if contactableB is a track shoe tread body
-        for (auto shoe : m_assembly->m_shoes) {
-            if (contactableB == shoe->GetShoeBody().get())
+    bool feaA = dynamic_cast<fea::ChContactNodeXYZ*>(contactableA) ||  //
+                dynamic_cast<fea::ChContactTriangleXYZ*>(contactableA);
+    bool feaB = dynamic_cast<fea::ChContactNodeXYZ*>(contactableB) ||  //
+                dynamic_cast<fea::ChContactTriangleXYZ*>(contactableB);
+
+    // Reject this candidate pair if one model is a web FEA contactable and the other is a track shoe tread body
+    // of *any* of the registered assemblies.
+    for (auto assembly : m_assemblies) {
+        for (auto shoe : assembly->m_shoes) {
+            auto shoe_body = shoe->GetShoeBody().get();
+            if (feaA && contactableB == shoe_body)
+                return false;
+            if (feaB && contactableA == shoe_body)
                 return false;
         }
     }
 
-    if (dynamic_cast<fea::ChContactNodeXYZ*>(contactableB) ||
-        dynamic_cast<fea::ChContactTriangleXYZ*>(contactableB)) {
-        // Reject this candidate pair if contactableA is a track shoe tread body
-        for (auto shoe : m_assembly->m_shoes) {
-            if (contactableA == shoe->GetShoeBody().get())
-                return false;
-        }
-    }
+    // Defer to a previously registered callback, if any
+    if (m_chained)
+        return m_chained->OnBroadphase(modelA, modelB);
 
     // Accept this candidate
     return true;
@@ -229,9 +243,20 @@ bool ChTrackAssemblyBandANCF::Assemble(std::shared_ptr<ChChassis> chassis) {
         }
     }
 
-    // Create and register the custom broadphase callback.
-    m_callback = chrono_types::make_shared<BroadphaseCulling>(this);
-    chassis->GetSystem()->GetCollisionSystem()->RegisterBroadphaseCallback(m_callback);
+    // Register the custom broadphase callback.
+    // ChCollisionSystem holds a single broadphase callback, so a second ANCF band track assembly must not simply
+    // overwrite the one installed by the first (that would silently disable culling for the first assembly).
+    // Instead, join the culling callback already installed in this collision system, if there is one.
+    auto coll_sys = chassis->GetSystem()->GetCollisionSystem();
+    auto registered = coll_sys->GetBroadphaseCallback();
+    if (auto culling = std::dynamic_pointer_cast<BroadphaseCulling>(registered)) {
+        culling->AddAssembly(this);
+        m_callback = culling;
+    } else {
+        m_callback = chrono_types::make_shared<BroadphaseCulling>(this);
+        m_callback->SetChainedCallback(registered);
+        coll_sys->RegisterBroadphaseCallback(m_callback);
+    }
 
     return ccw;
 }
