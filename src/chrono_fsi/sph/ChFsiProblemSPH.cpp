@@ -709,12 +709,16 @@ void ChFsiProblemSPH::BCEShift(const ChVector3d& shift_dist) {
 void ChFsiProblemSPH::SPHShift(const ChVector3d& shift_dist) {
     ChAssertAlways(m_relocator);
 
-    // Destination heights of a uniform shift are the current ones translated by shift_dist.z. The
-    // marker z extent is not tracked on the host, so tabulate over the computational domain, which
-    // contains it by construction.
-    ChAABB domain = m_sysSPH->GetComputationalDomain();
-    ChVector3d c = (domain.min + domain.max) / 2 + shift_dist;
-    UpdateRelocatorVirginState(c.x(), c.y(), domain.min.z() + shift_dist.z(), domain.max.z() + shift_dist.z());
+    // Destination heights of a uniform shift are the current ones translated by shift_dist.z. Tabulate
+    // over the marker extent rather than the computational domain: the table is sampled by rounding
+    // (z - z_lo) / spacing to an integer, so z_lo has to sit on the marker lattice. The domain is only
+    // lattice-aligned by accident -- the default one is the marker AABB padded by a whole number of
+    // spacings -- and a user-supplied domain whose z_min is off-lattice silently hands every marker its
+    // neighbour's state, up to a full layer out.
+    const ChAABB& sph_aabb = GetSPHBoundingBox();
+    ChVector3d c = (sph_aabb.min + sph_aabb.max) / 2 + shift_dist;
+    UpdateRelocatorVirginState(c.x(), c.y(), sph_aabb.min.z() + shift_dist.z(),
+                               sph_aabb.max.z() + shift_dist.z());
 
     m_relocator->Shift(MarkerType::SPH_PARTICLE, ToReal3(shift_dist));
     ForceProximitySearch();
