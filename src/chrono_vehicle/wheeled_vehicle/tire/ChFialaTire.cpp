@@ -95,6 +95,7 @@ void ChFialaTire::Synchronize(double time, const ChTerrain& terrain) {
 
         if (Fn_mag < 0) {
             Fn_mag = 0;
+            m_data.in_contact = false;  // Skip Force and moment calculations when the normal force = 0
         }
 
         m_data.normal_force = Fn_mag;
@@ -163,6 +164,15 @@ void ChFialaTire::Advance(double step) {
 // -----------------------------------------------------------------------------
 
 void ChFialaTire::FialaPatchForces(double& fx, double& fy, double& mz, double kappa, double alpha, double fz) {
+    // With no vertical load the critical slip and critical slip angle both collapse to zero and the expressions
+    // below degenerate to 0/0. Return zero patch forces instead (which is their limit for fz -> 0).
+    if (!(fz > 0)) {
+        fx = 0;
+        fy = 0;
+        mz = 0;
+        return;
+    }
+
     double SsA = std::min<>(1.0, std::sqrt(std::pow(kappa, 2) + std::pow(std::tan(alpha), 2)));
     double U = m_u_max - (m_u_max - m_u_min) * SsA;
     double S_critical = std::abs(U * fz / (2 * m_c_slip));
