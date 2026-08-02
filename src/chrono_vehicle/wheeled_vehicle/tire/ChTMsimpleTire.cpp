@@ -175,7 +175,10 @@ void ChTMsimpleTire::Advance(double step) {
 
     CombinedCoulombForces(Fx0, Fy0, Fz, m_states.muscale);
 
-    double frblend = ChFunctionSineStep::Eval(m_data.vel.x(), m_frblend_begin, 0.0, m_frblend_end, 1.0);
+    // Blend between the Coulomb/Dahl stand-still model and the tire model. The blend guards the low speed
+    // singularity of the slip definitions and is therefore a function of the speed magnitude: driving backwards is
+    // not a stand-still condition.
+    double frblend = ChFunctionSineStep::Eval(std::abs(m_data.vel.x()), m_frblend_begin, 0.0, m_frblend_end, 1.0);
 
     TMcombinedForces(Fx, Fy, m_states.sx, m_states.sy, Fz, m_states.muscale);
     Fx = (1.0 - frblend) * Fx0 + frblend * Fx;

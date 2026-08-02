@@ -211,7 +211,10 @@ void ChTMeasyTire::Advance(double step) {
 
     CombinedCoulombForces(Fx0, Fy0, Fz, m_states.muscale);
 
-    double frblend = ChFunctionSineStep::Eval(m_data.vel.x(), m_frblend_begin, 0.0, m_frblend_end, 1.0);
+    // Blend between the Coulomb/Dahl stand-still model and the tire model. The blend guards the low speed
+    // singularity of the slip definitions and is therefore a function of the speed magnitude: driving backwards is
+    // not a stand-still condition.
+    double frblend = ChFunctionSineStep::Eval(std::abs(m_data.vel.x()), m_frblend_begin, 0.0, m_frblend_end, 1.0);
 
     // TMeasy horizontal forces
     double sx = m_states.sx;
@@ -253,8 +256,10 @@ void ChTMeasyTire::Advance(double step) {
     double My = 0;
     double Mz = 0;
 
-    if (m_data.vel.x() >= m_frblend_begin) {
-        Mz = AlignmentTorque(Fy);
+    // The pneumatic trail trails the contact point, i.e. it lies on the opposite side of the direction of travel,
+    // so the self aligning torque changes sign when the wheel runs backwards.
+    if (std::abs(m_data.vel.x()) >= m_frblend_begin) {
+        Mz = ChSignum(m_data.vel.x()) * AlignmentTorque(Fy);
     }
 
     // Rolling Resistance, Ramp Like Signum inhibits 'switching' of My

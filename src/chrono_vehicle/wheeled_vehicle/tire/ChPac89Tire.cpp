@@ -199,10 +199,12 @@ void ChPac89Tire::Advance(double step) {
         Fy = mu_scale * (D * std::sin(C * std::atan(B * X1 - E * (B * X1 - std::atan(B * X1))))) + Sv;
     }
 
-    // Blend forces
+    // Blend forces. The blend between the Coulomb/Dahl stand-still model and the tire model guards the low speed
+    // singularity of the slip definitions and is therefore a function of the speed magnitude: driving backwards is
+    // not a stand-still condition.
     constexpr double frblend_begin = 1.0;
     constexpr double frblend_end = 3.0;
-    double frblend = ChFunctionSineStep::Eval(m_data.vel.x(), frblend_begin, 0.0, frblend_end, 1.0);
+    double frblend = ChFunctionSineStep::Eval(std::abs(m_data.vel.x()), frblend_begin, 0.0, frblend_end, 1.0);
     Fx = (1.0 - frblend) * Fx0 + frblend * Fx;
     Fy = (1.0 - frblend) * Fy0 + frblend * Fy;
 
