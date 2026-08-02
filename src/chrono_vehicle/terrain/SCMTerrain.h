@@ -234,15 +234,19 @@ class CH_VEHICLE_API SCMTerrain : public ChTerrain {
 
     /// Get the visualization triangular mesh.
     /// Returns the full-extent mesh. In windowed visualization mode (see SetVisualizationWindow) there is no
-    /// such mesh: the terrain is drawn from a pool of tiles, and what is returned is an empty shape that is
-    /// not attached to the visual model, so operations on it have no effect on what is drawn. Callers that
-    /// must work in either mode should use GetMeshes(); appearance is better set through SetColor,
-    /// SetTexture and SetMeshWireframe, which apply in both.
+    /// such mesh: the terrain is drawn from a pool of tiles and this shape holds no geometry and is not
+    /// attached to the visual model, so anything done to its *geometry* is discarded. Its appearance is not:
+    /// tiles are created from it, so wireframe, colour, texture and materials set through it **before**
+    /// Initialize do reach the tiles, while the same calls after Initialize do not. Prefer SetColor,
+    /// SetTexture and SetMeshWireframe, which behave identically in both modes and at any time, and
+    /// GetMeshes() to reach the geometry actually being drawn.
     std::shared_ptr<ChVisualShapeTriangleMesh> GetMesh() const;
 
     /// Get all visualization triangular meshes.
     /// Without a visualization window this holds the single, full-extent mesh. With one, it holds the pool of
     /// tile meshes. Empty if visualization was disabled at construction.
+    /// Note that tiles share one set of ChVisualMaterial objects, so mutating a material reached through one
+    /// tile changes every tile.
     const std::vector<std::shared_ptr<ChVisualShapeTriangleMesh>>& GetMeshes() const;
 
     /// Restrict visualization to a moving window that follows the active domains.

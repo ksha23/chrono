@@ -17,6 +17,7 @@
 //
 // =============================================================================
 
+#include <algorithm>
 #include <cstdio>
 #include <cmath>
 #include <numeric>
@@ -957,8 +958,10 @@ void SCMLoader::RepaintTile(int slot) {
             if (!wireframe)
                 normals[iv] = m_frame.TransformDirectionLocalToParent(ComputeVisNormal(ij));
 
-            // Texture coordinates run in world units so that a tile's texture lines up with its neighbours'.
-            uv[iv] = ChVector2d(ij.x() * m_delta, ij.y() * m_delta);
+            // Same parameterisation as the full-extent mesh: [0,1] across the patch. Using world units
+            // here instead would leave a copied material's texture scale wrong by the terrain size --
+            // a factor of 1000 on the kilometre patch this feature exists for.
+            uv[iv] = ChVector2d((ij.x() + m_nx) * 0.5 / m_nx, (ij.y() + m_ny) * 0.5 / m_ny);
 
             colors[iv] = plotting && p != m_grid_map.end() ? ComputeVisColor(p->second) : ChColor(1, 1, 1);
         }
@@ -971,72 +974,86 @@ void SCMLoader::RepaintTile(int slot) {
 void SCMLoader::UpdateVisualizationWindow() {
     const int T = m_tile_cells;
 
-    // Half-window in grid cells. Active domains are typically much smaller than the window the user asked
-    // to see (a per-wheel domain is on the order of a metre), so the drawn region is the window, centred
-    // on the domains -- not the domains merely padded, which would draw only the tiles under the wheels.
-    const int half_i = (int)std::ceil((m_win_x / 2) / m_delta);
-    const int half_j = (int)std::ceil((m_win_y / 2) / m_delta);
+    // Half-window in grid cells. An active domain is typically much smaller than the window the user asked
+    // to see -- a per-wheel domain is on the order of a metre -- so each domain is given the full window
+    // around it, rather than the domains merely being padded.
+    int half_i = (int)std::ceil((m_win_x / 2) / m_delta);
+    int half_j = (int)std::ceil((m_win_y / 2) / m_delta);
 
-    // The union of the active domains sets the window's *centre* only. It must not also set its size:
-    // growing the box to contain the union makes the tile count quadratic in domain separation, so two
-    // vehicles a few hundred metres apart on one terrain enumerate the whole gap every step. Terrain
-    // outside the window is not drawn -- which is the documented contract -- so the box stays bounded.
-    bool any = false;
-    int umin_i = 0, umax_i = 0, umin_j = 0, umax_j = 0;
+    auto clamp_i = [&](int i) { return ChClamp(i, -m_nx, +m_nx); };
+    auto clamp_j = [&](int j) { return ChClamp(j, -m_ny, +m_ny); };
+
+    // Collect the domains once.
+    struct DomainBox {
+        int ci, cj;  // domain centre, in grid indices
+    };
+    std::vector<DomainBox> domains;
     for (const auto& ad : m_active_domains) {
         if (ad.m_range.empty())
             continue;
-        if (!any) {
-            umin_i = ad.m_range_min.x();
-            umax_i = ad.m_range_max.x();
-            umin_j = ad.m_range_min.y();
-            umax_j = ad.m_range_max.y();
-            any = true;
-        } else {
-            umin_i = std::min(umin_i, ad.m_range_min.x());
-            umax_i = std::max(umax_i, ad.m_range_max.x());
-            umin_j = std::min(umin_j, ad.m_range_min.y());
-            umax_j = std::max(umax_j, ad.m_range_max.y());
-        }
+        domains.push_back({(ad.m_range_min.x() + ad.m_range_max.x()) / 2,
+                           (ad.m_range_min.y() + ad.m_range_max.y()) / 2});
     }
 
+    std::vector<ChVector2i> required_ordered;
     std::unordered_set<ChVector2i, CoordHash> required;
-    std::vector<ChVector2i> priority;  // tiles an active domain actually covers
-    if (any) {
-        const int ci = (umin_i + umax_i) / 2;
-        const int cj = (umin_j + umax_j) / 2;
 
-        // Clamped to the declared extent: there is no terrain to draw beyond it, and without this a
-        // window wider than the patch demands more tiles than the pool -- which is sized from the extent
-        // -- can ever hold.
-        auto clamp_i = [&](int i) { return ChClamp(i, -m_nx, +m_nx); };
-        auto clamp_j = [&](int j) { return ChClamp(j, -m_ny, +m_ny); };
+    if (!domains.empty()) {
+        // One window per domain, unioned -- not one window on their centroid. A centroid window stops
+        // covering any vehicle as soon as the domains are further apart than the window: with two vehicles
+        // 8 m apart and a 4 m window it spends its whole pool drawing flat ground at the midpoint. Unioning
+        // per-domain windows costs O(domains x window) rather than the O(separation^2) that growing a single
+        // box to contain them all would.
+        //
+        // If that union does not fit the pool, shrink every window equally until it does, so the vehicles
+        // keep their surroundings in proportion instead of some of them losing everything.
+        auto collect = [&](int hi, int hj, std::unordered_set<ChVector2i, CoordHash>& out) {
+            out.clear();
+            for (const auto& d : domains) {
+                const int I0 = TileOfIndex(clamp_i(d.ci - hi), T);
+                const int I1 = TileOfIndex(clamp_i(d.ci + hi), T);
+                const int J0 = TileOfIndex(clamp_j(d.cj - hj), T);
+                const int J1 = TileOfIndex(clamp_j(d.cj + hj), T);
+                for (int I = I0; I <= I1; I++)
+                    for (int J = J0; J <= J1; J++)
+                        out.insert(ChVector2i(I, J));
+            }
+        };
 
-        const int I0 = TileOfIndex(clamp_i(ci - half_i), T);
-        const int I1 = TileOfIndex(clamp_i(ci + half_i), T);
-        const int J0 = TileOfIndex(clamp_j(cj - half_j), T);
-        const int J1 = TileOfIndex(clamp_j(cj + half_j), T);
-        for (int I = I0; I <= I1; I++)
-            for (int J = J0; J <= J1; J++)
-                required.insert(ChVector2i(I, J));
-
-        // Tiles under a domain are where deformation is actually happening, so they must win if the pool
-        // cannot satisfy everything. Without this the survivors are whichever the hash order reached
-        // first, which in an exhausted pool routinely means drawing bare terrain and not the rut.
-        for (const auto& ad : m_active_domains) {
-            if (ad.m_range.empty())
-                continue;
-            const int i0 = TileOfIndex(clamp_i(ad.m_range_min.x()), T);
-            const int i1 = TileOfIndex(clamp_i(ad.m_range_max.x()), T);
-            const int j0 = TileOfIndex(clamp_j(ad.m_range_min.y()), T);
-            const int j1 = TileOfIndex(clamp_j(ad.m_range_max.y()), T);
-            for (int I = i0; I <= i1; I++)
-                for (int J = j0; J <= j1; J++) {
-                    const ChVector2i c(I, J);
-                    if (required.insert(c).second || m_tile_index.find(c) == m_tile_index.end())
-                        priority.push_back(c);
-                }
+        collect(half_i, half_j, required);
+        while (required.size() > m_tiles.size() && (half_i > 0 || half_j > 0)) {
+            half_i = (half_i > 0) ? (half_i * 3) / 4 : 0;
+            half_j = (half_j > 0) ? (half_j * 3) / 4 : 0;
+            const size_t before = required.size();
+            collect(half_i, half_j, required);
+            if (required.size() >= before)  // no longer shrinking; the domains alone exceed the pool
+                break;
         }
+
+        // Acquire in a deterministic, vehicle-centric order: nearest to a domain first. Iterating the hash
+        // set instead left scattered single-tile holes at hash-determined positions whenever the pool could
+        // not satisfy everything, and starved whichever domains happened to be visited last.
+        required_ordered.assign(required.begin(), required.end());
+        auto dist2 = [&](const ChVector2i& c) {
+            const double x = (c.x() * T + T / 2.0);
+            const double y = (c.y() * T + T / 2.0);
+            double best = std::numeric_limits<double>::max();
+            for (const auto& d : domains) {
+                const double dx = x - d.ci;
+                const double dy = y - d.cj;
+                best = std::min(best, dx * dx + dy * dy);
+            }
+            return best;
+        };
+        std::sort(required_ordered.begin(), required_ordered.end(),
+                  [&](const ChVector2i& a, const ChVector2i& b) {
+                      const double da = dist2(a), db = dist2(b);
+                      if (da != db)
+                          return da < db;
+                      if (a.x() != b.x())
+                          return a.x() < b.x();
+                      return a.y() < b.y();
+                  });
     }
 
     // Release tiles that have scrolled out. Collected first: ReleaseTile mutates m_tile_index.
@@ -1048,12 +1065,8 @@ void SCMLoader::UpdateVisualizationWindow() {
     for (int slot : to_release)
         ReleaseTile(slot);
 
-    // Bring in tiles that have scrolled into the window, domain-covered ones first.
-    for (const auto& coord : priority) {
-        if (m_tile_index.find(coord) == m_tile_index.end())
-            AcquireTile(coord);
-    }
-    for (const auto& coord : required) {
+    // Bring in tiles that have scrolled into the window, nearest to a domain first.
+    for (const auto& coord : required_ordered) {
         if (m_tile_index.find(coord) == m_tile_index.end())
             AcquireTile(coord);
     }
