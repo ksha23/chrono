@@ -120,8 +120,8 @@ void ChVehicleCosimBaseNode::Initialize() {
             type = 3;
             break;
     }
-    int* type_all = new int[size];
-    MPI_Allgather(&type, 1, MPI_INT, type_all, 1, MPI_INT, MPI_COMM_WORLD);
+    std::vector<int> type_all(size);
+    MPI_Allgather(&type, 1, MPI_INT, type_all.data(), 1, MPI_INT, MPI_COMM_WORLD);
 
     // Calculate number of different node types
     for (int i = 0; i < size; i++) {
@@ -397,8 +397,8 @@ void ChVehicleCosimBaseNode::SendGeometry(const utils::ChBodyGeometry& geom, int
         if (m_verbose)
             cout << "[" << GetNodeTypeString() << "] Send: vertices = " << surf_props[0] << "  triangles = " << surf_props[2] << endl;
 
-        double* vert_data = new double[3 * nv + 3 * nn];
-        unsigned int* tri_data = new unsigned int[3 * nt + 3 * nt];
+        std::vector<double> vert_data(3 * nv + 3 * nn);
+        std::vector<unsigned int> tri_data(3 * nt + 3 * nt);
         for (unsigned int iv = 0; iv < nv; iv++) {
             vert_data[3 * iv + 0] = vertices[iv].x();
             vert_data[3 * iv + 1] = vertices[iv].y();
@@ -417,8 +417,8 @@ void ChVehicleCosimBaseNode::SendGeometry(const utils::ChBodyGeometry& geom, int
             tri_data[6 * it + 4] = idx_normals[it].y();
             tri_data[6 * it + 5] = idx_normals[it].z();
         }
-        MPI_Send(vert_data, 3 * nv + 3 * nn, MPI_DOUBLE, TERRAIN_NODE_RANK, 0, MPI_COMM_WORLD);
-        MPI_Send(tri_data, 3 * nt + 3 * nt, MPI_INT, TERRAIN_NODE_RANK, 0, MPI_COMM_WORLD);
+        MPI_Send(vert_data.data(), 3 * nv + 3 * nn, MPI_DOUBLE, dest, 0, MPI_COMM_WORLD);
+        MPI_Send(tri_data.data(), 3 * nt + 3 * nt, MPI_INT, dest, 0, MPI_COMM_WORLD);
     }
 }
 

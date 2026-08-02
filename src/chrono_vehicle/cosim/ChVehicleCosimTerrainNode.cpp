@@ -183,7 +183,7 @@ void ChVehicleCosimTerrainNode::InitializeTireData() {
         }
 
         // Set size of collision model for this tire
-        m_aabb[i] = m_geometry[0]->CalculateAABB();
+        m_aabb[i] = m_geometry[i]->CalculateAABB();
 
         // Resize mesh state vectors (if used)
         if (m_interface_type == InterfaceType::MESH) {
