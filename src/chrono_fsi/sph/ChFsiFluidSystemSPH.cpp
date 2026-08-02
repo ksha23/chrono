@@ -1436,6 +1436,11 @@ void ChFsiFluidSystemSPH::ApplyComputationalDomain(const ChAABB& computational_A
     m_paramsH->boxDims = new_cMax - new_cMin;
 
     CopyParametersToDevice(m_paramsH, m_data_mgr->countersH);
+
+    // Moving the domain changes which markers are zombies and invalidates the spatial ordering and
+    // the cached per-chunk boxes of the activity update (both are expressed in domain coordinates).
+    // Request the full rebuild here rather than relying on the caller to ask for it.
+    m_force_proximity_search = true;
 }
 
 void ChFsiFluidSystemSPH::Initialize(const std::vector<FsiBodyState>& body_states) {
@@ -1824,10 +1829,15 @@ void ChFsiFluidSystemSPH::PrintTimeSteps(const std::string& path) const {
 
 void ChFsiFluidSystemSPH::OnDoStepDynamics(double time, double step) {
     SynchronizeCopyStream();
+
+    // Will the sorted arrays be rebuilt on this step? The activity update needs to know: the set of
+    // markers the solver actually touches only follows the activity flags at a proximity search.
+    bool proximity_search = m_frame % m_paramsH->num_proximity_search_steps == 0 || m_force_proximity_search;
+
     // Update particle activity. A forced proximity search means markers were moved or reordered from
     // outside the solver (the particle relocator), so the activity update cannot trust anything it
     // cached about where markers are.
-    m_fluid_dynamics->UpdateActivity(m_data_mgr->sphMarkers_D, time, m_frame == 0 || m_force_proximity_search);
+    m_fluid_dynamics->UpdateActivity(m_data_mgr->sphMarkers_D, time, m_frame == 0 || m_force_proximity_search, proximity_search);
 
     // Zero the unsorted derivative output for the markers of the outgoing active set. This has to
     // happen here, before the proximity search rebuilds that set: a marker leaving the active set
@@ -1836,7 +1846,6 @@ void ChFsiFluidSystemSPH::OnDoStepDynamics(double time, double step) {
         m_data_mgr->ResetDerivVelRhoOriginal();
 
     // Perform proximity search
-    bool proximity_search = m_frame % m_paramsH->num_proximity_search_steps == 0 || m_force_proximity_search;
     if (proximity_search) {
         // Resize arrays
         bool resize_arrays = m_fluid_dynamics->CheckActivityArrayResize();

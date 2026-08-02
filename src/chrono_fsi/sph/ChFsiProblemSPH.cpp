@@ -593,48 +593,144 @@ void ChFsiProblemSPH::CreateParticleRelocator() {
 
     // Relocated markers are reinitialized as virgin material. Under MCC that has to include the
     // hardening state: leaving it behind gives a marker with zero stress and an inherited deformation
-    // history, which is not a state the model can be in.
-    //
-    // The virgin state is taken from the same particle-properties callback the markers were created
-    // with, evaluated once at the origin. Relocation already applies uniform defaults for density,
-    // pressure, viscosity and stress rather than re-evaluating the callback per destination, so a
-    // single representative value is consistent with the rest of the reset.
+    // history, which is not a state the model can be in. The state itself is filled in per relocation
+    // by UpdateRelocatorVirginState, once the destination is known.
     const auto& params = m_sysSPH->GetParams();
     props.reset_pcEvSv = params.elastic_SPH && params.rheology_model_crm == RheologyCRM::MCC;
-    props.pcEvSv0 = mR3(0);
-    if (props.reset_pcEvSv) {
-        auto cb = m_props_cb ? m_props_cb
-                             : chrono_types::make_shared<ChFsiFluidSystemSPH::ParticlePropertiesCallback>();
-        cb->set(*m_sysSPH, ChVector3d(0, 0, 0));
-
-        // Mirrors FsiDataManager::AddSphParticle.
-        const Real pc = (Real)cb->consolidation_pressure;
-        const Real confining_stress = (Real)cb->p0;
-        const Real p1 = 1000;
-        const Real Sv = params.mcc_v_lambda - params.mcc_lambda * std::log(pc / p1) +
-                        params.mcc_kappa * std::log(pc / confining_stress);
-        props.pcEvSv0 = mR3(pc, 0.0, Sv);
-    }
 
     m_relocator = chrono_types::make_unique<SphParticleRelocator>(*m_sysSPH->m_data_mgr, props);
+}
+
+// Tabulate the virgin MCC hardening state over the destination layers of a relocation.
+//
+// A single sample will not do, and where it is taken matters a great deal. The virgin state is
+// derived from the confining pressure, which under the standard initialization idiom for CRM -
+// DepthPressurePropertiesCallback and its subclasses, as used by demo_VEH_CRMTerrain_TrackedVehicle
+// and demo_ROBOT_Lander_CRM - grows linearly with depth. ConstructMovingPatch puts the soil in
+// z in [0, depth], so the origin, where this used to be sampled once, is the patch FLOOR: the single
+// most over-consolidated point in the patch. For a 0.3 m deep patch at 0.02 m spacing that is a
+// preconsolidation pressure of 5053 Pa applied uniformly, against a true value of 84 Pa in the
+// topmost soil layer - 60x too stiff in precisely the layer a wheel or a plow interacts with.
+//
+// Both relocation primitives land markers on a known lattice in z, so one host evaluation per
+// destination layer is exact and costs at most a few tens of calls per patch shift.
+void ChFsiProblemSPH::UpdateRelocatorVirginState(double x, double y, double z_lo, double z_hi) {
+    ChAssertAlways(m_relocator);
+
+    const auto& params = m_sysSPH->GetParams();
+    if (!params.elastic_SPH || params.rheology_model_crm != RheologyCRM::MCC)
+        return;
+
+    auto cb = m_props_cb ? m_props_cb : chrono_types::make_shared<ChFsiFluidSystemSPH::ParticlePropertiesCallback>();
+
+    // set() reports its results by writing them into the callback object. That object belongs to the
+    // caller and is used elsewhere (Initialize evaluates it once per particle and reads it back), so
+    // put it back exactly as it was found rather than leaving our last sample in it.
+    const double saved_p0 = cb->p0;
+    const double saved_rho0 = cb->rho0;
+    const double saved_mu0 = cb->mu0;
+    const ChVector3d saved_v0 = cb->v0;
+    const ChVector3d saved_tau_diag = cb->tau_diag;
+    const ChVector3d saved_tau_offdiag = cb->tau_offdiag;
+    const double saved_pc = cb->consolidation_pressure;
+
+    int num_layers = 1 + (int)std::max(0.0, std::round((z_hi - z_lo) / m_spacing));
+    std::vector<Real3> states(num_layers);
+    std::vector<bool> valid(num_layers, false);
+    int num_valid = 0;
+    int first_bad = -1;
+
+    for (int j = 0; j < num_layers; j++) {
+        double z = z_lo + j * m_spacing;
+        cb->set(*m_sysSPH, ChVector3d(x, y, z));
+
+        const double pc = cb->consolidation_pressure;
+        const double confining_stress = cb->p0;
+
+        // Sv below is +-infinity for pc == 0 or confining_stress == 0, and without this check that
+        // value would be written into every marker of the layer with no diagnostic whatsoever.
+        // DepthPressurePropertiesCallback documents the requirement and floors p0 for exactly this
+        // reason; the particle creation path enforces it too (ChFsiFluidSystemSPH::AddSPHParticle).
+        if (!(pc > 0 && confining_stress > 0 && pc >= confining_stress)) {
+            if (first_bad < 0)
+                first_bad = j;
+            continue;
+        }
+
+        // Mirrors FsiDataManager::AddSphParticle.
+        const double p1 = 1000;
+        const double Sv = params.mcc_v_lambda - params.mcc_lambda * std::log(pc / p1) + params.mcc_kappa * std::log(pc / confining_stress);
+        states[j] = mR3((Real)pc, Real(0), (Real)Sv);
+        valid[j] = true;
+        num_valid++;
+    }
+
+    // The sampled range is not always confined to the soil: SPHShift tabulates over the whole
+    // computational domain (the marker z extent is not tracked on the host), so it reaches heights at
+    // which no particle was ever created and at which a callback is under no obligation to return an
+    // admissible state. Rather than fail a run over a layer that may hold no markers, substitute the
+    // nearest layer that does have an admissible state - but say so, because the other reading is
+    // that the callback is wrong for the soil column itself, which would corrupt real markers.
+    if (num_valid < num_layers) {
+        ChAssertAlways(num_valid > 0);
+        for (int j = 0; j < num_layers; j++) {
+            if (valid[j])
+                continue;
+            int best = -1;
+            for (int k = 0; k < num_layers; k++)
+                if (valid[k] && (best < 0 || std::abs(k - j) < std::abs(best - j)))
+                    best = k;
+            states[j] = states[best];
+        }
+        std::cerr << "Warning: particle properties callback returned an inadmissible MCC state "
+                  << "(need consolidation_pressure >= p0 > 0) for " << (num_layers - num_valid) << " of " << num_layers
+                  << " relocation destination layers, first at z = " << (z_lo + first_bad * m_spacing)
+                  << "; using the nearest admissible layer instead." << std::endl;
+    }
+
+    cb->p0 = saved_p0;
+    cb->rho0 = saved_rho0;
+    cb->mu0 = saved_mu0;
+    cb->v0 = saved_v0;
+    cb->tau_diag = saved_tau_diag;
+    cb->tau_offdiag = saved_tau_offdiag;
+    cb->consolidation_pressure = saved_pc;
+
+    m_relocator->SetVirginMccState((Real)z_lo, (Real)m_spacing, states);
 }
 
 void ChFsiProblemSPH::BCEShift(const ChVector3d& shift_dist) {
     ChAssertAlways(m_relocator);
 
     m_relocator->Shift(MarkerType::BCE_WALL, ToReal3(shift_dist));
+    ForceProximitySearch();
 }
 
 void ChFsiProblemSPH::SPHShift(const ChVector3d& shift_dist) {
     ChAssertAlways(m_relocator);
 
+    // Destination heights of a uniform shift are the current ones translated by shift_dist.z. The
+    // marker z extent is not tracked on the host, so tabulate over the computational domain, which
+    // contains it by construction.
+    ChAABB domain = m_sysSPH->GetComputationalDomain();
+    ChVector3d c = (domain.min + domain.max) / 2 + shift_dist;
+    UpdateRelocatorVirginState(c.x(), c.y(), domain.min.z() + shift_dist.z(), domain.max.z() + shift_dist.z());
+
     m_relocator->Shift(MarkerType::SPH_PARTICLE, ToReal3(shift_dist));
+    ForceProximitySearch();
 }
 
 void ChFsiProblemSPH::SPHMoveAABB2AABB(const ChAABB& aabb_src, const ChIntAABB& aabb_dest) {
     ChAssertAlways(m_relocator);
 
+    // The destination is a lattice block in integer grid coordinates; world position is spacing*index
+    // (see togrid_op), so its layer heights are known exactly.
+    UpdateRelocatorVirginState(m_spacing * (aabb_dest.min.x() + aabb_dest.max.x()) / 2.0,  //
+                               m_spacing * (aabb_dest.min.y() + aabb_dest.max.y()) / 2.0,  //
+                               m_spacing * aabb_dest.min.z(), m_spacing * aabb_dest.max.z());
+
     m_relocator->MoveAABB2AABB(MarkerType::SPH_PARTICLE, ToRealAABB(aabb_src), ToIntAABB(aabb_dest), Real(m_spacing));
+    ForceProximitySearch();
 }
 
 void ChFsiProblemSPH::ForceProximitySearch() {

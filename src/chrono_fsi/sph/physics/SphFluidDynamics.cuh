@@ -97,7 +97,10 @@ class SphFluidDynamics {
     /// SPH particles which are in an active domain (e.g., close to a solid) are set as active particles.
     /// Set `force_full` to visit every marker, bypassing the dormant-chunk shortcut. Required whenever
     /// markers have been moved or reordered behind the solver's back (e.g. by the particle relocator).
-    void UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkersD, double time, bool force_full);
+    /// `proximity_search` must say whether the caller will run a proximity search later in this same
+    /// step; a chunk may only go dormant when that search is about to rebuild the active list from the
+    /// flags written here (see UpdateActivityChunkedD).
+    void UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkersD, double time, bool force_full, bool proximity_search);
 
     /// Check if arrays must be resized due to change in particle activity.
     bool CheckActivityArrayResize();

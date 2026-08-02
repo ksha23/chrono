@@ -266,13 +266,20 @@ class CH_FSI_API ChFsiProblemSPH {
     void ProcessFeaMesh2D(ChFsiFluidSystemSPH::FsiSphMesh2D& m);
 #endif
 
-    // Only derived classes can use the following particle and marker relocation functions
+    // Only derived classes can use the following particle and marker relocation functions.
+    // All of them relocate markers behind the solver's back, so each requests a proximity search
+    // itself; a derived class does not have to remember to do so.
 
     void CreateParticleRelocator();
     void BCEShift(const ChVector3d& shift_dist);
     void SPHShift(const ChVector3d& shift_dist);
     void SPHMoveAABB2AABB(const ChAABB& aabb_src, const ChIntAABB& aabb_dest);
     void ForceProximitySearch();
+
+    /// Tabulate the virgin MCC hardening state given to relocated SPH particles over the destination
+    /// height range [z_lo, z_hi], sampled at horizontal position (x,y) and on the marker lattice.
+    /// A no-op unless the CRM rheology is MCC.
+    void UpdateRelocatorVirginState(double x, double y, double z_lo, double z_hi);
 
     std::shared_ptr<ChFsiFluidSystemSPH> m_sysSPH;     ///< underlying Chrono SPH system
     std::shared_ptr<ChFsiSystemSPH> m_sysFSI;          ///< underlying Chrono FSI system

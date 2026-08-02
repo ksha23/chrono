@@ -45,12 +45,56 @@ namespace chrono {
 namespace fsi {
 namespace sph {
 
-SphParticleRelocator::SphParticleRelocator(FsiDataManager& data_mgr, const DefaultProperties& props) : m_data_mgr(data_mgr), m_props(props) {}
+SphParticleRelocator::SphParticleRelocator(FsiDataManager& data_mgr, const DefaultProperties& props)
+    : m_data_mgr(data_mgr), m_props(props), m_mcc_z0(0), m_mcc_dz(1) {}
+
+void SphParticleRelocator::SetVirginMccState(Real z0, Real dz, const std::vector<Real3>& states) {
+    ChAssertAlways(dz > 0);
+    m_mcc_z0 = z0;
+    m_mcc_dz = dz;
+    m_mcc_states = states;
+}
+
+// Device-side view of the tabulated virgin MCC hardening state (SetVirginMccState). An empty table
+// (n == 0) means "leave pcEvSv alone", which is the case for every rheology other than MCC and for
+// BCE markers (which never accumulate a hardening state - EulerStep_D skips them - and keep the
+// sentinel value assigned at creation).
+struct mcc_table {
+    const Real3* v;
+    int n;
+    Real z0;
+    Real inv_dz;
+
+    __device__ Real3 at(Real z) const {
+        int j = (int)floor((z - z0) * inv_dz + Real(0.5));
+        j = min(max(j, 0), n - 1);
+        return v[j];
+    }
+};
+
+// Upload the virgin-state table and build the device view. `storage` must outlive the view.
+static mcc_table MakeMccTable(bool enable, const std::vector<Real3>& states, Real z0, Real dz, thrust::device_vector<Real3>& storage) {
+    mcc_table t;
+    t.v = nullptr;
+    t.n = 0;
+    t.z0 = z0;
+    t.inv_dz = Real(1) / dz;
+    if (!enable)
+        return t;
+
+    // Relocating SPH particles under MCC without a virgin state would write an uninitialized (or
+    // stale) hardening state into every one of them; refuse rather than do that silently.
+    ChAssertAlways(!states.empty());
+    storage.assign(states.begin(), states.end());
+    t.v = mR3CAST(storage);
+    t.n = (int)storage.size();
+    return t;
+}
 
 // Relocation function to shift marker position by a given vector.
 // Implements a Thrust unary function to be used with thrust::for_each.
 struct shift_op {
-    shift_op(const Real3& shift, const SphParticleRelocator::DefaultProperties& props) : s(shift), p(props) {}
+    shift_op(const Real3& shift, const SphParticleRelocator::DefaultProperties& props, const mcc_table& mcc) : s(shift), p(props), m(mcc) {}
 
     template <typename T>
     __device__ void operator()(const T& a) const {
@@ -66,10 +110,15 @@ struct shift_op {
         thrust::get<2>(a) = mR4(p.rho0, 0, p.mu0, thrust::get<2>(a).w);  // rho, pres, mu, type
         thrust::get<3>(a) = zero;                                        // tau diagonal
         thrust::get<4>(a) = zero;                                        // tau off-diagonal
+
+        // Element 5 is the MCC hardening state; see togrid_op for why it has to be reset with the rest.
+        if (m.n > 0)
+            thrust::get<5>(a) = m.at(pos.z);
     }
 
     Real3 s;
     SphParticleRelocator::DefaultProperties p;
+    mcc_table m;
 };
 
 void SphParticleRelocator::Shift(MarkerType type, const Real3& shift) {
@@ -87,8 +136,11 @@ void SphParticleRelocator::Shift(MarkerType type, const Real3& shift) {
             break;
     }
 
+    thrust::device_vector<Real3> mcc_storage;
+    auto mcc = MakeMccTable(m_props.reset_pcEvSv && type == MarkerType::SPH_PARTICLE, m_mcc_states, m_mcc_z0, m_mcc_dz, mcc_storage);
+
     // Transform all markers in the specified range
-    thrust::for_each(m_data_mgr.sphMarkers_D->iterator(start_idx), m_data_mgr.sphMarkers_D->iterator(end_idx), shift_op(shift, m_props));
+    thrust::for_each(m_data_mgr.sphMarkers_D->iterator(start_idx), m_data_mgr.sphMarkers_D->iterator(end_idx), shift_op(shift, m_props, mcc));
 }
 
 // Selector function to find particles in a given AABB.
@@ -116,7 +168,8 @@ struct inaabb_op {
 // Implements a Thrust unary function to be used with thrust::for_each.
 // Operates on a tuple {index, data_tuple}.
 struct togrid_op {
-    togrid_op(const IntAABB& aabb_dest, Real spacing, const SphParticleRelocator::DefaultProperties& props) : aabb(aabb_dest), delta(spacing), p(props) {}
+    togrid_op(const IntAABB& aabb_dest, Real spacing, const SphParticleRelocator::DefaultProperties& props, const mcc_table& mcc)
+        : aabb(aabb_dest), delta(spacing), p(props), m(mcc) {}
 
     template <typename T>
     __device__ T operator()(const T& t) const {
@@ -153,8 +206,10 @@ struct togrid_op {
         // marker is virgin material, and leaving the preconsolidation pressure of the soil it used to
         // be gives a particle with zero stress but a deformation history, which is not a state the
         // model can be in. Only reset under MCC -- other rheologies do not allocate this array.
-        if (p.reset_pcEvSv)
-            thrust::get<5>(a) = p.pcEvSv0;
+        // The virgin state depends on confinement, hence on the destination layer, so it is looked up
+        // by destination height rather than being a single value for the whole patch.
+        if (m.n > 0)
+            thrust::get<5>(a) = m.at(pos.z);
 
         return t;
     }
@@ -162,6 +217,7 @@ struct togrid_op {
     IntAABB aabb;
     Real delta;
     SphParticleRelocator::DefaultProperties p;
+    mcc_table m;
 };
 
 void SphParticleRelocator::MoveAABB2AABB(MarkerType type, const RealAABB& aabb_src, const IntAABB& aabb_dest, Real spacing) {
@@ -194,8 +250,11 @@ void SphParticleRelocator::MoveAABB2AABB(MarkerType type, const RealAABB& aabb_s
     auto data_first = m_data_mgr.sphMarkers_D->iterator(start_idx);
     auto data_last = m_data_mgr.sphMarkers_D->iterator(start_idx + n_move);
 
+    thrust::device_vector<Real3> mcc_storage;
+    auto mcc = MakeMccTable(m_props.reset_pcEvSv && type == MarkerType::SPH_PARTICLE, m_mcc_states, m_mcc_z0, m_mcc_dz, mcc_storage);
+
     thrust::for_each(thrust::make_zip_iterator(thrust::make_tuple(idx_first, data_first)), thrust::make_zip_iterator(thrust::make_tuple(idx_last, data_last)),
-                     togrid_op(aabb_dest, spacing, m_props));
+                     togrid_op(aabb_dest, spacing, m_props, mcc));
 }
 
 }  // namespace sph

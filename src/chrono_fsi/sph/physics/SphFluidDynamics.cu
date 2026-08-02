@@ -296,15 +296,28 @@ __global__ void UpdateActivityD(const Real4* posRadD,
 //
 // The flat kernel above reads the position of every marker in the world on every step, so its cost
 // grows with terrain extent even though the physics does not. The markers that dominate that count
-// are, by construction, the ones nowhere near a solid - and a marker that is not in the extended
-// active set is not in the sorted arrays at all, so it is never integrated and never moves. That
-// makes it possible to remember, per fixed-size block of marker indices ("chunk"):
-//   - whether every marker in the chunk was outside the extended active domain last time it was
-//     looked at ("dormant"), and
+// are, by construction, the ones nowhere near a solid - and a marker that is not in the *sorted*
+// arrays is never integrated and never moves. That makes it possible to remember, per fixed-size
+// block of marker indices ("chunk"):
+//   - whether every marker in the chunk is currently absent from the sorted arrays ("dormant"), and
 //   - the bounding box of the chunk's marker positions, which stays valid for exactly as long as the
 //     chunk is dormant.
 // A dormant chunk whose box does not touch the (extended) active region cannot contain a marker
 // whose activity would change, so it is skipped without reading a single position.
+//
+// The membership test is deliberately *not* "extendedActivityIdentifierOriginalD == 0". That flag is
+// recomputed every step, but the sorted arrays are rebuilt only every num_proximity_search_steps
+// steps, and numExtendedParticles / gridMarkerIndexD / activityIdentifierSortedD are frozen in
+// between. A marker whose extended flag drops to 0 mid-period therefore remains in the sorted arrays
+// - still integrated if its *sorted* activity flag was set - for up to k-1 more steps, and
+// CopySortedToOriginal keeps writing its evolving sorted state back into the unsorted arrays. The
+// flat kernel re-zeroes such a marker's velocity on every one of those steps and, decisively, on the
+// step of the proximity search that finally evicts it; a chunk that had already gone dormant is
+// skipped on that step and the last value written by CopySortedToOriginal is left in place forever.
+// So a chunk may only *become* dormant on a step whose proximity search will actually rebuild the
+// active list from the flags just computed (allowDormant below). Once dormant it may stay dormant,
+// since its markers are then absent from the sorted arrays and nothing can put them back without
+// first waking the chunk.
 //
 // Anything that moves or reorders markers outside the solver invalidates the cached boxes; the
 // caller signals that with force_full.
@@ -363,18 +376,25 @@ __global__ void UpdateActivityChunkedD(const Real4* posRadD,
                                        Real3* chunkAabbMax,
                                        int32_t* chunkDormant,
                                        const uint* __restrict__ activityOrder,
-                                       int forceFull) {
+                                       int forceFull,
+                                       int allowDormant) {
     __shared__ Real3 s_lo[ACTIVITY_BLOCK_SIZE];
     __shared__ Real3 s_hi[ACTIVITY_BLOCK_SIZE];
     __shared__ int32_t s_act[ACTIVITY_BLOCK_SIZE];
     __shared__ int s_skip;
+    __shared__ int s_was_dormant;
 
     const uint chunk = blockIdx.x;
     const uint tid = threadIdx.x;
 
     if (tid == 0) {
+        // Under forceFull the previous flag carries no information: the chunk-to-marker mapping has
+        // just been rebuilt, so this chunk holds a different set of markers than the one the flag was
+        // computed for. Treat it as awake, both for skipping and for the dormancy rule below (which
+        // would otherwise let a stale flag authorize dormancy without a proximity search).
+        int was_dormant = (!forceFull && chunkDormant[chunk]) ? 1 : 0;
         int skip = 0;
-        if (!forceFull && chunkDormant[chunk]) {
+        if (was_dormant) {
             Real3 lo = chunkAabbMin[chunk];
             Real3 hi = chunkAabbMax[chunk];
             skip = (hi.x < regionMin.x || lo.x > regionMax.x ||  //
@@ -383,6 +403,7 @@ __global__ void UpdateActivityChunkedD(const Real4* posRadD,
                        ? 1
                        : 0;
         }
+        s_was_dormant = was_dormant;
         s_skip = skip;
     }
     __syncthreads();
@@ -427,10 +448,14 @@ __global__ void UpdateActivityChunkedD(const Real4* posRadD,
     if (tid == 0) {
         chunkAabbMin[chunk] = s_lo[0];
         chunkAabbMax[chunk] = s_hi[0];
-        // A chunk is dormant only if no marker in it is in the *extended* active set. Those markers
-        // are absent from the sorted arrays, so nothing in the step can move them or write their
-        // state - which is what keeps the cached box above valid while the chunk stays dormant.
-        chunkDormant[chunk] = (s_act[0] == 0) ? 1 : 0;
+        // Dormant means "no marker of this chunk is in the sorted arrays", which is what keeps the
+        // cached box valid and what makes skipping the chunk unobservable. Having no marker in the
+        // extended active set is necessary but not sufficient: the sorted arrays only catch up with
+        // the flags at a proximity search. So require either that this step's proximity search will
+        // rebuild the active list from the flags just written (allowDormant), or that the chunk was
+        // already dormant - in which case its markers were evicted by an earlier search and, since
+        // the chunk has been awake or box-rejected on every step since, cannot have been re-added.
+        chunkDormant[chunk] = (s_act[0] == 0 && (allowDormant || s_was_dormant)) ? 1 : 0;
     }
 }
 
@@ -458,7 +483,7 @@ void SphFluidDynamics::BuildActivityOrder(std::shared_ptr<SphMarkerDataD> sphMar
     thrust::sort_by_key(keys.begin(), keys.end(), m_data_mgr.activityOrderD.begin());
 }
 
-void SphFluidDynamics::UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkersD, double time, bool force_full) {
+void SphFluidDynamics::UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkersD, double time, bool force_full, bool proximity_search) {
     const auto& countersH = m_data_mgr.countersH;
     const auto& paramsH = m_data_mgr.paramsH;
 
@@ -545,7 +570,7 @@ void SphFluidDynamics::UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkers
         mR4CAST(sphMarkersD->posRadD), mR3CAST(sphMarkersD->velMasD), mR3CAST(m_data_mgr.fsiBodyState_D->pos), mR3CAST(m_data_mgr.fsiMesh1DState_D->pos),
         mR3CAST(m_data_mgr.fsiMesh2DState_D->pos), INT_32CAST(m_data_mgr.activityIdentifierOriginalD), INT_32CAST(m_data_mgr.extendedActivityIdentifierOriginalD),
         time, regionMin, regionMax, mR3CAST(m_data_mgr.activityChunkAabbMin), mR3CAST(m_data_mgr.activityChunkAabbMax), INT_32CAST(m_data_mgr.activityChunkDormant),
-        U1CAST(m_data_mgr.activityOrderD), force_full ? 1 : 0);
+        U1CAST(m_data_mgr.activityOrderD), force_full ? 1 : 0, proximity_search ? 1 : 0);
     if (m_check_errors) {
         gpuCheckError();
     }
