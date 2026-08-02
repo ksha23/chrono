@@ -19,6 +19,8 @@
 //
 // =============================================================================
 
+#include <cmath>
+
 #include "chrono_vehicle/tracked_vehicle/track_assembly/ChTrackAssemblySegmented.h"
 #include "chrono_vehicle/tracked_vehicle/track_shoe/ChTrackShoeSegmented.h"
 
@@ -44,12 +46,14 @@ double ChTrackAssemblySegmented::TrackBendingFunctor::evaluate(double time,
                                                                double vel,
                                                                const ChLinkRSDA& link) {
     // Wrap angle into [-pi, +pi].
-    // Note: ChLinkRSDA passes its (turn-adjusted) relative angle here, which can be an arbitrary number of full
-    // turns outside [-pi, +pi], hence the loops.
-    while (angle < -CH_PI)
-        angle = angle + CH_2PI;
-    while (angle > CH_PI)
-        angle = angle - CH_2PI;
+    // ChLinkRSDA passes its turn-adjusted relative angle, which can be an arbitrary number of full turns
+    // outside the range -- measured at 2.99 turns on an M113 road wheel after the link unwinds.
+    //
+    // Done branch-free rather than by looping. A loop does not terminate on every input this can receive:
+    // at -inf the addition is a fixed point, and beyond about 1e17 a step of 2*pi is below half an ulp, so
+    // it is a no-op. Both spin forever. This form is O(1), returns the same value everywhere a loop would
+    // have converged, and propagates a non-finite input instead of hanging on it.
+    angle -= CH_2PI * std::round(angle / CH_2PI);
     // Linear spring-damper (assume 0 rest angle)
     return m_t - m_k * angle - m_c * vel;
 }

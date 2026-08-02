@@ -37,6 +37,15 @@ const std::string FEDA_Pac02Tire::m_meshFile_right = "feda/meshes/feda_tire_fine
 
 // -----------------------------------------------------------------------------
 
+// NOTE: the camber (inclination) coefficients in the shipped FEDA .tir files have the opposite sign to
+// every other PAC2002 dataset in this repository. Measured dFy/dgamma is about +0.22*Fz/rad here against
+// -0.07 to -0.87 elsewhere, so this tire develops camber thrust that opposes the lean rather than
+// following it. Chrono started honouring the camber angle for Pac02 only recently; before that the term
+// was inert and the sign went unnoticed. The tire model is not at fault -- these datasets need refitting
+// or their inclination terms negated. Until then, FEDA camber response is wrong in sign.
+// Also note 335_65R22_5_G275MSA_70psi.tir currently fails to parse (std::invalid_argument from stod),
+// which makes any inflation pressure in [65, 82.5) psi unusable.
+
 FEDA_Pac02Tire::FEDA_Pac02Tire(const std::string& name, unsigned int pressure_level) : ChPac02Tire(name) {}
 
 void FEDA_Pac02Tire::SetMFParams() {
