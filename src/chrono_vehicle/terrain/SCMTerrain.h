@@ -233,9 +233,11 @@ class CH_VEHICLE_API SCMTerrain : public ChTerrain {
     NodeInfo GetNodeInfo(const ChVector3d& loc) const;
 
     /// Get the visualization triangular mesh.
-    /// In windowed visualization mode (see SetVisualizationWindow) the terrain is drawn with several meshes
-    /// rather than one; this function then returns the first tile mesh, which is rarely what a caller wants.
-    /// Use GetMeshes() instead.
+    /// Returns the full-extent mesh. In windowed visualization mode (see SetVisualizationWindow) there is no
+    /// such mesh: the terrain is drawn from a pool of tiles, and what is returned is an empty shape that is
+    /// not attached to the visual model, so operations on it have no effect on what is drawn. Callers that
+    /// must work in either mode should use GetMeshes(); appearance is better set through SetColor,
+    /// SetTexture and SetMeshWireframe, which apply in both.
     std::shared_ptr<ChVisualShapeTriangleMesh> GetMesh() const;
 
     /// Get all visualization triangular meshes.

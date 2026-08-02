@@ -149,10 +149,21 @@ void SCMTerrain::WriteMesh(const std::string& filename) const {
         std::cout << "SCMTerrain::WriteMesh  -- visualization mesh not created.";
         return;
     }
-    // In windowed mode this writes only the tiles currently resident, which is all the geometry that exists.
+    // Windowed mode: skip tiles that are not resident. Their vertices are all collapsed to the origin,
+    // so writing them would emit a cloud of degenerate faces there.
     std::vector<ChTriangleMeshConnected> meshes;
-    for (const auto& shape : m_loader->m_trimesh_shapes)
-        meshes.push_back(*shape->GetMesh());
+    if (m_loader->m_vis_windowed) {
+        for (const auto& tile : m_loader->m_tiles)
+            if (tile.resident)
+                meshes.push_back(*tile.shape->GetMesh());
+    } else {
+        for (const auto& shape : m_loader->m_trimesh_shapes)
+            meshes.push_back(*shape->GetMesh());
+    }
+    if (meshes.empty()) {
+        std::cout << "SCMTerrain::WriteMesh  -- no resident terrain geometry to write.";
+        return;
+    }
     meshes[0].WriteWavefront(filename, meshes);
 }
 
@@ -814,6 +825,11 @@ void SCMLoader::CreateTilePool() {
         shape->SetWireframe(m_trimesh_shape->IsWireframe());
         shape->SetDoubleFaced(true);
         shape->SetFixedConnectivity();
+        // Appearance is routinely set before Initialize, when no tile exists yet, so it lands on the
+        // prototype. Carry it across -- sharing the material objects, since every tile draws the same
+        // terrain. Wireframe above is a plain flag and cannot be shared this way.
+        for (const auto& mat : m_trimesh_shape->GetMaterials())
+            shape->AddMaterial(mat);
 
         auto trimesh = shape->GetMesh();
         trimesh->Clear();
