@@ -16,6 +16,8 @@
 //
 // =============================================================================
 
+#include <cmath>
+
 #include "chrono_ros/handlers/mbs/ChROSJointCommandHandler.h"
 
 #include "chrono_ros/ChROSBridge.h"
@@ -213,8 +215,13 @@ bool ChROSJointCommandHandler::ApplyCommand(const CommandEntry& entry, double ti
             break;
     }
 
-    // Fallback: if the message did not populate the expected field but populated exactly one other
-    // field, use that. This lets a simple publisher drive motors of any mode.
+    // Fallback, off by default: if the message did not populate the expected field but populated exactly
+    // one other field, use that, so a simple publisher can drive motors of any mode without knowing them.
+    //
+    // JointState carries parallel arrays, so any message naming both a speed motor and a position motor
+    // populates only one of the two fields -- and the fallback then applies e.g. "velocity 0" to the
+    // position motor as a position. That is the mixed-mode robot demo_ROS_joints builds. Opt in with
+    // SetStrictFieldMatching(false) when every joint in a message shares a mode.
     if (!have_value && !m_strict_field_matching) {
         const int num_populated = entry.has_position + entry.has_velocity + entry.has_effort;
         if (num_populated == 1) {
@@ -231,7 +238,27 @@ bool ChROSJointCommandHandler::ApplyCommand(const CommandEntry& entry, double ti
     if (!have_value)
         return false;
 
-    motor_entry.setpoint->SetSetpoint(value, time);
+    // A command carrying NaN or an infinity would be latched into the motor function and propagate into
+    // the solver, from which nothing recovers.
+    if (!std::isfinite(value)) {
+        std::cerr << "ChROSJointCommandHandler: ignoring non-finite command for joint \"" << entry.name
+                  << "\"" << std::endl;
+        return false;
+    }
+
+    // SetSetpoint derives a backward-difference derivative from the previous setpoint and the time
+    // between them, and a position motor feeds that derivative straight into its velocity-level
+    // constraint. Applying a position command once therefore leaves the motor holding both "stay at the
+    // target" and "keep moving at whatever rate the last two commands implied" -- so two ordinary
+    // commands 10 ms apart wind a joint up to hundreds of rad/s, and a slower command stream parks the
+    // joint a fixed step*rate away from where it was told to go, forever.
+    //
+    // A position setpoint is a position, not a trajectory sample: pin the derivatives to zero. Speed and
+    // force motors read only the value, so they are unaffected either way.
+    if (motor_entry.mode == ActuationMode::POSITION)
+        motor_entry.setpoint->SetSetpointAndDerivatives(value, 0, 0);
+    else
+        motor_entry.setpoint->SetSetpoint(value, time);
     return true;
 }
 

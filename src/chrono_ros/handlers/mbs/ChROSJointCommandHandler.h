@@ -140,7 +140,7 @@ class CH_ROS_API ChROSJointCommandHandler : public ChROSHandler {
     std::vector<std::string> m_motor_order;      ///< registration order, for GetJointNames()
     std::shared_ptr<ChROSSubscription> m_subscription;
 
-    bool m_strict_field_matching = false;  ///< see SetStrictFieldMatching()
+    bool m_strict_field_matching = true;  ///< see SetStrictFieldMatching()
     uint64_t m_num_commands_applied = 0;   ///< number of command messages applied
 
     // Most recent command batch (written in the subscription callback, applied in Tick; both run on
