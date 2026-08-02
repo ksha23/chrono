@@ -43,6 +43,7 @@ bool ChROSViperDCMotorControlHandler::Initialize(ChROSBridge& bridge) {
     m_subscription = bridge.CreateSubscription(
         m_topic_name, "chrono_ros_interfaces/msg/ViperDCMotorControl",
         [this](const ChROSMessageView& msg) {
+            m_have_command = true;
             m_steering.clear();
             const size_t n = msg.GetCount("driver_commands.steering_list");
             for (size_t i = 0; i < n; i++) {
@@ -59,10 +60,20 @@ bool ChROSViperDCMotorControlHandler::Initialize(ChROSBridge& bridge) {
 }
 
 void ChROSViperDCMotorControlHandler::Tick(double time) {
+    // Nothing has been commanded yet: leave the driver at the defaults it was constructed with.
+    // Applying the zero-initialized members below before the first message would silently override
+    // ViperDCMotorControl's real defaults (300 Nm stall torque, pi rad/s no-load speed) on the wheel
+    // whose id happens to be the default 0.
+    if (!m_have_command)
+        return;
+
     for (const auto& s : m_steering) {
-        if (s.wheel_id != VIPER_WHEEL_UNDEFINED)
+        // wheel_id comes off the wire as a uint8, so it can be anything; ViperWheelID only defines
+        // 0..3 and ViperDriver indexes a std::array<double, 4> with it. Ids outside 0..3 that are
+        // not the V_UNDEFINED "all wheels" sentinel are ignored rather than written out of bounds.
+        if (s.wheel_id < 4)
             m_driver->SetSteering(s.angle, static_cast<ViperWheelID>(s.wheel_id));
-        else
+        else if (s.wheel_id == VIPER_WHEEL_UNDEFINED)
             m_driver->SetSteering(s.angle);
     }
     m_driver->SetLifting(m_lifting);

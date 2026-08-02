@@ -385,6 +385,10 @@ int main(int argc, char* argv[]) {
                 break;
             }
         }
+
+        // Note: both branches above are compiled out when neither run-time visualization module is
+        // enabled, so 'vis' can still be null here even though rendering was requested. The
+        // simulation loop below therefore tests 'vis' rather than 'render'.
     }
 
     // Co-simulation loop with ROS publishing.
@@ -393,7 +397,7 @@ int main(int argc, char* argv[]) {
 
     ChRealtimeStepTimer realtime_timer;
     while (t <= t_end) {
-        if (render) {
+        if (vis) {
             if (!vis->Run())
                 break;
             vis->BeginScene();

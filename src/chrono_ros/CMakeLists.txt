@@ -141,6 +141,10 @@ set(CH_ROS_HANDLER_FILES
   handlers/ChROSBodyHandler.cpp
   handlers/ChROSTFHandler.h
   handlers/ChROSTFHandler.cpp
+  handlers/mbs/ChROSJointStateHandler.h
+  handlers/mbs/ChROSJointStateHandler.cpp
+  handlers/mbs/ChROSJointCommandHandler.h
+  handlers/mbs/ChROSJointCommandHandler.cpp
   handlers/robot/ChROSRobotModelHandler.h
   handlers/robot/ChROSRobotModelHandler.cpp
 )

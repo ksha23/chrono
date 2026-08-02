@@ -32,6 +32,8 @@
 #include "chrono/assets/ChVisualShapeModelFile.h"
 #include "chrono/assets/ChVisualShapeTriangleMesh.h"
 
+#include "chrono/functions/ChFunctionSetpoint.h"
+#include "chrono/physics/ChLinkLock.h"
 #include "chrono/physics/ChLinkMate.h"
 #include "chrono/physics/ChLinkMotorLinearPosition.h"
 #include "chrono/physics/ChLinkMotorLinearSpeed.h"
@@ -55,7 +57,8 @@ using std::endl;
 // Threshold for identifying bodies with zero inertia properties.
 const double inertia_threshold = 1e-6;
 
-ChParserURDF::ChParserURDF(const std::string& filename) : m_filename(filename), m_vis_collision(false), m_sys(nullptr) {
+ChParserURDF::ChParserURDF(const std::string& filename)
+    : m_filename(filename), m_vis_collision(false), m_use_mimic(true), m_sys(nullptr) {
     // Read input file into XML string
     std::fstream xml_file(filename, std::fstream::in);
     while (xml_file.good()) {
@@ -117,6 +120,23 @@ void ChParserURDF::SetAllJointsActuationType(ActuationType actuation_type) {
             joint.second->type == urdf::Joint::PRISMATIC)
             m_actuated_joints[joint.first] = actuation_type;
     }
+}
+
+void ChParserURDF::SetMimicJointsEnabled(bool enabled) {
+    if (m_sys) {
+        cerr << "WARNING: SetMimicJointsEnabled must be called before PopulateSystem." << endl;
+        return;
+    }
+
+    m_use_mimic = enabled;
+}
+
+std::vector<std::string> ChParserURDF::GetMimicJointNames() const {
+    std::vector<std::string> names;
+    names.reserve(m_mimic_joints.size());
+    for (const auto& mimic : m_mimic_joints)
+        names.push_back(mimic.first);
+    return names;
 }
 
 void ChParserURDF::SetBodyMeshCollisionType(const std::string& body_name, MeshCollisionType collision_type) {
@@ -266,6 +286,9 @@ void ChParserURDF::PopulateSystem(ChSystem& sys) {
 
     createChildren(root_link, frame);
 
+    // Wire up mimic joints (needs all Chrono links to exist)
+    setupMimicJoints();
+
     // Calculate visualization and collision bounding boxes
     for (const auto& body : m_bodies) {
         if (body->GetVisualModel()) {
@@ -277,6 +300,95 @@ void ChParserURDF::PopulateSystem(ChSystem& sys) {
             ChAABB body_aabb = body->GetCollisionModel()->GetBoundingBox(true);
             m_aabb_coll += body_aabb.Transform(*body);
         }
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Support for URDF <mimic> joints
+// -----------------------------------------------------------------------------
+
+namespace {
+
+/// Read the joint coordinate of a Chrono link created from a 1-DOF URDF joint.
+/// Returns false for link types that do not represent a single-DOF joint.
+bool GetURDFJointPosition(const std::shared_ptr<ChLinkBase>& link, double& position) {
+    if (auto motor_rot = std::dynamic_pointer_cast<ChLinkMotorRotation>(link)) {
+        position = motor_rot->GetMotorAngle();
+        return true;
+    }
+    if (auto motor_lin = std::dynamic_pointer_cast<ChLinkMotorLinear>(link)) {
+        position = motor_lin->GetMotorPos();
+        return true;
+    }
+    if (auto revolute = std::dynamic_pointer_cast<ChLinkLockRevolute>(link)) {
+        // ChLinkLockRevolute leaves rotation about the link Z axis free.
+        position = revolute->GetRelAngleAxis().z();
+        return true;
+    }
+    if (auto prismatic = std::dynamic_pointer_cast<ChLinkLockPrismatic>(link)) {
+        // ChLinkLockPrismatic leaves translation along the link Z axis free.
+        position = prismatic->GetRelCoordsys().pos.z();
+        return true;
+    }
+    return false;
+}
+
+/// Actuation function realizing a URDF <mimic> coupling: q = multiplier * q_source + offset.
+/// ChLinkMotor::Update calls ChFunctionSetpointCallback::Update, which invokes SetpointCallback,
+/// so the mimicking motor tracks the mimicked joint as the simulation advances.
+class ChFunctionMimicJoint : public ChFunctionSetpointCallback {
+  public:
+    ChFunctionMimicJoint(std::shared_ptr<ChLinkBase> source, double multiplier, double offset)
+        : m_source(source), m_multiplier(multiplier), m_offset(offset) {}
+
+    virtual ChFunctionMimicJoint* Clone() const override { return new ChFunctionMimicJoint(*this); }
+
+    virtual double SetpointCallback(double x) override {
+        double q = 0;
+        GetURDFJointPosition(m_source, q);
+        return m_multiplier * q + m_offset;
+    }
+
+  private:
+    std::shared_ptr<ChLinkBase> m_source;
+    double m_multiplier;
+    double m_offset;
+};
+
+}  // namespace
+
+void ChParserURDF::setupMimicJoints() {
+    for (const auto& mimic : m_mimic_joints) {
+        const std::string& joint_name = mimic.first;
+        const MimicData& data = mimic.second;
+
+        if (data.source_joint == joint_name) {
+            cerr << "WARNING: joint \"" << joint_name << "\" mimics itself; the <mimic> element is ignored." << endl;
+            continue;
+        }
+
+        auto motor = std::dynamic_pointer_cast<ChLinkMotor>(m_sys->SearchLink(joint_name));
+        if (!motor) {
+            cerr << "WARNING: mimic joint \"" << joint_name << "\" was not translated into a Chrono motor; "
+                 << "the <mimic> element is ignored." << endl;
+            continue;
+        }
+
+        auto source = m_sys->SearchLink(data.source_joint);
+        if (!source) {
+            cerr << "WARNING: mimic joint \"" << joint_name << "\" refers to unknown joint \"" << data.source_joint
+                 << "\"; the <mimic> element is ignored." << endl;
+            continue;
+        }
+
+        double q = 0;
+        if (!GetURDFJointPosition(source, q)) {
+            cerr << "WARNING: mimic joint \"" << joint_name << "\" refers to joint \"" << data.source_joint
+                 << "\" which is not a single-DOF joint; the <mimic> element is ignored." << endl;
+            continue;
+        }
+
+        motor->SetMotorFunction(chrono_types::make_shared<ChFunctionMimicJoint>(source, data.multiplier, data.offset));
     }
 }
 
@@ -569,6 +681,24 @@ std::shared_ptr<ChLink> ChParserURDF::toChLink(urdf::JointSharedPtr& joint) {
 
     // Create motors or passive joints
     ChFrame<> joint_frame = child->GetFrameRefToAbs();  // default joint frame == child body frame
+
+    // A joint carrying a URDF <mimic> element is kinematically slaved to another joint:
+    //     q = multiplier * q_source + offset
+    // Chrono has no direct joint-coupling constraint, so realize this by turning the mimicking joint
+    // into a POSITION motor and driving it from the mimicked joint's position (wired up later, in
+    // setupMimicJoints(), once every Chrono link exists).
+    if (m_use_mimic && joint->mimic &&
+        (joint_type == urdf::Joint::REVOLUTE ||    //
+         joint_type == urdf::Joint::CONTINUOUS ||  //
+         joint_type == urdf::Joint::PRISMATIC)) {
+        auto it = m_actuated_joints.find(joint->name);
+        if (it != m_actuated_joints.end() && it->second != ActuationType::POSITION) {
+            cerr << "WARNING: joint \"" << joint->name << "\" has a <mimic> element; "
+                 << "overriding its actuation type with POSITION." << endl;
+        }
+        m_actuated_joints[joint->name] = ActuationType::POSITION;
+        m_mimic_joints[joint->name] = {joint->mimic->joint_name, joint->mimic->multiplier, joint->mimic->offset};
+    }
 
     if (m_actuated_joints.find(joint->name) != m_actuated_joints.end()) {
         // Create a motor (with a default zero constant motor function)

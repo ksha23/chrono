@@ -12,9 +12,11 @@ if(CH_ENABLE_MODULE_SENSOR)
   list(APPEND DEMOS demo_ROS_sensor)
 endif()
 
-# demo_ROS_urdf exercises RobotModel (ChParserURDF ctor) + TF AddURDF.
+# demo_ROS_urdf exercises RobotModel (ChParserURDF ctor) + TF AddURDF;
+# demo_ROS_joints exercises the joint state/command handlers on a URDF robot.
 if(CH_ENABLE_MODULE_PARSERS AND CH_USE_URDF)
   list(APPEND DEMOS demo_ROS_urdf)
+  list(APPEND DEMOS demo_ROS_joints)
 endif()
 
 # demo_ROS_viper exercises the Viper rover motor-control handler; needs the

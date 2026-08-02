@@ -49,6 +49,7 @@
         @defgroup ros_handlers ROS Handlers
         @brief ROS Handlers
         @{
+            @defgroup ros_mbs_handlers ROS MBS Handlers
             @defgroup ros_vehicle_handlers ROS Vehicle Handlers
             @defgroup ros_sensor_handlers ROS Sensor Handlers
             @defgroup ros_robot_handlers ROS Robot Handlers

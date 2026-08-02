@@ -10,6 +10,7 @@ Select ROS C++ demos:
 * demo_ROS_custom_handler - writing a custom handler, alongside the built-in clock, body, and TF handlers
 * demo_ROS_sensor - ROS integration with Chrono::Sensor (camera, lidar, IMU, GPS)
 * demo_ROS_urdf - ROS integration with a URDF model (robot description and transforms)
+* demo_ROS_joints - publishing `sensor_msgs/JointState` and driving a URDF robot's motors from the same message type
 * demo_ROS_vehicle - a Chrono::Vehicle driven from ROS
 * demo_ROS_viper - ROS integration with the Viper rover model
 * demo_ROS_two_managers - using multiple `ChROSManager` instances

@@ -71,6 +71,7 @@ class CH_ROS_API ChROSViperDCMotorControlHandler : public ChROSHandler {
         uint8_t wheel_id;  // ViperWheelID value; V_UNDEFINED (=4) means "all wheels"
     };
     std::vector<SteeringCommand> m_steering;
+    bool m_have_command = false;  // false until the first message arrives; see Tick()
     double m_lifting = 0;
     double m_stall_torque = 0;
     uint8_t m_stall_wheel = 0;

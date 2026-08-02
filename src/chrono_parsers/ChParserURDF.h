@@ -97,6 +97,22 @@ class ChApiParsers ChParserURDF {
     /// This function has no effect for joints other than Revolute, Continuous, or Prismatic.
     void SetAllJointsActuationType(ActuationType actuation_type);
 
+    /// Enable or disable support for URDF <mimic> joints (default: enabled).
+    /// A URDF joint with a <mimic> element is constrained to follow another joint according to
+    /// q = multiplier * q_source + offset. Chrono realizes this by translating the mimicking joint
+    /// into a POSITION motor (ChLinkMotorRotationAngle or ChLinkMotorLinearPosition) whose actuation
+    /// function tracks the position of the mimicked joint. This overrides any actuation type
+    /// previously requested for that joint, and the joint must not be driven by the user.
+    /// Must be called before PopulateSystem().
+    void SetMimicJointsEnabled(bool enabled);
+
+    /// Return true if URDF <mimic> joints are honored (default: true).
+    bool GetMimicJointsEnabled() const { return m_use_mimic; }
+
+    /// Get the names of the joints that were created as mimic joints.
+    /// This list is populated only after a call to PopulateSystem().
+    std::vector<std::string> GetMimicJointNames() const;
+
     /// Set the collision type for mesh collision (default: TRIMESH).
     /// This is interpreted only if the specified body has a mesh collision shape.
     void SetBodyMeshCollisionType(const std::string& body_name, MeshCollisionType collision_type);
@@ -183,6 +199,10 @@ class ChApiParsers ChParserURDF {
     /// Recursively create bodies and joints in the Chrono model.
     void createChildren(urdf::LinkConstSharedPtr parent, const ChFrame<>& parent_frame);
 
+    /// Attach the tracking actuation functions to all mimic joints.
+    /// Called at the end of PopulateSystem(), once every Chrono link exists.
+    void setupMimicJoints();
+
     /// Attach visualization assets to a Chrono body.
     void attachVisualization(std::shared_ptr<ChBody> body, urdf::LinkConstSharedPtr link, const ChFrame<>& ref_frame);
 
@@ -201,6 +221,15 @@ class ChApiParsers ChParserURDF {
     ChSystem* m_sys;                        ///< containing Chrono system
     ChFrame<> m_init_pose;                  ///< root body initial pose
     bool m_vis_collision;                   ///< visualize collision shapes
+    bool m_use_mimic;                       ///< honor URDF <mimic> elements
+
+    /// Coupling described by a URDF <mimic> element.
+    struct MimicData {
+        std::string source_joint;  ///< name of the joint being mimicked
+        double multiplier;         ///< q = multiplier * q_source + offset
+        double offset;             ///< q = multiplier * q_source + offset
+    };
+    std::map<std::string, MimicData> m_mimic_joints;  ///< mimic joints (indexed by joint name)
 
     std::shared_ptr<ChBodyAuxRef> m_root_body;                ///< model root body
     std::map<std::string, std::string> m_discarded;           ///< discarded bodies
