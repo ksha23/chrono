@@ -1129,6 +1129,7 @@ set(Chrono_solver_SOURCES
     solver/ChSolverBB.cpp
     solver/ChSolverAPGD.cpp
     solver/ChSolverADMM.cpp
+    solver/ChSolverAuto.cpp
     solver/ChKRMBlock.cpp
     solver/ChNlsolver.cpp
     )
@@ -1138,6 +1139,7 @@ set(Chrono_solver_HEADERS
     solver/ChSolverLS.h
     solver/ChSolverVI.h
     solver/ChDirectSolverLS.h
+    solver/ChSolverAuto.h
     solver/ChDirectSolverLScomplex.h
     solver/ChIterativeSolver.h
     solver/ChIterativeSolverLS.h

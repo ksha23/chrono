@@ -54,6 +54,12 @@ class ChApi ChSolverBB : public ChIterativeSolverVI {
     /// For the Barzilai-Borwein solver, this is the norm of the projected gradient.
     virtual double GetError() const override { return lastgoodres; }
 
+    /// Return the number of backtracking steps taken by the non-monotone Armijo line
+    /// search during the last solve.  Provided as a diagnostic: a value that is always
+    /// zero across a whole simulation indicates the spectral step is never being
+    /// rejected, so the line search is contributing nothing.
+    int GetNumArmijoBacktracks() const { return n_armijo_backtracks; }
+
     /// Method to allow serialization of transient data to archives.
     virtual void ArchiveOut(ChArchiveOut& archive_out) override;
 
@@ -63,6 +69,7 @@ class ChApi ChSolverBB : public ChIterativeSolverVI {
   private:
     int n_armijo;
     int max_armijo_backtrace;
+    int n_armijo_backtracks;
     double lastgoodres;
 };
 

@@ -132,6 +132,15 @@ class ChApi ChDirectSolverLS : public ChSolverLS {
     /// Return the number of calls to the solver's Setup function.
     unsigned int GetNumSolveCalls() const { return m_solve_call; }
 
+    /// Return the number of nonzeros in the computed factors, or 0 if the concrete
+    /// solver cannot report it.
+    /// Together with the problem dimension this measures the fill-in produced by the
+    /// factorization, which is what actually drives the cost of a sparse direct solve:
+    /// a banded system (chain, tree, most mechanisms) factorizes with almost no
+    /// fill-in and stays cheap even at large size, whereas a 3-D connected system
+    /// fills in rapidly and becomes far more expensive than an iterative solve.
+    virtual unsigned int GetNumFactorNonzeros() const { return 0; }
+
     /// Get a handle to the underlying matrix.
     ChSparseMatrix& GetMatrix() { return m_mat; }
 
@@ -243,6 +252,9 @@ class ChApi ChSolverSparseLU : public ChDirectSolverLS {
     ChSolverSparseLU() {}
     ~ChSolverSparseLU() {}
     virtual Type GetType() const override { return Type::SPARSE_LU; }
+
+    /// Return nnz(L) + nnz(U) for the last factorization.
+    virtual unsigned int GetNumFactorNonzeros() const override;
 
   private:
     /// Factorize the current sparse matrix and return true if successful.

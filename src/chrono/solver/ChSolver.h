@@ -53,7 +53,8 @@ class ChApi ChSolver {
         MINRES,    ///< MINimum RESidual method
         BICGSTAB,  ///< Bi-conjugate gradient stabilized
         // Other
-        CUSTOM
+        CUSTOM,
+        AUTO  ///< dispatch per step between a direct and an iterative solver (see ChSolverAuto)
     };
 
     virtual ~ChSolver() {}

@@ -99,6 +99,8 @@ std::string ChSolver::GetTypeAsString(Type type) {
             return "MINRES";
         case Type::BICGSTAB:
             return "BICGSTAB";
+        case Type::AUTO:
+            return "AUTO";
         case Type::CUSTOM:
             return "CUSTOM";
     }

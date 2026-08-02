@@ -20,8 +20,23 @@ CH_UPCASTING(ChIterativeSolverVI, ChIterativeSolver)
 CH_UPCASTING(ChIterativeSolverVI, ChSolverVI)
 CH_UPCASTING(ChSolverVI, ChSolver)  // placed here since ChSolver is missing the .cpp
 
+// Default stopping tolerance for the iterative VI solvers.
+//
+// This was previously 0.0, which made the stopping test `residual < m_tolerance`
+// unsatisfiable for any non-negative residual: PSOR, PJacobi, BB and APGD always
+// ran their full iteration budget and never exited early, even on problems they
+// had already solved to machine precision.
+//
+// The value below is deliberately tight.  The residual measured by each solver has
+// a different meaning (see the class documentation and each solver's GetError), so
+// a single number cannot be tuned per solver; it is instead chosen small enough to
+// be unreachable on problems that are genuinely still converging, and therefore not
+// to truncate any solve that was previously doing useful work.  Its only effect is
+// to stop a solve that has already converged.
+static const double CH_VI_DEFAULT_TOLERANCE = 1e-9;
+
 ChIterativeSolverVI::ChIterativeSolverVI()
-    : ChIterativeSolver(50, 0.0, true, false),
+    : ChIterativeSolver(50, CH_VI_DEFAULT_TOLERANCE, true, false),
       m_omega(1.0),
       m_shlambda(1.0),
       m_iterations(0),

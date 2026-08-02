@@ -12,6 +12,8 @@
 // Authors: Alessandro Tasora, Radu Serban
 // =============================================================================
 
+#include <limits>
+
 #include "chrono/solver/ChSolverBB.h"
 #include "chrono/utils/ChConstants.h"
 
@@ -20,7 +22,26 @@ namespace chrono {
 // Register into the object factory, to enable run-time dynamic creation and persistence
 CH_FACTORY_REGISTER(ChSolverBB)
 
-ChSolverBB::ChSolverBB() : n_armijo(10), max_armijo_backtrace(3), lastgoodres(1e30) {}
+// Default number of backtracking steps allowed in the non-monotone line search.
+//
+// Zero, i.e. the line search is off: every spectral step is accepted as-is.
+//
+// The line search code below was dead from the outset (the acceptance threshold was
+// seeded with +10e29, which no finite objective can exceed), so no released version of
+// Chrono has ever taken a backtracking step and every published BB result was obtained
+// with the plain spectral step. The code is repaired rather than deleted, but leaving
+// it enabled by default would silently change every existing BB result. Measurements on
+// serial chains and 3-D lattices showed the repaired search firing several hundred times
+// per run while leaving trajectory accuracy unchanged or marginally worse, so there is
+// no evidence to justify that change. Enable it explicitly with
+// SetMaxStepsArmijoBacktrace() if your problem benefits.
+static const int CH_BB_DEFAULT_ARMIJO_BACKTRACKS = 0;
+
+ChSolverBB::ChSolverBB()
+    : n_armijo(10),
+      max_armijo_backtrace(CH_BB_DEFAULT_ARMIJO_BACKTRACKS),
+      n_armijo_backtracks(0),
+      lastgoodres(1e30) {}
 
 double ChSolverBB::Solve(ChSystemDescriptor& sysd) {
     if (!sysd.SupportsSchurComplement()) {
@@ -46,6 +67,7 @@ double ChSolverBB::Solve(ChSystemDescriptor& sysd) {
     double neg_BB2_fallback = 0.12;
 
     m_iterations = 0;
+    n_armijo_backtracks = 0;
 
     int nc = sysd.CountActiveConstraints();
     if (verbose)
@@ -107,8 +129,14 @@ double ChSolverBB::Solve(ChSystemDescriptor& sysd) {
     // Iterations
 
     double mf_p = 0;
-    double mf = 1e29;
+
+    // Objective at the current iterate:  f(l) = 0.5*l'*N*l - l'*b.
+    // Using g = N*l - b this is  f = 0.5*l'*(g + b) - l'*b = 0.5*l'*(g - b).
+    double mf = 0.5 * ml.dot(mg - mb);
+
+    // Objective value at each *accepted* iterate, used by the non-monotone line search.
     std::vector<double> f_hist;
+    f_hist.push_back(mf);
 
     std::fill(violation_history.begin(), violation_history.end(), 0.0);
     std::fill(dlambda_history.begin(), dlambda_history.end(), 0.0);
@@ -155,31 +183,44 @@ double ChSolverBB::Solve(ChSystemDescriptor& sysd) {
             // f_p = 0.5*l_p'*N*l_p - l_p'*b  = l_p'*(0.5*Nl_p - b);
             mf_p = ml_p.dot(0.5 * mb_tmp - mb);
 
-            f_hist.push_back(mf_p);
+            // Non-monotone (Grippo-Lampariello-Lucidi) Armijo condition: accept the
+            // trial step if
+            //     f(l_p) <= max_{0 <= h <= n_armijo} f(l_{k-h}) + gamma*lambda*dir'*g
+            // where the maximum is taken over the objective at the most recent accepted
+            // iterates, including the current one.
+            //
+            // NOTE: this reference value was previously seeded with +10e29 and the loop
+            // could only raise it, so the acceptance test was always true and the line
+            // search never ran.  The history was also appended once per *trial* rather
+            // than once per accepted iterate, which corrupted its indexing as soon as a
+            // backtrack did occur.  Both are fixed here.
+            double f_ref = -std::numeric_limits<double>::max();
+            int n_hist = static_cast<int>(f_hist.size());
+            int n_back = std::min(n_hist, this->n_armijo + 1);
+            for (int h = 0; h < n_back; h++)
+                f_ref = std::max(f_ref, f_hist[n_hist - 1 - h]);
 
-            double max_compare = 10e29;
-            for (int h = 1; h <= std::min(iter, this->n_armijo); h++) {
-                double compare = f_hist[iter - h] + gamma * lambda * dTg;
-                if (compare > max_compare)
-                    max_compare = compare;
-            }
-
-            if (mf_p > max_compare) {
+            if (mf_p > f_ref + gamma * lambda * dTg && n_backtracks < this->max_armijo_backtrace) {
                 armijo_repeat = true;
-                if (iter > 0)
-                    mf = f_hist[iter - 1];
-                double lambdanew = -lambda * lambda * dTg / (2 * (mf_p - mf - lambda * dTg));
+                // Safeguarded quadratic interpolation of the step length.
+                double denom = 2 * (mf_p - mf - lambda * dTg);
+                double lambdanew = (denom != 0) ? -lambda * lambda * dTg / denom : sigma_min * lambda;
                 lambda = std::max(sigma_min * lambda, std::min(sigma_max * lambda, lambdanew));
+                n_backtracks++;
+                n_armijo_backtracks++;
                 if (verbose)
                     std::cout << " Repeat Armijo, new lambda=" << lambda << std::endl;
             } else {
                 armijo_repeat = false;
             }
-
-            n_backtracks = n_backtracks + 1;
-            if (n_backtracks > this->max_armijo_backtrace)
-                armijo_repeat = false;
         }
+
+        // Record the objective at the accepted iterate.  Only the last n_armijo+1
+        // entries are ever read.
+        f_hist.push_back(mf_p);
+        if (static_cast<int>(f_hist.size()) > this->n_armijo + 1)
+            f_hist.erase(f_hist.begin());
+        mf = mf_p;
 
         ms = ml_p - ml;  // s = l_p - l;
         my = mg_p - mg;  // y = g_p - g;

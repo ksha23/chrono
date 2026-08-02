@@ -3,6 +3,7 @@ set(TESTS
     btest_CH_joints
     btest_CH_pendulums
     btest_CH_mixerNSC
+    btest_CH_solverScaling
     )
 
 if(CH_ENABLE_MODULE_PARDISO_MKL OR CH_ENABLE_MODULE_MUMPS)

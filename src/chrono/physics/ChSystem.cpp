@@ -31,6 +31,7 @@
 #include "chrono/solver/ChSolverAPGD.h"
 #include "chrono/solver/ChSolverBB.h"
 #include "chrono/solver/ChSolverPJacobi.h"
+#include "chrono/solver/ChSolverAuto.h"
 #include "chrono/solver/ChSolverPSOR.h"
 #include "chrono/solver/ChIterativeSolverLS.h"
 #include "chrono/solver/ChDirectSolverLS.h"
@@ -307,6 +308,9 @@ void ChSystem::SetSolverType(ChSolver::Type type) {
             break;
         case ChSolver::Type::SPARSE_QR:
             solver = chrono_types::make_shared<ChSolverSparseQR>();
+            break;
+        case ChSolver::Type::AUTO:
+            solver = chrono_types::make_shared<ChSolverAuto>();
             break;
         case ChSolver::Type::PSSOR:
             std::cerr << "\n\nWARNING: The PSSOR solver was removed. Falling back to PSOR\n\n" << std::endl;

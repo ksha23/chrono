@@ -296,6 +296,12 @@ bool ChSolverSparseLU::FactorizeMatrix(bool analyze) {
     return true;
 }
 
+unsigned int ChSolverSparseLU::GetNumFactorNonzeros() const {
+    if (m_setup_call == 0)
+        return 0;
+    return static_cast<unsigned int>(m_engine.nnzL() + m_engine.nnzU());
+}
+
 bool ChSolverSparseLU::SolveSystem() {
     m_sol = m_engine.solve(m_rhs);
     return (m_engine.info() == Eigen::Success);

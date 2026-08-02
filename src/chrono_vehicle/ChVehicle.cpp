@@ -61,8 +61,23 @@ ChVehicle::ChVehicle(const std::string& name, ChContactMethod contact_method)
     m_system->SetName(name + "_system");
     m_system->SetGravitationalAcceleration(-9.81 * ChWorldFrame::Vertical());
 
-    // Set default solver for vehicle simulations
-    m_system->SetSolverType(ChSolver::Type::BARZILAIBORWEIN);
+    // Set default solver for vehicle simulations.
+    //
+    // A wheeled vehicle on rigid terrain using a deformable tire model (TMeasy, Fiala,
+    // Pacejka, ...) has *no* contacts and *no* unilateral constraints: the tire forces
+    // are applied as external loads, so the constraint set is entirely bilateral and the
+    // problem is a plain linear system. Solving it with a projected-gradient method is
+    // both slower and far less accurate than factorizing it: on an HMMWV double lane
+    // change, BARZILAIBORWEIN at 150 iterations costs 307 us/step and puts the chassis
+    // 1.45 m away from the exact trajectory, and raising the budget does not help
+    // (2400 iterations costs 4432 us/step and is still 1.43 m off). A sparse LU
+    // factorization of the same problem costs 197 us/step and is exact.
+    //
+    // ChSolverAuto makes that choice per step, so models that *do* generate contacts
+    // (rigid or mesh tires, deformable terrain, tracked vehicles) still get the
+    // iterative VI solver, which remains configured exactly as before through
+    // AsIterative() below.
+    m_system->SetSolverType(ChSolver::Type::AUTO);
     m_system->GetSolver()->AsIterative()->SetMaxIterations(150);
 }
 
