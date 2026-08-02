@@ -119,6 +119,12 @@ class CH_ROS_API ChROSJointStateHandler : public ChROSHandler {
     };
 
     struct JointEntry {
+        // Unwrapping state for passive revolute/continuous joints, whose relative angle is reported
+        // wrapped into (-pi, pi].
+        mutable double prev_raw_angle = 0;
+        mutable int turns = 0;
+        mutable bool have_prev_angle = false;
+
         std::string name;
         JointKind kind;
         std::shared_ptr<ChLinkMotorRotation> motor_rot;

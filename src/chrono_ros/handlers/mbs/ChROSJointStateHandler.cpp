@@ -60,6 +60,16 @@ bool ChROSJointStateHandler::AddJoint(std::shared_ptr<ChLinkBase> joint, const s
         return false;
     }
 
+    // A JointState carrying the same name twice is malformed -- robot_state_publisher and most consumers
+    // index by name -- and it is an easy mistake to make when mixing AddURDF with explicit AddJoint calls.
+    for (const auto& existing : m_joints) {
+        if (existing.name == entry.name) {
+            std::cerr << "ChROSJointStateHandler::AddJoint: joint \"" << entry.name
+                      << "\" is already published; ignoring the duplicate." << std::endl;
+            return false;
+        }
+    }
+
     // Dispatch on the concrete Chrono link type once, at registration time, so the per-tick read
     // does not pay for repeated dynamic casts.
     if (auto motor_rot = std::dynamic_pointer_cast<ChLinkMotorRotation>(joint)) {
@@ -157,14 +167,33 @@ void ChROSJointStateHandler::ReadJoint(const JointEntry& joint, double& position
             velocity = joint.motor_lin->GetMotorPosDt();
             effort = joint.motor_lin->GetMotorForce();
             break;
-        case JointKind::LOCK_REVOLUTE:
+        case JointKind::LOCK_REVOLUTE: {
             // ChLinkLockRevolute leaves rotation about the link Z axis free (see ChLinkLock.cpp
-            // BuildLink for Type::REVOLUTE). GetRelAngleAxis() is the relative rotation vector,
-            // so its z component is the signed joint angle.
-            position = joint.lock->GetRelAngleAxis().z();
+            // BuildLink for Type::REVOLUTE), so the z component of the relative rotation vector is the
+            // signed joint angle -- but GetRelAngleAxis comes from a quaternion angle-axis
+            // decomposition and is therefore confined to (-pi, pi]. A URDF CONTINUOUS joint is
+            // specifically unbounded, and the same joint reports an accumulating angle once actuated
+            // (GetMotorAngle), so unwrap here: otherwise a free-spinning wheel publishes a sawtooth and
+            // any odometry built on it is wrong.
+            //
+            // Unwrapping assumes the joint turns less than half a revolution between publications. At
+            // the handler's update rate that holds for anything short of an implausible spin rate; a
+            // faster joint aliases, exactly as it would for any incremental encoder.
+            const double raw = joint.lock->GetRelAngleAxis().z();
+            if (joint.have_prev_angle) {
+                const double d = raw - joint.prev_raw_angle;
+                if (d > CH_PI)
+                    joint.turns -= 1;
+                else if (d < -CH_PI)
+                    joint.turns += 1;
+            }
+            joint.prev_raw_angle = raw;
+            joint.have_prev_angle = true;
+            position = raw + CH_2PI * joint.turns;
             velocity = joint.lock->GetRelativeAngVel().z();
             effort = 0;
             break;
+        }
         case JointKind::LOCK_PRISMATIC:
             // ChLinkLockPrismatic leaves translation along the link Z axis free.
             position = joint.lock->GetRelCoordsys().pos.z();
