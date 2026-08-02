@@ -38,7 +38,15 @@ mark_as_advanced(CLEAR glfw3_DIR)
 #-----------------------------------------------------------------------------
 
 set(CH_USE_SENSOR_OPTIX OFF CACHE BOOL "Enable legacy OptiX-dependent Chrono::Sensor features")
-set(CH_USE_SENSOR_VULKAN_RT ON CACHE BOOL "Enable Vulkan ray-tracing Chrono::Sensor features")
+if(APPLE)
+  # Apple has no CUDA/OptiX, and MoltenVK does not implement Vulkan ray tracing.
+  # The native path on Apple Silicon is Metal ray tracing.
+  set(CH_USE_SENSOR_VULKAN_RT OFF CACHE BOOL "Enable Vulkan ray-tracing Chrono::Sensor features")
+  set(CH_USE_SENSOR_METAL_RT ON CACHE BOOL "Enable Metal ray-tracing Chrono::Sensor features")
+else()
+  set(CH_USE_SENSOR_VULKAN_RT ON CACHE BOOL "Enable Vulkan ray-tracing Chrono::Sensor features")
+  set(CH_USE_SENSOR_METAL_RT OFF CACHE BOOL "Enable Metal ray-tracing Chrono::Sensor features")
+endif()
 
 if(CH_USE_SENSOR_OPTIX)
 
@@ -96,6 +104,25 @@ if(CH_USE_SENSOR_VULKAN_RT)
   endif()
 endif()
 
+#-----------------------------------------------------------------------------
+# Check Metal RT (Apple)
+#-----------------------------------------------------------------------------
+
+if(CH_USE_SENSOR_METAL_RT)
+  if(APPLE)
+    message(STATUS "Looking for Apple Metal ray tracing support")
+    find_library(CH_METAL_FRAMEWORK Metal REQUIRED)
+    find_library(CH_FOUNDATION_FRAMEWORK Foundation REQUIRED)
+    find_library(CH_QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(CH_COREGRAPHICS_FRAMEWORK CoreGraphics REQUIRED)
+    find_library(CH_IMAGEIO_FRAMEWORK ImageIO REQUIRED)
+    message(STATUS "  Metal framework: ${CH_METAL_FRAMEWORK}")
+  else()
+    message(STATUS "WARNING: Metal RT is only available on Apple platforms; disabling Metal RT Chrono::Sensor features")
+    set(CH_USE_SENSOR_METAL_RT FALSE CACHE BOOL "Enable Metal ray-tracing Chrono::Sensor features" FORCE)
+  endif()
+endif()
+
 if(CH_USE_SENSOR_OPTIX)
 
   message(STATUS "Building Chrono::Sensor with OptiX support")
@@ -128,7 +155,14 @@ else()
   set(CHRONO_HAS_VULKAN_RT "#undef CHRONO_HAS_VULKAN_RT")
 endif()
 
-if(CH_USE_SENSOR_OPTIX OR CH_USE_SENSOR_VULKAN_RT)
+if(CH_USE_SENSOR_METAL_RT)
+  message(STATUS "Building Chrono::Sensor with Metal RT support")
+  set(CHRONO_HAS_METAL_RT "#define CHRONO_HAS_METAL_RT")
+else()
+  set(CHRONO_HAS_METAL_RT "#undef CHRONO_HAS_METAL_RT")
+endif()
+
+if(CH_USE_SENSOR_OPTIX OR CH_USE_SENSOR_VULKAN_RT OR CH_USE_SENSOR_METAL_RT)
   set(CHRONO_HAS_SENSOR_RENDER "#define CHRONO_HAS_SENSOR_RENDER")
 else()
   set(CHRONO_HAS_SENSOR_RENDER "#undef CHRONO_HAS_SENSOR_RENDER")
@@ -353,6 +387,35 @@ if(CH_USE_SENSOR_VULKAN_RT)
   endif()
 endif()
 
+if(CH_USE_SENSOR_METAL_RT)
+  set(Chrono_sensor_SENSORS_SOURCES ${Chrono_sensor_SENSORS_SOURCES}
+      sensors/ChMetalSensor.cpp
+  )
+  set(Chrono_sensor_SENSORS_HEADERS ${Chrono_sensor_SENSORS_HEADERS}
+      sensors/ChMetalSensor.h
+  )
+
+  if(NOT CH_USE_SENSOR_OPTIX AND NOT CH_USE_SENSOR_VULKAN_RT)
+    # Build the standard render sensor front-ends against the Metal backend.
+    list(APPEND Chrono_sensor_SENSORS_SOURCES
+        sensors/ChCameraSensor.cpp
+        sensors/ChDepthCamera.cpp
+        sensors/ChNormalCamera.cpp
+        sensors/ChSegmentationCamera.cpp
+        sensors/ChLidarSensor.cpp
+        sensors/ChRadarSensor.cpp
+    )
+    list(APPEND Chrono_sensor_SENSORS_HEADERS
+        sensors/ChCameraSensor.h
+        sensors/ChDepthCamera.h
+        sensors/ChNormalCamera.h
+        sensors/ChSegmentationCamera.h
+        sensors/ChLidarSensor.h
+        sensors/ChRadarSensor.h
+    )
+  endif()
+endif()
+
 source_group("source" FILES ${Chrono_sensor_SENSORS_SOURCES} ${Chrono_sensor_SENSORS_HEADERS})
 
 #-----------------------------------------------------------------------------
@@ -453,6 +516,52 @@ else()
 endif()
 
 #-----------------------------------------------------------------------------
+# LIST THE FILES THAT MAKE THE SENSOR METAL RT LIBRARY (Apple)
+#-----------------------------------------------------------------------------
+
+if(CH_USE_SENSOR_METAL_RT)
+  set(Chrono_sensor_METAL_SOURCES
+      metal/ChMetalSceneBuilder.cpp
+      metal/ChMetalRTScene.cpp
+      metal/ChMetalRTEngine.cpp
+      metal/ChMetalRTDevice.mm
+      metal/ChMetalRTRenderer.mm
+      metal/ChFilterMetalRTRender.mm
+      metal/ChFilterMetalVisualize.mm
+      metal/ChFilterMetalVisualizePointCloud.mm
+      metal/ChMetalPerfOverlay.mm
+  )
+  set(Chrono_sensor_METAL_HEADERS
+      metal/ChMetalRTDefinitions.h
+      metal/ChMetalRenderTypes.h
+      metal/ChMetalSceneBuilder.h
+      metal/ChMetalRTShaderMSL.h
+      metal/ChMetalRTDevice.h
+      metal/ChMetalRTScene.h
+      metal/ChMetalRTRenderer.h
+      metal/ChFilterMetalRTRender.h
+      metal/ChFilterMetalVisualize.h
+      metal/ChFilterMetalVisualizePointCloud.h
+      metal/ChMetalPerfOverlay.h
+      metal/ChOrbitCameraControl.h
+      metal/ChMetalRTEngine.h
+  )
+  # The .mm files are Objective-C++ with ARC.
+  set_source_files_properties(
+      metal/ChMetalRTDevice.mm
+      metal/ChMetalRTRenderer.mm
+      metal/ChFilterMetalRTRender.mm
+      metal/ChFilterMetalVisualize.mm
+      metal/ChFilterMetalVisualizePointCloud.mm
+      metal/ChMetalPerfOverlay.mm
+      PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
+  source_group("Metal RT" FILES ${Chrono_sensor_METAL_SOURCES} ${Chrono_sensor_METAL_HEADERS})
+else()
+  set(Chrono_sensor_METAL_SOURCES "")
+  set(Chrono_sensor_METAL_HEADERS "")
+endif()
+
+#-----------------------------------------------------------------------------
 # LIST THE FILES THAT MAKE THE FILTERS FOR THE SENSOR LIBRARY
 #-----------------------------------------------------------------------------
 
@@ -487,6 +596,23 @@ if(CH_USE_SENSOR_OPTIX OR CH_USE_SENSOR_VULKAN_RT)
       filters/ChFilterGrayscale.h
       filters/ChFilterImageOps.h
       filters/ChFilterVisualize.h
+      filters/ChFilterSave.h
+  )
+endif()
+
+if(CH_USE_SENSOR_METAL_RT)
+  # Host-buffer camera filters for the Metal backend. ChFilterVisualize is GL-based
+  # (replaced by ChFilterMetalVisualize), so it is intentionally excluded.
+  set(Chrono_sensor_FILTERS_SOURCES ${Chrono_sensor_FILTERS_SOURCES}
+      filters/ChFilterImageOps.cpp
+      filters/ChFilterGrayscale.cpp
+      filters/ChFilterCameraNoise.cpp
+      filters/ChFilterSave.cpp
+  )
+  set(Chrono_sensor_FILTERS_HEADERS ${Chrono_sensor_FILTERS_HEADERS}
+      filters/ChFilterImageOps.h
+      filters/ChFilterGrayscale.h
+      filters/ChFilterCameraNoise.h
       filters/ChFilterSave.h
   )
 endif()
@@ -682,6 +808,8 @@ list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_OPTIX_SOURCES})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_OPTIX_HEADERS})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_VULKAN_SOURCES})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_VULKAN_HEADERS})
+list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_METAL_SOURCES})
+list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_METAL_HEADERS})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_FILTERS_SOURCES})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_FILTERS_HEADERS})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_SCENE_SOURCES})
@@ -748,6 +876,17 @@ if(CH_USE_SENSOR_VULKAN_RT)
   if(CH_USE_SENSOR_VULKAN_RT_GPU)
     target_compile_definitions(Chrono_sensor PRIVATE $<$<COMPILE_LANGUAGE:CXX>:CHRONO_SENSOR_VULKAN_RT_GPU_ENABLED>)
   endif()
+endif()
+
+if(CH_USE_SENSOR_METAL_RT)
+  find_library(CH_COCOA_FRAMEWORK Cocoa REQUIRED)
+  target_link_libraries(Chrono_sensor PRIVATE
+      ${CH_METAL_FRAMEWORK}
+      ${CH_FOUNDATION_FRAMEWORK}
+      ${CH_QUARTZCORE_FRAMEWORK}
+      ${CH_COREGRAPHICS_FRAMEWORK}
+      ${CH_IMAGEIO_FRAMEWORK}
+      ${CH_COCOA_FRAMEWORK})
 endif()
 
 # print cxx compiler flags\

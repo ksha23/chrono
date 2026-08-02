@@ -17,7 +17,7 @@
 
 #include "chrono_sensor/filters/ChFilterSave.h"
 
-#if defined(CHRONO_HAS_VULKAN_RT) && !defined(CHRONO_HAS_OPTIX)
+#if (defined(CHRONO_HAS_VULKAN_RT) || defined(CHRONO_HAS_METAL_RT)) && !defined(CHRONO_HAS_OPTIX)
 
 #include <filesystem>
 #include <fstream>

@@ -33,6 +33,10 @@
     #include "chrono_sensor/vulkan/ChVulkanRTEngine.h"
     #include "chrono_sensor/vulkan/ChVulkanRTScene.h"
 #endif
+#ifdef CHRONO_HAS_METAL_RT
+    #include "chrono_sensor/metal/ChMetalRTEngine.h"
+    #include "chrono_sensor/metal/ChMetalRTScene.h"
+#endif
 
 #ifdef CHRONO_FSI_SPH
     #include "chrono_sensor/ChFsiSphRender.h"
@@ -89,6 +93,10 @@ class CH_SENSOR_API ChSensorManager {
     /// Get the number of render engines the manager is currently using.
     /// Preserves the OptiX-era count API for Vulkan-only builds.
     int GetNumEngines() { return (int)m_vulkan_engines.size(); }
+#elif defined(CHRONO_HAS_METAL_RT)
+    /// Get the number of render engines the manager is currently using.
+    /// Preserves the OptiX-era count API for Metal-only builds.
+    int GetNumEngines() { return (int)m_metal_engines.size(); }
 #endif
 #ifdef CHRONO_HAS_VULKAN_RT
     /// Get the number of Vulkan RT engines the manager is currently using.
@@ -96,6 +104,13 @@ class CH_SENSOR_API ChSensorManager {
 
     /// Get a pointer to a Vulkan RT engine based on its id.
     std::shared_ptr<ChVulkanRTEngine> GetVulkanEngine(int context_id);
+#endif
+#ifdef CHRONO_HAS_METAL_RT
+    /// Get the number of Metal RT engines the manager is currently using.
+    int GetNumMetalEngines() { return (int)m_metal_engines.size(); }
+
+    /// Get a pointer to a Metal RT engine based on its id.
+    std::shared_ptr<ChMetalRTEngine> GetMetalEngine(int context_id);
 #endif
 
     /// Calls on the sensor manager to rebuild the scene.
@@ -152,10 +167,17 @@ class CH_SENSOR_API ChSensorManager {
 #elif defined(CHRONO_HAS_VULKAN_RT)
     /// Public scene pointer preserved for OptiX-compatible demos when Vulkan RT is the render backend.
     std::shared_ptr<ChVulkanRTScene> scene;
+#elif defined(CHRONO_HAS_METAL_RT)
+    /// Public scene pointer preserved for OptiX-compatible demos when Metal RT is the render backend.
+    std::shared_ptr<ChMetalRTScene> scene;
 #endif
 #ifdef CHRONO_HAS_VULKAN_RT
     /// Public pointer to the Vulkan RT scene staging object.
     std::shared_ptr<ChVulkanRTScene> vulkan_scene;
+#endif
+#ifdef CHRONO_HAS_METAL_RT
+    /// Public pointer to the Metal RT scene staging object.
+    std::shared_ptr<ChMetalRTScene> metal_scene;
 #endif
 
   private:
@@ -172,6 +194,9 @@ class CH_SENSOR_API ChSensorManager {
 #endif
 #ifdef CHRONO_HAS_VULKAN_RT
     std::vector<std::shared_ptr<ChVulkanRTEngine>> m_vulkan_engines;  ///< Vulkan RT engine(s) used for rendered sensors
+#endif
+#ifdef CHRONO_HAS_METAL_RT
+    std::vector<std::shared_ptr<ChMetalRTEngine>> m_metal_engines;  ///< Metal RT engine(s) used for rendered sensors
 #endif
 
     int m_allowable_groups = 1;  ///< default maximum number of allowable engines

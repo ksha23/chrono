@@ -1,0 +1,101 @@
+// =============================================================================
+// PROJECT CHRONO - http://projectchrono.org
+//
+// Copyright (c) 2026 projectchrono.org
+// All rights reserved.
+//
+// Use of this source code is governed by a BSD-style license that can be found
+// in the LICENSE file at the top level of the distribution and at
+// http://projectchrono.org/license-chrono.txt.
+//
+// =============================================================================
+// Authors: (Metal RT backend)
+// =============================================================================
+// Metal hardware ray-tracing renderer: builds BLAS/TLAS from a RenderScene and
+// renders a pinhole camera into an RGBA8 host buffer. Header is pure C++ (PIMPL);
+// all Metal code lives in the .mm.
+// =============================================================================
+
+#ifndef CH_METAL_RT_RENDERER_H
+#define CH_METAL_RT_RENDERER_H
+
+#include <cstdint>
+
+#include "chrono_sensor/ChApiSensor.h"
+#include "chrono_sensor/metal/ChMetalRenderTypes.h"
+
+namespace chrono {
+namespace sensor {
+
+/// Explicit pinhole camera basis (world space), matching Chrono::Sensor convention.
+struct MetalCameraParams {
+    float origin[3];
+    float forward[3];
+    float right[3];
+    float up[3];
+    float ambient[3];  ///< ambient light color
+    float tanHalfV;    ///< tan(vertical_half_fov)
+    int aa;            ///< antialiasing samples per axis
+    int mode;          ///< 0 color, 1 depth, 2 normal, 3 segmentation, 4 lidar
+    float lidarHFov;   ///< lidar horizontal FOV (rad)
+    float lidarVMin;   ///< lidar min elevation (rad)
+    float lidarVMax;   ///< lidar max elevation (rad)
+    float maxDist;     ///< lidar max range (0 = infinite)
+    int lidarSampleRadius;  ///< beam sub-sampling radius (1 = single ray)
+    float lidarHDiv;        ///< horizontal beam divergence (rad)
+    float lidarVDiv;        ///< vertical beam divergence (rad)
+    int lidarReturnMode;    ///< 0 strongest,1 mean,2 first,3 last,4 dual
+    int lensModel;          ///< 0 pinhole, 1 FOV (fisheye), 2 radial
+    float dk1, dk2, dk3;    ///< radial distortion coefficients
+    int bgMode = 0;         ///< background: 0 procedural/env, 1 gradient, 2 solid
+    float bgZenith[3] = {0.26f,0.48f,0.82f};   ///< gradient zenith / solid color
+    float bgHorizon[3] = {0.58f,0.72f,0.88f};  ///< gradient horizon
+    float fogColor[3] = {0.6f,0.7f,0.8f};      ///< fog color
+    float fogScatter = 0.f; ///< exponential fog scattering (0 = off)
+    int useGi = 0;          ///< 1 = path-traced global illumination
+    float exposure = 1.f;   ///< linear exposure/gain
+    float vignette = 0.f;   ///< vignette strength (0 = off)
+    float apertureR = 0.f;  ///< lens aperture radius for depth of field (0 = pinhole)
+    float focalDist = 10.f; ///< depth-of-field focal distance
+    float noiseSigma = 0.f; ///< gaussian sensor-noise stddev (0 = off)
+    bool useDenoiser = false; ///< run the spatial despeckle/denoise pass
+};
+
+/// One light, GPU layout (matches the shader's Light struct: 16 floats).
+struct MetalLightGPU {
+    float pos[3];    ///< world position (point/spot) or direction (directional)
+    float range;     ///< falloff range for point/spot lights (0 = no falloff)
+    float color[3];  ///< light color * intensity
+    float type;      ///< 0 = point, 1 = directional, 2 = spot
+    float dir[3];    ///< spot axis direction
+    float cosOuter;  ///< spot: cos(outer cone half-angle)  (attenuation reaches 0)
+    float cosInner;  ///< spot: cos(inner cone half-angle)  (full intensity)
+    float pad[3];
+};
+
+class CH_SENSOR_API ChMetalRTRenderer {
+  public:
+    ChMetalRTRenderer(void* mtlDevice, void* mtlQueue);  // opaque id<MTLDevice>/id<MTLCommandQueue>
+    ~ChMetalRTRenderer();
+
+    bool Valid() const;
+
+    void Build(const cr::RenderScene& scene);         // (re)create accel structures, buffers, textures, pipeline
+    void UpdateDynamic(const cr::RenderScene& scene);  // upload transforms + refit dynamic geom + rebuild TLAS
+    // Renders into a caller-provided RGBA32F buffer (w*h*4 floats). Interpretation by mode:
+    //  color: rgb in [0,1]; depth: .r = distance; normal: .rgb = world normal; segmentation: .r=class,.g=instance.
+    void Render(const MetalCameraParams& cam, const MetalLightGPU* lights, int numLights, int w, int h, float* rgba32_out);
+
+    /// Load an HDR equirectangular environment map (Radiance .hdr) to use as the
+    /// sky background and reflection source. Empty path disables it.
+    void SetEnvMap(const std::string& path);
+
+  private:
+    struct Impl;
+    Impl* p = nullptr;
+};
+
+}  // namespace sensor
+}  // namespace chrono
+
+#endif
