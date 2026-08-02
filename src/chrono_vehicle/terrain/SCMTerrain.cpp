@@ -761,10 +761,27 @@ void SCMLoader::SetVisualizationWindow(double size_x, double size_y, int tile_ce
                   << std::endl;
         return;
     }
-    if (size_x <= 0 || size_y <= 0) {
+    // Written as a positive test so that NaN is rejected: every comparison against NaN is false, so
+    // "size_x <= 0" lets it through, and it then reaches the half-window computation as an int cast of
+    // NaN -- which is undefined and in practice yields INT_MIN.
+    if (!(size_x > 0) || !(size_y > 0) || !std::isfinite(size_x) || !std::isfinite(size_y)) {
         std::cerr << "SCMTerrain::SetVisualizationWindow -- invalid window (" << size_x << " x " << size_y
                   << "); ignored." << std::endl;
         return;
+    }
+    // The pool is sized from the window, so an enormous one is an out-of-memory request rather than a
+    // useful setting. Cap at the terrain extent, beyond which there is nothing further to draw anyway.
+    const double max_x = (2 * m_nx + 1) * m_delta;
+    const double max_y = (2 * m_ny + 1) * m_delta;
+    if (m_nx > 0 && size_x > max_x) {
+        std::cerr << "SCMTerrain::SetVisualizationWindow -- window X " << size_x << " exceeds the terrain ("
+                  << max_x << "); clamped." << std::endl;
+        size_x = max_x;
+    }
+    if (m_ny > 0 && size_y > max_y) {
+        std::cerr << "SCMTerrain::SetVisualizationWindow -- window Y " << size_y << " exceeds the terrain ("
+                  << max_y << "); clamped." << std::endl;
+        size_y = max_y;
     }
     // Upper bound keeps (tile_cells+1)^2 and 2*tile_cells^2 well inside int; beyond a few hundred a tile
     // also stops being a useful unit of eviction. Lower bound avoids one asset per grid cell.
