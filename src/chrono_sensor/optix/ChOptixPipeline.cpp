@@ -1281,6 +1281,17 @@ void ChOptixPipeline::UpdateDeformableMeshes(size_t sim_step_count) {
         std::vector<int> delta;
         const bool have_delta = mesh_shape->GetModifiedVerticesSince(synced_version, delta);
         const std::vector<int>& modified = delta;
+        // An empty delta means one of two things, and the version tells them apart. If the producer has
+        // published since we last looked and the delta is still empty, it published nothing: the mesh
+        // provably did not change, so there is nothing to send. If it has not published at all, the
+        // emptiness carries no information -- a producer that never populates the list rewrites the whole
+        // mesh in silence -- so restate everything. Conflating the two spent most of the remaining
+        // transfer budget re-uploading meshes that had not moved.
+        if (have_delta && modified.empty() && current_version > synced_version) {
+            std::get<4>(m_deformable_meshes[i]) = current_version;
+            continue;
+        }
+
         const bool incremental = have_delta && !modified.empty() &&
                                  modified.size() * kDeformableIncrementalDenominator < num_vertices;
 

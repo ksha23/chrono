@@ -176,15 +176,32 @@ void ChVisualShapeTriangleMesh::SetModifiedVertices(const std::vector<int>& vert
     dirty_log.insert(dirty_log.end(), vertices.begin(), vertices.end());
     dirty_log_ends.push_back(dirty_log.size());
 
-    // Once patching would cost more than a wholesale refresh, drop the log and restart it at the
-    // current version. Consumers that were keeping up are unaffected: their next query asks for the
-    // delta since the version we just moved the base to, which is empty. Consumers further behind get
-    // a miss and refresh everything, which is the correct outcome and the cheaper one.
-    const size_t budget = trimesh ? std::max<size_t>(1024, trimesh->GetCoordsVertices().size() / 2) : 1024;
-    if (dirty_log.size() > budget) {
-        dirty_log.clear();
-        dirty_log_ends.clear();
-        dirty_log_base = dirty_version;
+    // Retire the oldest publications until the log is back inside budget, rather than discarding all of
+    // it. Clearing throws away history a consumer one publication behind still needs -- and a consumer
+    // that is exactly caught up holds dirty_version - 1, not dirty_version, so clearing forced a full
+    // refresh on precisely the callers that were keeping up. Trimming from the front bounds the memory
+    // just as well and costs those callers nothing.
+    //
+    // Two bounds, because they are reached by different producers. The index budget catches a few large
+    // publications. The publication budget catches many small or empty ones: a producer that publishes
+    // every step whether or not anything changed -- which SCM does -- adds an offset per step forever,
+    // and the index budget alone never fires because no indices ever arrive.
+    const size_t index_budget = trimesh ? std::max<size_t>(1024, trimesh->GetCoordsVertices().size() / 2) : 1024;
+    const size_t pub_budget = 4096;
+
+    size_t drop = 0;
+    while ((dirty_log.size() - (drop ? dirty_log_ends[drop - 1] : 0) > index_budget ||
+            dirty_log_ends.size() - drop > pub_budget) &&
+           drop < dirty_log_ends.size()) {
+        ++drop;
+    }
+    if (drop > 0) {
+        const size_t cut = dirty_log_ends[drop - 1];
+        dirty_log.erase(dirty_log.begin(), dirty_log.begin() + cut);
+        dirty_log_ends.erase(dirty_log_ends.begin(), dirty_log_ends.begin() + drop);
+        for (auto& e : dirty_log_ends)
+            e -= cut;
+        dirty_log_base += drop;
     }
 }
 
