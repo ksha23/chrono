@@ -630,6 +630,20 @@ if(CH_USE_SENSOR_METAL_RT)
       filters/ChFilterPhysCameraAggregator.cpp
       filters/ChFilterPhysCameraNoise.cpp
       filters/ChFilterPhysCameraExpsrToDV.cpp
+      # Point-cloud filters. The CUDA kernels in cuda/pointcloud.cu are unavailable here, but
+      # each of these files already carries a host implementation behind #ifdef CHRONO_HAS_OPTIX
+      # -- the transform is per-element polar-to-Cartesian, so the CPU path is equivalent and
+      # fast enough (a 1024x64 scan is 65k points).
+      filters/ChFilterPCfromDepth.cpp
+      filters/ChFilterSavePtCloud.cpp
+      filters/ChFilterRadarXYZReturn.cpp
+      filters/ChFilterRadarXYZVisualize.cpp
+      filters/ChFilterRadarProcess.cpp
+      filters/ChFilterRadarSavePC.cpp
+      filters/ChFilterLidarNoise.cpp
+      filters/ChFilterVisualizePointCloud.cpp
+      filters/ChFilterLidarIntensityClip.cpp
+      filters/ChFilterLidarReduce.cpp
   )
   set(Chrono_sensor_FILTERS_HEADERS ${Chrono_sensor_FILTERS_HEADERS}
       filters/ChFilterVisualize.h
@@ -642,6 +656,16 @@ if(CH_USE_SENSOR_METAL_RT)
       filters/ChFilterPhysCameraAggregator.h
       filters/ChFilterPhysCameraNoise.h
       filters/ChFilterPhysCameraExpsrToDV.h
+      filters/ChFilterPCfromDepth.h
+      filters/ChFilterSavePtCloud.h
+      filters/ChFilterRadarXYZReturn.h
+      filters/ChFilterRadarXYZVisualize.h
+      filters/ChFilterRadarProcess.h
+      filters/ChFilterRadarSavePC.h
+      filters/ChFilterLidarNoise.h
+      filters/ChFilterVisualizePointCloud.h
+      filters/ChFilterLidarIntensityClip.h
+      filters/ChFilterLidarReduce.h
   )
 endif()
 
