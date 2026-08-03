@@ -22,6 +22,9 @@
 #if (defined(CHRONO_HAS_VULKAN_RT) || defined(CHRONO_HAS_METAL_RT)) && !defined(CHRONO_HAS_OPTIX)
 
 #include "chrono_sensor/filters/ChFilterPhysCameraAggregator.h"
+#ifdef CHRONO_HAS_METAL_RT
+    #include "chrono_sensor/metal/ChMetalPhysCamOps.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -59,6 +62,12 @@ CH_SENSOR_API void ChFilterPhysCameraAggregator::Initialize(std::shared_ptr<ChSe
 CH_SENSOR_API void ChFilterPhysCameraAggregator::Apply() {
     if (!m_in_out || !m_in_out->Buffer)
         return;
+#ifdef CHRONO_HAS_METAL_RT
+    if (metal_phys_cam::Aggregator(m_in_out->Buffer.get(), m_in_out->Width, m_in_out->Height, m_aperture_num,
+                                   m_expsr_time, m_pixel_size, m_max_scene_light_amount, m_rgb_QEs,
+                                   m_aggregator_gain))
+        return;
+#endif
     const float denom = std::max(1e-12f, m_aperture_num * m_aperture_num);
     const float scale_base = m_aggregator_gain * m_max_scene_light_amount / denom * m_pixel_size * m_pixel_size * m_expsr_time;
     const size_t count = static_cast<size_t>(m_in_out->Width) * m_in_out->Height;

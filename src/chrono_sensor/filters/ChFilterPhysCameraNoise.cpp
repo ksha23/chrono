@@ -18,8 +18,12 @@
 #if (defined(CHRONO_HAS_VULKAN_RT) || defined(CHRONO_HAS_METAL_RT)) && !defined(CHRONO_HAS_OPTIX)
 
 #include "chrono_sensor/filters/ChFilterPhysCameraNoise.h"
+#ifdef CHRONO_HAS_METAL_RT
+    #include "chrono_sensor/metal/ChMetalPhysCamOps.h"
+#endif
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <random>
@@ -51,11 +55,20 @@ CH_SENSOR_API void ChFilterPhysCameraNoise::Initialize(std::shared_ptr<ChSensor>
     m_in_out = std::dynamic_pointer_cast<SensorDeviceHalf4Buffer>(bufferInOut);
     if (!m_in_out)
         InvalidFilterGraphBufferTypeMismatch(pSensor);
+    // Shot/dark noise is seeded from the clock (as init_cuda_rng does in the CUDA path); the FPN/read
+    // stream keeps the user-supplied, reproducible m_FPN_seed.
+    m_shot_seed = static_cast<unsigned int>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
 }
 
 CH_SENSOR_API void ChFilterPhysCameraNoise::Apply() {
     if (!m_in_out || !m_in_out->Buffer)
         return;
+#ifdef CHRONO_HAS_METAL_RT
+    if (metal_phys_cam::Noise(m_in_out->Buffer.get(), m_in_out->Width, m_in_out->Height, m_expsr_time,
+                              m_dark_currents, m_noise_gains, m_STD_reads, m_shot_seed, m_FPN_seed,
+                              m_in_out->LaunchedCount))
+        return;
+#endif
     const size_t count = static_cast<size_t>(m_in_out->Width) * m_in_out->Height;
     for (size_t i = 0; i < count; ++i) {
         std::mt19937 rng(static_cast<uint32_t>(m_FPN_seed + 0x9e3779b9u * static_cast<uint32_t>(i + 1u) + 1013904223u * m_in_out->LaunchedCount));

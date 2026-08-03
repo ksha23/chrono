@@ -528,6 +528,7 @@ if(CH_USE_SENSOR_METAL_RT)
       metal/ChMetalRTEngine.cpp
       metal/ChMetalRTDevice.mm
       metal/ChMetalRTRenderer.mm
+      metal/ChMetalPhysCamOps.mm
       metal/ChFilterMetalRTRender.mm
       metal/ChFilterMetalVisualize.mm
       metal/ChFilterMetalVisualizePointCloud.mm
@@ -538,6 +539,8 @@ if(CH_USE_SENSOR_METAL_RT)
       metal/ChMetalRenderTypes.h
       metal/ChMetalSceneBuilder.h
       metal/ChMetalRTShaderMSL.h
+      metal/ChMetalPhysCamOps.h
+      metal/ChMetalPhysCamOpsMSL.h
       metal/ChMetalRTDevice.h
       metal/ChMetalRTScene.h
       metal/ChMetalRTRenderer.h
@@ -552,6 +555,7 @@ if(CH_USE_SENSOR_METAL_RT)
   set_source_files_properties(
       metal/ChMetalRTDevice.mm
       metal/ChMetalRTRenderer.mm
+      metal/ChMetalPhysCamOps.mm
       metal/ChFilterMetalRTRender.mm
       metal/ChFilterMetalVisualize.mm
       metal/ChFilterMetalVisualizePointCloud.mm
