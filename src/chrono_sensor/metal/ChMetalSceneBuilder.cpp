@@ -98,7 +98,9 @@ static void meshToGeom(std::shared_ptr<ChTriangleMeshConnected> mesh, Geometry& 
 }
 // primitive generators (object space; white base color; no UV)
 static void genBox(double lx,double ly,double lz,Geometry& g){ g={}; double x=lx*.5,y=ly*.5,z=lz*.5; float w[3]={1,1,1};
-    auto q=[&](V3 a,V3 b,V3 c,V3 d,V3 nn){ addTri(g,a,b,c,nn,nn,nn,w,nullptr); addTri(g,a,c,d,nn,nn,nn,w,nullptr); };
+    // per-face planar UVs in [0,1] (tiled by the material's texture scale in the shader), matching OptiX box UVs
+    auto q=[&](V3 a,V3 b,V3 c,V3 d,V3 nn){ float u1[6]={0,0, 1,0, 1,1}, u2[6]={0,0, 1,1, 0,1};
+        addTri(g,a,b,c,nn,nn,nn,w,u1); addTri(g,a,c,d,nn,nn,nn,w,u2); };
     q({-x,-y,z},{x,-y,z},{x,y,z},{-x,y,z},{0,0,1}); q({x,-y,-z},{-x,-y,-z},{-x,y,-z},{x,y,-z},{0,0,-1});
     q({-x,-y,-z},{x,-y,-z},{x,-y,z},{-x,-y,z},{0,-1,0}); q({x,y,-z},{-x,y,-z},{-x,y,z},{x,y,z},{0,1,0});
     q({x,-y,-z},{x,y,-z},{x,y,z},{x,-y,z},{1,0,0}); q({-x,y,-z},{-x,-y,-z},{-x,-y,z},{-x,y,z},{-1,0,0}); }
@@ -107,23 +109,34 @@ static void genSphere(double sx,double sy,double sz,int st,int sl,Geometry& g){ 
     auto vN=[&](V3 d){ return nrm3(V3{d.x/sx,d.y/sy,d.z/sz}); };
     auto sc=[&](V3 d){ return V3{d.x*sx,d.y*sy,d.z*sz}; };
     for(int i=0;i<st;i++)for(int j=0;j<sl;j++){ V3 a=P(i,j),b=P(i,j+1),c=P(i+1,j),d=P(i+1,j+1);
-        addTri(g,sc(a),sc(b),sc(c),vN(a),vN(b),vN(c),w,nullptr); addTri(g,sc(b),sc(d),sc(c),vN(b),vN(d),vN(c),w,nullptr); } }
+        float uj=(float)j/sl, uj1=(float)(j+1)/sl, vi=(float)i/st, vi1=(float)(i+1)/st;      // equirectangular UVs
+        float t1[6]={uj,vi, uj1,vi, uj,vi1}, t2[6]={uj1,vi, uj1,vi1, uj,vi1};
+        addTri(g,sc(a),sc(b),sc(c),vN(a),vN(b),vN(c),w,t1); addTri(g,sc(b),sc(d),sc(c),vN(b),vN(d),vN(c),w,t2); } }
 static void genCyl(double r,double h,int seg,Geometry& g){ g={}; double hz=h*.5; float w[3]={1,1,1};
     for(int i=0;i<seg;i++){ double a0=2*M_PI*i/seg,a1=2*M_PI*(i+1)/seg; V3 d0{cos(a0),sin(a0),0},d1{cos(a1),sin(a1),0};
         V3 p00{d0.x*r,d0.y*r,-hz},p01{d1.x*r,d1.y*r,-hz},p10{d0.x*r,d0.y*r,hz},p11{d1.x*r,d1.y*r,hz};
-        addTri(g,p00,p01,p10,d0,d1,d0,w,nullptr); addTri(g,p01,p11,p10,d1,d1,d0,w,nullptr);
-        addTri(g,{0,0,hz},p10,p11,{0,0,1},{0,0,1},{0,0,1},w,nullptr); addTri(g,{0,0,-hz},p01,p00,{0,0,-1},{0,0,-1},{0,0,-1},w,nullptr); } }
+        float su0=(float)i/seg, su1=(float)(i+1)/seg;                                       // side: u=angle, v=height
+        float s1[6]={su0,0, su1,0, su0,1}, s2[6]={su1,0, su1,1, su0,1};
+        addTri(g,p00,p01,p10,d0,d1,d0,w,s1); addTri(g,p01,p11,p10,d1,d1,d0,w,s2);
+        float ct[6]={0.5f,0.5f, (float)(d0.x*.5+.5),(float)(d0.y*.5+.5), (float)(d1.x*.5+.5),(float)(d1.y*.5+.5)};  // caps: planar
+        float cb[6]={0.5f,0.5f, (float)(d1.x*.5+.5),(float)(d1.y*.5+.5), (float)(d0.x*.5+.5),(float)(d0.y*.5+.5)};
+        addTri(g,{0,0,hz},p10,p11,{0,0,1},{0,0,1},{0,0,1},w,ct); addTri(g,{0,0,-hz},p01,p00,{0,0,-1},{0,0,-1},{0,0,-1},w,cb); } }
 static void genCone(double r,double h,int seg,Geometry& g){ g={}; double hz=h*.5; float w[3]={1,1,1}; V3 ap{0,0,hz};
     for(int i=0;i<seg;i++){ double a0=2*M_PI*i/seg,a1=2*M_PI*(i+1)/seg; V3 b0{r*cos(a0),r*sin(a0),-hz},b1{r*cos(a1),r*sin(a1),-hz};
         V3 n0=nrm3({cos(a0),sin(a0),r/h}),n1=nrm3({cos(a1),sin(a1),r/h});
-        addTri(g,b0,b1,ap,n0,n1,nrm3({(n0.x+n1.x)/2,(n0.y+n1.y)/2,(n0.z+n1.z)/2}),w,nullptr);
-        addTri(g,{0,0,-hz},b1,b0,{0,0,-1},{0,0,-1},{0,0,-1},w,nullptr); } }
+        float u0=(float)i/seg, u1=(float)(i+1)/seg;
+        float side[6]={u0,0, u1,0, 0.5f,1};                                                 // side: u=angle, apex at v=1
+        addTri(g,b0,b1,ap,n0,n1,nrm3({(n0.x+n1.x)/2,(n0.y+n1.y)/2,(n0.z+n1.z)/2}),w,side);
+        float cb[6]={0.5f,0.5f, (float)(cos(a1)*.5+.5),(float)(sin(a1)*.5+.5), (float)(cos(a0)*.5+.5),(float)(sin(a0)*.5+.5)};  // base cap: planar
+        addTri(g,{0,0,-hz},b1,b0,{0,0,-1},{0,0,-1},{0,0,-1},w,cb); } }
 static void genCapsule(double r,double h,int seg,Geometry& g){ genCyl(r,h,seg,g); double hz=h*.5; float w[3]={1,1,1}; int rings=6;
     auto hemi=[&](double zc,double sgn){ for(int i=0;i<rings;i++)for(int j=0;j<seg;j++){
         double t0=(M_PI/2)*i/rings,t1=(M_PI/2)*(i+1)/rings,p0=2*M_PI*j/seg,p1=2*M_PI*(j+1)/seg;
         auto pt=[&](double t,double p){ V3 d{sin(t)*cos(p),sin(t)*sin(p),sgn*cos(t)}; return std::pair<V3,V3>({d.x*r,d.y*r,zc+d.z*r},d); };
         auto A=pt(t0,p0),B=pt(t0,p1),C=pt(t1,p0),D=pt(t1,p1);
-        addTri(g,A.first,B.first,C.first,A.second,B.second,C.second,w,nullptr); addTri(g,B.first,D.first,C.first,B.second,D.second,C.second,w,nullptr); } };
+        float u0=(float)j/seg,u1=(float)(j+1)/seg, v0=(float)i/rings, v1=(float)(i+1)/rings;
+        float h1[6]={u0,v0, u1,v0, u0,v1}, h2[6]={u1,v0, u1,v1, u0,v1};
+        addTri(g,A.first,B.first,C.first,A.second,B.second,C.second,w,h1); addTri(g,B.first,D.first,C.first,B.second,D.second,C.second,w,h2); } };
     hemi(hz,1.0); hemi(-hz,-1.0); }
 
 int ChScene::countShapes() const {
@@ -210,17 +223,34 @@ void ChScene::build(RenderScene& scene){
                     float col[3]={vdef[0],vdef[1],vdef[2]}; shapeColor(sh,col); meshToGeom(mesh,g,faceMat,mf->GetMaterials(),col[0],col[1],col[2],sc); if(g.verts.empty()) continue; toTexIds(g,faceMat,mf->GetMaterials()); geomCache_[k]=(int)scene.geometries.size(); scene.geometries.push_back(std::move(g)); }
                 float t[3]={1,1,1}; addInstance(geomCache_[k],body,sf,t,0,false,nullptr);
             } else {
-                char k[96]={0}; bool ok=true; float col[3]={vdef[0],vdef[1],vdef[2]}; shapeColor(sh,col);
-                if(auto s2=std::dynamic_pointer_cast<ChVisualShapeBox>(sh)){ auto L=s2->GetLengths(); snprintf(k,96,"box:%.4f,%.4f,%.4f",L.x(),L.y(),L.z()); if(!geomCache_.count(k)){genBox(L.x(),L.y(),L.z(),g);} }
-                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeSphere>(sh)){ double r=s2->GetRadius(); snprintf(k,96,"sph:%.4f",r); if(!geomCache_.count(k)){genSphere(r,r,r,16,28,g);} }
-                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCylinder>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); snprintf(k,96,"cyl:%.4f,%.4f",r,h); if(!geomCache_.count(k)){genCyl(r,h,24,g);} }
-                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCapsule>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); snprintf(k,96,"cap:%.4f,%.4f",r,h); if(!geomCache_.count(k)){genCapsule(r,h,24,g);} }
-                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCone>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); snprintf(k,96,"cone:%.4f,%.4f",r,h); if(!geomCache_.count(k)){genCone(r,h,24,g);} }
-                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeEllipsoid>(sh)){ auto S=s2->GetSemiaxes(); snprintf(k,96,"ell:%.4f,%.4f,%.4f",S.x(),S.y(),S.z()); if(!geomCache_.count(k)){genSphere(S.x(),S.y(),S.z(),16,28,g);} }
+                char kb[96]={0}; bool ok=true; float col[3]={vdef[0],vdef[1],vdef[2]}; shapeColor(sh,col);
+                if(auto s2=std::dynamic_pointer_cast<ChVisualShapeBox>(sh)){ auto L=s2->GetLengths(); snprintf(kb,96,"box:%.4f,%.4f,%.4f",L.x(),L.y(),L.z()); }
+                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeSphere>(sh)){ double r=s2->GetRadius(); snprintf(kb,96,"sph:%.4f",r); }
+                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCylinder>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); snprintf(kb,96,"cyl:%.4f,%.4f",r,h); }
+                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCapsule>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); snprintf(kb,96,"cap:%.4f,%.4f",r,h); }
+                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCone>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); snprintf(kb,96,"cone:%.4f,%.4f",r,h); }
+                else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeEllipsoid>(sh)){ auto S=s2->GetSemiaxes(); snprintf(kb,96,"ell:%.4f,%.4f,%.4f",S.x(),S.y(),S.z()); }
                 else ok=false;
                 if(!ok) continue;
-                if(!geomCache_.count(k)){ g.texId.assign(g.triCount(),-1); g.opacity.assign(g.triCount(),1.0f); g.roughness.assign(g.triCount(),1.0f); g.metallic.assign(g.triCount(),0.0f); g.roughTexId.assign(g.triCount(),-1); g.metalTexId.assign(g.triCount(),-1); g.opacityTexId.assign(g.triCount(),-1); g.normalTexId.assign(g.triCount(),-1); g.specular.assign(g.triCount()*4,0.f); g.emissive.assign(g.triCount()*4,0.f); g.texScale.assign(g.triCount()*2,1.f); g.ksTexId.assign(g.triCount(),-1); g.keTexId.assign(g.triCount(),-1); geomCache_[k]=(int)scene.geometries.size(); scene.geometries.push_back(std::move(g)); }
-                addInstance(geomCache_[k],body,sf,col,0,false,nullptr);
+                // texture-aware cache key: same-size primitives with different textures must not share geometry
+                auto& pmats=sh->GetMaterials(); std::string ptex=pmats.empty()?std::string():pmats[0]->GetKdTexture();
+                std::string k=std::string(kb)+"|"+ptex;
+                if(!geomCache_.count(k)){
+                    if(auto s2=std::dynamic_pointer_cast<ChVisualShapeBox>(sh)){ auto L=s2->GetLengths(); genBox(L.x(),L.y(),L.z(),g); }
+                    else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeSphere>(sh)){ double r=s2->GetRadius(); genSphere(r,r,r,16,28,g); }
+                    else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCylinder>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); genCyl(r,h,24,g); }
+                    else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCapsule>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); genCapsule(r,h,24,g); }
+                    else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeCone>(sh)){ double r=s2->GetRadius(),h=s2->GetHeight(); genCone(r,h,24,g); }
+                    else if(auto s2=std::dynamic_pointer_cast<ChVisualShapeEllipsoid>(sh)){ auto S=s2->GetSemiaxes(); genSphere(S.x(),S.y(),S.z(),16,28,g); }
+                    if(g.verts.empty()) continue;
+                    // primitives carry a single material (index 0); UVs are generated by gen*(), so textures tile
+                    std::vector<int> fm(g.triCount(), pmats.empty()? -1 : 0);
+                    toTexIds(g,fm,pmats);
+                    geomCache_[k]=(int)scene.geometries.size(); scene.geometries.push_back(std::move(g));
+                }
+                // textured primitive -> white tint so the texture shows true; untextured -> flat diffuse color
+                float tintv[3]={col[0],col[1],col[2]}; if(!ptex.empty()){ tintv[0]=tintv[1]=tintv[2]=1.f; }
+                addInstance(geomCache_[k],body,sf,tintv,0,false,nullptr);
             }
         }
     };
