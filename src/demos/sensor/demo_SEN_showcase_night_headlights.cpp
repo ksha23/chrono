@@ -1,7 +1,7 @@
-// SHOWCASE (Metal RT): NIGHT DRIVE with SPOT-LIGHT HEADLIGHTS.
+// SHOWCASE: NIGHT DRIVE with SPOT-LIGHT HEADLIGHTS.
 // Near-black night scene (no sun, no env map, tiny ambient) lit only by two forward-pointing headlight spot
 // cones at the front of the Audi. Camera orbits across the front to sweep through the twin beams.
-// Headless: 150 PNG frames saved to demos_live/showcase_out/night_headlights/. No live window.
+// Headless: 150 PNG frames saved to SENSOR_OUTPUT/SHOWCASE_NIGHT_HEADLIGHTS/. No live window.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -24,13 +24,9 @@ using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_NIGHT_HEADLIGHTS/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -79,10 +75,10 @@ int main(int argc, char** argv) {
     auto cam = chrono_types::make_shared<ChCameraSensor>(audi.GetChassisBody(), 500.0f, cam_pose, 1280, 720,
                    (float)(CH_PI / 3), 2, CameraLensModelType::PINHOLE, false /*GI*/, true /*denoiser*/);
     cam->SetName("showcase_night_headlights");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/night_headlights/"));
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + ""));
     manager->AddSensor(cam);
 
-    printf("Showcase night headlights (Metal). PNGs -> demos_live/showcase_out/night_headlights/. 150 frames...\n");
+    printf("Showcase night headlights. PNGs -> SENSOR_OUTPUT/SHOWCASE_NIGHT_HEADLIGHTS/. 150 frames...\n");
     const double step = 2e-3;
     const int nframes = 150;
     const int on_frame = 42;     // headlights switch on here (a beat of darkness first)
@@ -92,7 +88,7 @@ int main(int argc, char** argv) {
     DriverInputs in; in.m_throttle = 0; in.m_steering = 0; in.m_braking = 1.0;  // parked
     for (int f = 0; f < nframes; ++f) {
         // IMPORTANT: the two headlight spots are added EVERY frame, even while "off" (intensity 0). If the
-        // scene's light list is left empty the Metal renderer synthesizes a default key + fill rig, which
+        // scene's light list is left empty the renderer may synthesize a default key + fill rig, which
         // would light the whole scene brightly during the off phase and then snap dark once the beams appear.
         float k = (f < on_frame) ? 0.f : std::min(1.f, (float)(f - on_frame + 1) / (float)ramp);  // 0->1 ramp
         // two headlight spots at the front corners, aimed forward and only ~15 deg down so the beams

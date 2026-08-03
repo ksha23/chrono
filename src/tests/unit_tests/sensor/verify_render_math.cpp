@@ -299,11 +299,6 @@ int main(int argc, char** argv) {
         if (!std::strcmp(argv[i], "--strict"))
             g_strict = true;
 
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/')
-        root += '/';
-    SetChronoDataPath(root + "data/");
 
     // -----------------------------------------------------------------------
     // scene definition -- every expectation below is derived from this table

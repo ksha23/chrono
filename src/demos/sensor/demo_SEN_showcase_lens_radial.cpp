@@ -1,7 +1,11 @@
-// SHOWCASE (METAL backend): wide-angle FISHEYE lens.
-// A stationary Audi on flat terrain under the shipped sky_2_4k HDR, camera orbiting the car with a very
-// wide FOV_LENS (equidistant fisheye) lens model so the horizon and env map bend around the frame.
-// HEADLESS: writes 150 PNGs to demos_live/showcase_out/lens_fisheye/ then returns (no live window).
+// SHOWCASE: RADIAL (barrel) lens distortion.
+// A stationary Audi on flat terrain under the shipped sky_2_4k HDR, camera orbiting with the RADIAL lens
+// model and a barrel-distortion polynomial (k1,k2,k3) so straight terrain/horizon lines bow outward -- an
+// action-cam / security-cam look. HEADLESS: writes 150 PNGs to SENSOR_OUTPUT/SHOWCASE_LENS_RADIAL/ then returns.
+//
+// NOTE: the RADIAL lens model IS supported by the ray-tracing backend. ChCameraSensor::SetRadialLensParameters(k1,k2,k3)
+// stores the coefficients (GetCameraDistortionCoefficients), which the backend's render filter feeds to its ray
+// generator as k1/k2/k3 in  k = 1 + k1*r^2 + k2*r^4 + k3*r^6. A negative k1 gives barrel distortion.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -24,20 +28,15 @@ using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_LENS_RADIAL/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
     sys.SetCollisionSystemType(ChCollisionSystem::Type::BULLET);
     sys.SetNumThreads(4);
 
-    // flat terrain patch (portable)
     RigidTerrain terrain(&sys);
     ChContactMaterialData minfo; minfo.mu = 0.9f; minfo.cr = 0.01f;
     auto patch_mat = minfo.CreateMaterial(ChContactMethod::SMC);
@@ -45,7 +44,6 @@ int main(int argc, char** argv) {
     patch->SetTexture(GetVehicleDataFile("terrain/textures/tile4.jpg"), 60, 24);
     terrain.Initialize();
 
-    // Audi, at origin, facing +x
     WheeledVehicle audi(&sys, GetVehicleDataFile("audi/json/audi_Vehicle.json"));
     audi.Initialize(ChCoordsys<>(ChVector3d(0, 0, 0.55), QUNIT));
     audi.SetChassisVisualizationType(VisualizationType::MESH);
@@ -69,7 +67,6 @@ int main(int argc, char** argv) {
     manager->scene->SetAmbientLight(ChVector3f(0.35f, 0.35f, 0.37f));
     manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
 
-    // Orbit params (see loop). Initial offset pose looking at the car.
     const double radius = 6.0, height = 1.8;
     const ChVector3d look(0, 0, 0.8);
     auto orbitPose = [&](double ang) {
@@ -78,15 +75,17 @@ int main(int argc, char** argv) {
         return ChFrame<double>(off, QuatFromAngleZ(std::atan2(d.y(), d.x())) * QuatFromAngleY(-std::asin(d.z())));
     };
 
-    // Wide-angle FISHEYE: FOV_LENS lens model with a very wide horizontal FOV (~2.5 rad).
+    // RADIAL lens model with a fairly wide FOV so the barrel distortion is obvious near the edges.
     auto cam = chrono_types::make_shared<ChCameraSensor>(
         audi.GetChassisBody(), 500.0f, orbitPose(0.0), 1280, 720,
-        2.5f /*hFOV ~143 deg fisheye*/, 1 /*ss*/, CameraLensModelType::FOV_LENS, false /*GI*/, false /*denoiser*/);
-    cam->SetName("lens_fisheye");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/lens_fisheye/"));
+        1.4f /*wide-ish hFOV*/, 1 /*ss*/, CameraLensModelType::RADIAL, false /*GI*/, false /*denoiser*/);
+    cam->SetName("lens_radial");
+    // Barrel distortion: negative leading coefficient bows straight lines outward toward the corners.
+    cam->SetRadialLensParameters(ChVector3f(-0.28f, 0.10f, 0.0f));
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + ""));
     manager->AddSensor(cam);
 
-    printf("Fisheye (FOV_LENS) showcase (Metal). PNGs -> demos_live/showcase_out/lens_fisheye/\n");
+    printf("Radial (barrel) distortion showcase. PNGs -> SENSOR_OUTPUT/SHOWCASE_LENS_RADIAL/\n");
     const double step = 2e-3;
     const int nframes = 150;
     double time = 0;

@@ -29,12 +29,6 @@ using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -162,7 +156,7 @@ int main(int argc, char** argv) {
     printf("\nbuffers delivered (non-zero => sensor is live): accel=%d gyro=%d magnet=%d gps=%d tach=%d\n",
            got_acc, got_gyro, got_mag, got_gps, got_tach);
     bool ok = got_acc && got_gyro && got_mag && got_gps && got_tach;
-    printf("RESULT: %s\n", ok ? "ALL FIVE DYNAMIC SENSORS WORK ON THE METAL BUILD"
+    printf("RESULT: %s\n", ok ? "ALL FIVE DYNAMIC SENSORS WORK ON THIS BUILD"
                               : "*** ONE OR MORE DYNAMIC SENSORS PRODUCED NO DATA ***");
     return ok ? 0 : 1;
 }

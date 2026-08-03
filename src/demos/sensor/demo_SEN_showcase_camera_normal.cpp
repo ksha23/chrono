@@ -1,7 +1,7 @@
-// SHOWCASE (Metal RT): PATH-TRACED GLOBAL ILLUMINATION.
-// A stationary Audi on flat terrain under the shipped sky_2_4k HDR, rendered with the camera's GI path so
-// soft indirect bounce light fills the shadows (vs. the flat baked-ambient look). Headless: orbits the Audi
-// and saves 150 PNG frames to demos_live/showcase_out/gi/. No live window.
+// SHOWCASE: Normal camera (ChNormalCamera).
+// A stationary Audi on flat terrain under the shipped sky_2_4k HDR environment map. The normal camera orbits
+// the car for 150 frames (full 360 deg) and saves each surface-normal frame (normals mapped to RGB) as a PNG,
+// then returns. HEADLESS. PNGs -> SENSOR_OUTPUT/SHOWCASE_CAMERA_NORMAL/
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -17,20 +17,16 @@
 #include "chrono_vehicle/wheeled_vehicle/vehicle/WheeledVehicle.h"
 
 #include "chrono_sensor/ChSensorManager.h"
-#include "chrono_sensor/sensors/ChCameraSensor.h"
+#include "chrono_sensor/sensors/ChNormalCamera.h"
 #include "chrono_sensor/filters/ChFilterSave.h"
 
 using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_CAMERA_NORMAL/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -65,33 +61,29 @@ int main(int argc, char** argv) {
     }
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
-    // low baked ambient -- GI supplies the fill light via indirect bounces off the ground + HDR sky
     manager->scene->AddDirectionalLight(ChColor(1.4f, 1.37f, 1.3f), 1.02625f, 0.50710f);
-    manager->scene->SetAmbientLight(ChVector3f(0.12f, 0.12f, 0.14f));
+    manager->scene->SetAmbientLight(ChVector3f(0.35f, 0.35f, 0.37f));
     manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
 
-    // GI camera: use_gi = true, denoiser = true (smooths the path-traced fill)
-    ChVector3d look(0, 0, 0.8);
-    ChVector3d cam_off(6.0, 0.0, 1.8);
-    ChVector3d d = (look - cam_off).GetNormalized();
-    ChFrame<double> cam_pose(cam_off, QuatFromAngleZ(std::atan2(d.y(), d.x())) * QuatFromAngleY(-std::asin(d.z())));
-    auto cam = chrono_types::make_shared<ChCameraSensor>(audi.GetChassisBody(), 500.0f, cam_pose, 1280, 720,
-                   (float)(CH_PI / 3), 2, CameraLensModelType::PINHOLE, true /*GI*/, true /*denoiser*/);
-    cam->SetName("showcase_gi");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/gi/"));
+    // Normal camera attached to the chassis; pose is updated each frame to orbit the car.
+    // ChNormalCamera(parent, updateRate, offsetPose, w, h, hFOV, lens=PINHOLE) -- no supersample arg.
+    auto cam = chrono_types::make_shared<ChNormalCamera>(
+        audi.GetChassisBody(), 500.0f, ChFrame<double>(), 1280, 720, (float)(CH_PI / 3));
+    cam->SetName("showcase_camera_normal");
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + ""));
     manager->AddSensor(cam);
 
-    printf("Showcase GI (Metal). PNGs -> demos_live/showcase_out/gi/. 150 frames...\n");
+    printf("Showcase Normal camera. PNGs -> SENSOR_OUTPUT/SHOWCASE_CAMERA_NORMAL/\n");
     const double step = 2e-3;
-    const int nframes = 150;
+    const int n_frames = 150;
+    const ChVector3d center(0, 0, 0.8);
     double time = 0;
     DriverInputs in; in.m_throttle = 0; in.m_steering = 0; in.m_braking = 1.0;  // parked
-    for (int f = 0; f < nframes; ++f) {
-        double ang = 2.0 * CH_PI * (double)f / (double)nframes;  // full orbit
-        cam_off = ChVector3d(6.0 * std::cos(ang), 6.0 * std::sin(ang), 1.8);
-        d = (look - cam_off).GetNormalized();
-        cam->SetOffsetPose(ChFrame<double>(cam_off,
-            QuatFromAngleZ(std::atan2(d.y(), d.x())) * QuatFromAngleY(-std::asin(d.z()))));
+    for (int frame = 0; frame < n_frames; ++frame) {
+        double ang = 2.0 * CH_PI * frame / (double)n_frames;
+        ChVector3d pos(6.0 * std::cos(ang), 6.0 * std::sin(ang), 1.8);
+        ChVector3d d = (center - pos).GetNormalized();
+        cam->SetOffsetPose(ChFrame<double>(pos, QuatFromAngleZ(std::atan2(d.y(), d.x())) * QuatFromAngleY(-std::asin(d.z()))));
 
         terrain.Synchronize(time);
         audi.Synchronize(time, in, terrain);

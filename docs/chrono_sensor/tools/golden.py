@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TIER 0 -- golden-image regression harness for the Chrono::Sensor Metal RT backend.
 
-Renders the small deterministic scene in ``docs/showcase/demos/verify_golden.cpp`` and
+Renders the small deterministic scene in ``src/demos/sensor/verify_golden.cpp`` and
 pixel-diffs the result against blessed reference frames, failing on any regression.
 
 Why this is the cheapest useful net
@@ -33,9 +33,9 @@ a bigger one, and never add multi-frame sequences here.
 
 Usage
 -----
-    python3 docs/showcase/tools/golden.py                 # check against references
-    python3 docs/showcase/tools/golden.py --bless         # update the references
-    python3 docs/showcase/tools/golden.py --keep-out DIR  # keep the rendered frames
+    python3 docs/chrono_sensor/tools/golden.py                 # check against references
+    python3 docs/chrono_sensor/tools/golden.py --bless         # update the references
+    python3 docs/chrono_sensor/tools/golden.py --keep-out DIR  # keep the rendered frames
 
 Exit code is 0 only if every image and every scalar signature is within tolerance.
 Requires Pillow and NumPy (both already in the ``chronopc`` conda env).
@@ -55,8 +55,8 @@ from PIL import Image, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
-DEFAULT_BIN = os.path.join(REPO, "docs", "showcase", "demos", "bin", "verify_golden")
-DEFAULT_REFS = os.path.join(REPO, "docs", "showcase", "golden")
+DEFAULT_BIN = os.path.join(REPO, "build", "bin", "verify_golden")
+DEFAULT_REFS = os.path.join(REPO, "docs", "chrono_sensor", "golden")
 
 # Rendered by verify_golden; "base" uses a procedural sky, "env" the shipped HDR map.
 MODES = ("base", "env")
@@ -96,7 +96,11 @@ def load_ref(path):
 def render(binary, out_dir, env=None):
     os.makedirs(out_dir, exist_ok=True)
     for mode in MODES:
-        proc = subprocess.run([binary, out_dir, mode], cwd=REPO, capture_output=True, text=True, env=env)
+        # Chrono's default data path is RELATIVE (../data/), so demos and tests only resolve
+        # their assets when run from build/bin. Running from the repo root silently loses every
+        # texture and HDR map, which changes only the shaded images -- a confusing failure.
+        proc = subprocess.run([binary, out_dir, mode], cwd=os.path.dirname(os.path.abspath(binary)),
+                              capture_output=True, text=True, env=env)
         if proc.returncode != 0:
             sys.stderr.write(proc.stdout + proc.stderr)
             raise SystemExit(f"golden: verify_golden {mode} failed with code {proc.returncode}")
@@ -165,7 +169,7 @@ def main():
 
     if not os.path.exists(args.bin):
         raise SystemExit(f"golden: {args.bin} not found -- build it with\n"
-                         f"    bash docs/showcase/demos/build.sh verify_golden")
+                         f"    ninja -C build verify_golden")
 
     tmp = args.keep_out or tempfile.mkdtemp(prefix="chrono_golden_")
     try:

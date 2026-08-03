@@ -1,4 +1,4 @@
-// SHOWCASE (Metal RT, HEADLESS): a genuine MULTI-SENSOR rig -- FOUR co-located sensors run at once off
+// SHOWCASE (headless): a genuine MULTI-SENSOR rig -- FOUR co-located sensors run at once off
 // the same driving Audi and each produces a capturable image, tiled into a 2x2 panel by the webp step:
 //   * RGB camera            (ChCameraSensor)        -> multisensor/rgb/
 //   * Depth camera          (ChDepthCamera)         -> multisensor/depth/
@@ -53,13 +53,9 @@ static void SetSemantic(std::shared_ptr<ChBody> body, unsigned short cls, unsign
     }
 }
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_MULTISENSOR/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -133,23 +129,23 @@ int main(int argc, char** argv) {
 
     auto rgb = chrono_types::make_shared<ChCameraSensor>(parent, 30.0f, pose, W, H, FOV, 1,
                    CameraLensModelType::PINHOLE, false, false);
-    rgb->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/multisensor/rgb/"));
+    rgb->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + "rgb/"));
     manager->AddSensor(rgb);
 
     auto depth = chrono_types::make_shared<ChDepthCamera>(parent, 30.0f, pose, W, H, FOV, 45.0f);
-    depth->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/multisensor/depth/"));
+    depth->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + "depth/"));
     manager->AddSensor(depth);
 
     auto normal = chrono_types::make_shared<ChNormalCamera>(parent, 30.0f, pose, W, H, FOV);
-    normal->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/multisensor/normal/"));
+    normal->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + "normal/"));
     manager->AddSensor(normal);
 
     auto seg = chrono_types::make_shared<ChSegmentationCamera>(parent, 30.0f, pose, W, H, FOV);
-    seg->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/multisensor/seg/"));
+    seg->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + "seg/"));
     manager->AddSensor(seg);
 
-    printf("Showcase multisensor (Metal, headless): RGB + Depth + Normal + Segmentation.\n"
-           "  -> demos_live/showcase_out/multisensor/{rgb,depth,normal,seg}/\n");
+    printf("Showcase multisensor (headless): RGB + Depth + Normal + Segmentation.\n"
+           "  -> SENSOR_OUTPUT/SHOWCASE_MULTISENSOR/{rgb,depth,normal,seg}/\n");
     const double step = 1e-3;  // fine sim step (stable), matches `autonomous`
     double time = 0;
     // 5.0 s @ 30 Hz => ~150 saved frames per sensor.

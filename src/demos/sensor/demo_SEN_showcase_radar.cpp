@@ -1,12 +1,13 @@
-// SHOWCASE (Metal RT, HEADLESS): a forward-looking Doppler RADAR.
+// SHOWCASE (headless): a forward-looking Doppler RADAR.
 // The Audi drives toward a field of obstacles; a front-mounted radar returns range + azimuth + Doppler for
 // each hit. Each frame's returns (ChFilterRadarAccess) are dumped to a small binary; the webp step renders a
 // top-down radar plot -- returns placed in the sensor's forward FOV wedge, coloured by closing speed (Doppler).
-//   -> demos_live/showcase_out/radar/{scan,cam}/   (custom return buffers, rendered to webp in python)
+//   -> SENSOR_OUTPUT/SHOWCASE_RADAR/{scan,cam}/   (custom return buffers, rendered to webp in python)
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -29,13 +30,9 @@ using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_RADAR/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -109,12 +106,12 @@ int main(int argc, char** argv) {
     auto cam = chrono_types::make_shared<ChCameraSensor>(audi.GetChassisBody(), 10.0f, cam_pose, 720, 720,
                    (float)(CH_PI / 3), 1, CameraLensModelType::PINHOLE, false, false);
     cam->SetName("radar_companion_cam");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/radar/cam/"));
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + "cam/"));
     manager->AddSensor(cam);
 
-    printf("Showcase radar (Metal, headless): forward Doppler radar -> top-down plot.\n"
-           "  -> demos_live/showcase_out/radar/{scan,cam}/\n");
-    std::system("mkdir -p demos_live/showcase_out/radar/scan");
+    printf("Showcase radar (headless): forward Doppler radar -> top-down plot.\n"
+           "  -> SENSOR_OUTPUT/SHOWCASE_RADAR/{scan,cam}/\n");
+    std::filesystem::create_directories(out_dir + "scan");
     const double step = 1e-3;
     double time = 0, last_ts = -1;
     int saved = 0;
@@ -131,7 +128,7 @@ int main(int argc, char** argv) {
         auto buf = radar->GetMostRecentBuffer<UserRadarBufferPtr>();
         if (buf && buf->Buffer && buf->TimeStamp > last_ts + 1e-6) {
             last_ts = buf->TimeStamp;
-            char fn[256]; snprintf(fn, sizeof(fn), "demos_live/showcase_out/radar/scan/frame_%d.bin", saved++);
+            const std::string fn = out_dir + "scan/frame_" + std::to_string(saved++) + ".bin";
             std::ofstream os(fn, std::ios::binary);
             int32_t w = (int32_t)buf->Width, h = (int32_t)buf->Height;
             float hdr[3] = {HFOV, VFOV, MAXD};

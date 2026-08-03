@@ -1,7 +1,7 @@
-// SHOWCASE: Chrono::Sensor Metal RT backend -- Depth camera (ChDepthCamera).
-// A stationary Audi on flat terrain under the shipped sky_2_4k HDR environment map. The depth camera orbits
-// the car for 150 frames (full 360 deg) and saves each colorized depth frame as a PNG, then returns. HEADLESS.
-// PNGs -> demos_live/showcase_out/camera_depth/
+// SHOWCASE: Segmentation camera (ChSegmentationCamera).
+// A stationary Audi on flat terrain under the shipped sky_2_4k HDR environment map. The segmentation camera
+// orbits the car for 150 frames (full 360 deg) and saves each semantic-label frame as a PNG, then returns.
+// HEADLESS. PNGs -> SENSOR_OUTPUT/SHOWCASE_CAMERA_SEGMENTATION/
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -10,6 +10,8 @@
 
 #include "chrono/physics/ChSystemSMC.h"
 #include "chrono/core/ChRotation.h"
+#include "chrono/assets/ChVisualMaterial.h"
+#include "chrono/assets/ChVisualShape.h"
 
 #include "chrono_vehicle/ChVehicleDataPath.h"
 #include "chrono_vehicle/terrain/RigidTerrain.h"
@@ -17,20 +19,16 @@
 #include "chrono_vehicle/wheeled_vehicle/vehicle/WheeledVehicle.h"
 
 #include "chrono_sensor/ChSensorManager.h"
-#include "chrono_sensor/sensors/ChDepthCamera.h"
+#include "chrono_sensor/sensors/ChSegmentationCamera.h"
 #include "chrono_sensor/filters/ChFilterSave.h"
 
 using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_CAMERA_SEGMENTATION/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -64,20 +62,36 @@ int main(int argc, char** argv) {
             }
     }
 
+    // Assign semantic (class, instance) labels so the segmentation camera has something to separate.
+    // Without this every material's class id is 0 and the whole frame is a single (blank) label.
+    auto tag = [](std::shared_ptr<ChBody> body, unsigned short cls, unsigned short inst) {
+        if (auto vm = body->GetVisualModel())
+            for (auto& si : vm->GetShapeInstances()) {
+                auto& mats = si.shape->GetMaterials();
+                if (mats.empty()) {
+                    auto m = chrono_types::make_shared<ChVisualMaterial>();
+                    m->SetClassID(cls); m->SetInstanceID(inst); si.shape->AddMaterial(m);
+                } else for (auto& m : mats) { m->SetClassID(cls); m->SetInstanceID(inst); }
+            }
+    };
+    tag(patch->GetGroundBody(), 1, 1);   // terrain = class 1
+    tag(audi.GetChassisBody(), 2, 2);    // car     = class 2
+
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
     manager->scene->AddDirectionalLight(ChColor(1.4f, 1.37f, 1.3f), 1.02625f, 0.50710f);
     manager->scene->SetAmbientLight(ChVector3f(0.35f, 0.35f, 0.37f));
     manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
 
-    // Depth camera attached to the chassis; pose is updated each frame to orbit the car.
-    // ChDepthCamera(parent, updateRate, offsetPose, w, h, hFOV, maxDepth=1000, lens=PINHOLE) -- no supersample arg.
-    auto cam = chrono_types::make_shared<ChDepthCamera>(
-        audi.GetChassisBody(), 500.0f, ChFrame<double>(), 1280, 720, (float)(CH_PI / 3), 20.0f /*maxDepth*/);
-    cam->SetName("showcase_camera_depth");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/camera_depth/"));
+    // Segmentation camera attached to the chassis; pose is updated each frame to orbit the car.
+    // ChSegmentationCamera(parent, updateRate, offsetPose, w, h, hFOV, lens=PINHOLE) -- no supersample arg.
+    // Output is a semantic (class/instance) buffer, saved directly by ChFilterSave.
+    auto cam = chrono_types::make_shared<ChSegmentationCamera>(
+        audi.GetChassisBody(), 500.0f, ChFrame<double>(), 1280, 720, (float)(CH_PI / 3));
+    cam->SetName("showcase_camera_segmentation");
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + ""));
     manager->AddSensor(cam);
 
-    printf("Showcase Depth camera (Metal). PNGs -> demos_live/showcase_out/camera_depth/\n");
+    printf("Showcase Segmentation camera. PNGs -> SENSOR_OUTPUT/SHOWCASE_CAMERA_SEGMENTATION/\n");
     const double step = 2e-3;
     const int n_frames = 150;
     const ChVector3d center(0, 0, 0.8);

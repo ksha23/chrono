@@ -3,7 +3,6 @@
 >
 > | script | purpose |
 > |---|---|
-> | `run_tests.py` | **single entry point** — runs every test tier that works on this machine and prints a pass/fail summary |
 > | `golden.py` | tier 0, golden-image regression against `../golden/` (`--bless` to update) |
 > | `parity.py` + `PARITY.md` | tier 4, cross-backend Metal-vs-OptiX parity **report** (needs an NVIDIA GPU) |
 >
@@ -12,7 +11,7 @@
 
 # Reproducing the showcase animations
 
-Every `.webp` in [`../../../media/sensor-showcase/`](../../../media/sensor-showcase/) is produced by a two-step pipeline: a **simulation demo** writes raw
+Every `.webp` in [`../../../docs/chrono_sensor/webp/`](../../../docs/chrono_sensor/webp/) is produced by a two-step pipeline: a **simulation demo** writes raw
 sensor frames, then a **Python post-processing script** turns that frame sequence into an animated WebP.
 
 ## 1. Build the demos
@@ -20,11 +19,11 @@ sensor frames, then a **Python post-processing script** turns that frame sequenc
 The Chrono libraries must already be built (e.g. `ninja Chrono_sensor` in your build dir), then:
 
 ```bash
-CHRONO_BUILD=/path/to/build ../demos/build.sh      # -> ../demos/bin/showcase_*
+cmake -S . -B build && ninja -C build      # demos build with the rest of Chrono
 ```
 
-`build.sh` honours `CHRONO_ROOT` (repo root), `CHRONO_BUILD` (build dir with `lib/`), `OUT_DIR`, and
-`EIGEN_INCLUDE`. Each demo also reads `$CHRONO_ROOT` at runtime to locate `data/`, falling back to the root
+The showcase demos are ordinary Chrono demos (`src/demos/sensor/demo_SEN_showcase_*.cpp`) and land in
+`build/bin`. Run them from there -- Chrono resolves its data directory relative to the working directory.
 it was compiled against.
 
 ## 2. Run a demo
@@ -33,7 +32,7 @@ Demos are headless and finite — they render a fixed number of frames, write th
 `demos_live/showcase_out/<name>/`, and exit. Run them from the repo root:
 
 ```bash
-./docs/showcase/demos/bin/showcase_camera_rgb
+./build/bin/showcase_camera_rgb
 ```
 
 ## 3. Convert frames to an animated WebP
@@ -47,12 +46,12 @@ Demos are headless and finite — they render a fixed number of frames, write th
 | `segutil.py` | Shared helpers (frame loading, segmentation palette, depth contrast stretch). |
 
 ```bash
-python3 mkwebp.py     demos_live/showcase_out/camera_rgb  media/sensor-showcase/camera_rgb.webp --fps 24
+python3 mkwebp.py     demos_live/showcase_out/camera_rgb  docs/chrono_sensor/webp/camera_rgb.webp --fps 24
 python3 mkwebp.py     demos_live/showcase_out/camera_segmentation \
-                      media/sensor-showcase/camera_segmentation.webp --fps 24 --seg
-python3 mkcomposite.py demos_live/showcase_out/multisensor media/sensor-showcase/multisensor.webp --fps 24
-python3 mklidar.py    demos_live/showcase_out/lidar       media/sensor-showcase/lidar.webp --fps 18
-python3 mkradar.py    demos_live/showcase_out/radar       media/sensor-showcase/radar.webp --fps 18
+                      docs/chrono_sensor/webp/camera_segmentation.webp --fps 24 --seg
+python3 mkcomposite.py demos_live/showcase_out/multisensor docs/chrono_sensor/webp/multisensor.webp --fps 24
+python3 mklidar.py    demos_live/showcase_out/lidar       docs/chrono_sensor/webp/lidar.webp --fps 18
+python3 mkradar.py    demos_live/showcase_out/radar       docs/chrono_sensor/webp/radar.webp --fps 18
 ```
 
 Requires **Pillow** and **NumPy** (both already in the `chronopc` conda env). Pillow's WebP encoder is used

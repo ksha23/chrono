@@ -53,7 +53,53 @@ if(CH_USE_SENSOR_OPTIX)
         demo_SEN_CRM_Rendering
       )
   endif()
-  
+
+endif()
+
+if(CH_USE_SENSOR_METAL_RT)
+    set(DEMOS ${DEMOS}
+        demo_SEN_JSON
+        demo_SEN_camera
+        demo_SEN_lidar
+        demo_SEN_radar
+        demo_SEN_phys_cam
+        demo_SEN_tachometer
+    )
+
+    if(CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
+        set(DEMOS ${DEMOS}
+          demo_SEN_metal_quarterpanel
+        )
+    endif()
+endif()
+
+# --------------------------------------------------------------
+# Feature showcase.
+#
+# These configure the scene only through the public ChScene API and standard sensors, so they
+# build against any ray-tracing backend. They drive a vehicle, so they additionally need the
+# vehicle module and its models.
+if(CH_USE_SENSOR_OPTIX OR CH_USE_SENSOR_VULKAN_RT OR CH_USE_SENSOR_METAL_RT)
+    if(CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
+        set(DEMOS ${DEMOS}
+            demo_SEN_showcase_camera_rgb
+            demo_SEN_showcase_camera_depth
+            demo_SEN_showcase_camera_normal
+            demo_SEN_showcase_camera_segmentation
+            demo_SEN_showcase_lens_fisheye
+            demo_SEN_showcase_lens_radial
+            demo_SEN_showcase_physcam_dof
+            demo_SEN_showcase_physcam_grain
+            demo_SEN_showcase_gi
+            demo_SEN_showcase_arealights
+            demo_SEN_showcase_envmap
+            demo_SEN_showcase_fog
+            demo_SEN_showcase_night_headlights
+            demo_SEN_showcase_lidar
+            demo_SEN_showcase_radar
+            demo_SEN_showcase_multisensor
+        )
+    endif()
 endif()
 
 list(REMOVE_DUPLICATES DEMOS)

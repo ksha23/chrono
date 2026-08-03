@@ -41,7 +41,7 @@ casts a wider penumbra than a point light) rather than pixel values.
 
 ## 2. Producing the OptiX side
 
-`docs/showcase/demos/verify_golden.cpp` is written entirely against the **shared public sensor API**
+`src/demos/sensor/verify_golden.cpp` is written entirely against the **shared public sensor API**
 — `ChSensorManager`, `ChCameraSensor`, `ChDepthCamera`, `ChNormalCamera`, `ChSegmentationCamera`,
 `ChLidarSensor`, `ChRadarSensor`, `ChFilterSave`, and the `ChScene` methods that
 `ChMetalRTScene` mirrors exactly (commit `5a2542b49`). It therefore compiles and runs unchanged on an
@@ -54,18 +54,16 @@ Build Chrono with the sensor module and OptiX enabled the same way you would for
 
 ```bash
 # from the repo root, with the Chrono libs already built in $CHRONO_BUILD
-CHRONO_BUILD=/path/to/build bash docs/showcase/demos/build.sh verify_golden
+cmake -S . -B build && ninja -C build verify_golden
 
 mkdir -p /tmp/optix_golden
-./docs/showcase/demos/bin/verify_golden /tmp/optix_golden base
-./docs/showcase/demos/bin/verify_golden /tmp/optix_golden env
+./build/bin/verify_golden /tmp/optix_golden base
+./build/bin/verify_golden /tmp/optix_golden env
 ```
 
 That writes ten PNGs (`<name>/frame_0.png`) plus `signature.txt`. Copy the whole directory back.
 
-> `build.sh` is a plain `c++` invocation against an existing build tree; it honours `CHRONO_ROOT`,
-> `CHRONO_BUILD`, `OUT_DIR` and `EIGEN_INCLUDE`. If your Chrono is configured differently, compiling
-> `verify_golden.cpp` as an ordinary Chrono demo works just as well — it has no special requirements.
+> `verify_golden` is built with the rest of Chrono and lands in `build/bin`; run it from there.
 
 **Sanity check before you copy anything back:** every camera must report exactly one launch, and the
 program exits non-zero if not. If `signature.txt` is missing or a `frame_0.png` is absent, the run
@@ -79,11 +77,11 @@ Either render it fresh:
 
 ```bash
 mkdir -p /tmp/metal_golden
-./docs/showcase/demos/bin/verify_golden /tmp/metal_golden base
-./docs/showcase/demos/bin/verify_golden /tmp/metal_golden env
+./build/bin/verify_golden /tmp/metal_golden base
+./build/bin/verify_golden /tmp/metal_golden env
 ```
 
-or just use the blessed references already committed at `docs/showcase/golden/`, which are the same
+or just use the blessed references already committed at `docs/chrono_sensor/golden/`, which are the same
 frames stored upright. `parity.py` accepts either layout and flips as needed.
 
 ---
@@ -91,7 +89,7 @@ frames stored upright. `parity.py` accepts either layout and flips as needed.
 ## 4. Running the comparison
 
 ```bash
-python3 docs/showcase/tools/parity.py docs/showcase/golden /tmp/optix_golden --out /tmp/parity_report
+python3 docs/chrono_sensor/tools/parity.py docs/chrono_sensor/golden /tmp/optix_golden --out /tmp/parity_report
 ```
 
 This prints a Markdown report and writes it to `/tmp/parity_report/REPORT.md`, along with
@@ -135,8 +133,8 @@ on a driver update. The GEOMETRY group *is* tight enough to gate on, and `parity
 the segmentation class IoU. Day-to-day regression protection comes from the tiers that do not need a
 second GPU at all:
 
-- `docs/showcase/tools/golden.py` — pixel-exact self-comparison on one machine (tier 0)
-- `docs/showcase/demos/verify_render_math.cpp` — analytic ground truth, no second renderer involved
+- `docs/chrono_sensor/tools/golden.py` — pixel-exact self-comparison on one machine (tier 0)
+- `src/demos/sensor/verify_render_math.cpp` — analytic ground truth, no second renderer involved
   (tier 1)
 - `src/tests/unit_tests/sensor/utest_SEN_metal_stochastic.cpp` — statistical properties (tier 2)
 

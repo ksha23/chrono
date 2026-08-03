@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TIER 4 -- cross-backend PARITY REPORT (Metal RT vs OptiX).
 
-    python3 docs/showcase/tools/parity.py METAL_DIR OPTIX_DIR [--out DIR]
+    python3 docs/chrono_sensor/tools/parity.py METAL_DIR OPTIX_DIR [--out DIR]
 
 This is a REPORT TO READ, NOT A PASS/FAIL GATE. It has no opinion about whether the two
 backends "match"; it measures how far apart they are, channel by channel, and groups the

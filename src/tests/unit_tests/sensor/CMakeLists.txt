@@ -41,3 +41,39 @@ set(LIBS Chrono_core Chrono_sensor)
 
 message(STATUS "Add unit test programs for SENSOR module")
 build_utests(YES "${TESTS}" "sensor" "${LIBS}")
+
+# --- standalone verification programs -------------------------------------------------
+# These print measurements and return non-zero on failure, so they have their own main()
+# and cannot go through build_utests (which links gtest_main). They are registered with
+# CTest directly, exactly as build_utests does, and run under the same label so that
+#     ctest -L sensor
+# is the single entry point for the whole module -- no bespoke runner script.
+#
+# WORKING_DIRECTORY matters: Chrono resolves its data directory relative to the working
+# directory, so a test launched from anywhere else silently loses every texture and HDR map.
+if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
+    set(VERIFY_WORKING_DIR "${EXECUTABLE_OUTPUT_PATH}/Release")
+else()
+    set(VERIFY_WORKING_DIR ${EXECUTABLE_OUTPUT_PATH})
+endif()
+
+set(VERIFY_PROGS verify_render_math verify_golden)
+if(CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
+  set(VERIFY_PROGS ${VERIFY_PROGS} verify_dynamic_sensors)
+endif()
+
+foreach(PROGRAM ${VERIFY_PROGS})
+  add_executable(${PROGRAM} ${PROGRAM}.cpp)
+  set_target_properties(${PROGRAM} PROPERTIES FOLDER tests)
+  target_include_directories(${PROGRAM} PRIVATE "${CMAKE_SOURCE_DIR}/src/chrono_thirdparty")
+  target_link_libraries(${PROGRAM} Chrono_core Chrono_sensor)
+  if(CH_ENABLE_MODULE_VEHICLE)
+    target_link_libraries(${PROGRAM} Chrono_vehicle)
+    if(CH_ENABLE_MODULE_VEHICLE_MODELS)
+      target_link_libraries(${PROGRAM} ChronoModels_vehicle)
+    endif()
+  endif()
+  install(TARGETS ${PROGRAM} CONFIGURATIONS Release DESTINATION ${CH_INSTALL_DEMO})
+  add_test(${PROGRAM} ${PROJECT_BINARY_DIR}/bin/${PROGRAM})
+  set_tests_properties(${PROGRAM} PROPERTIES WORKING_DIRECTORY ${VERIFY_WORKING_DIR} LABELS "sensor")
+endforeach()

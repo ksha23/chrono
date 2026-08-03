@@ -1,7 +1,7 @@
-// SHOWCASE (Metal RT): GLOSSY HDR ENVIRONMENT REFLECTIONS.
+// SHOWCASE: GLOSSY HDR ENVIRONMENT REFLECTIONS.
 // The Audi sits under the driving_school_4k HDR environment map, which lights the scene AND is mirrored in
 // the car's glossy paint and glass. As the camera orbits, the reflected surroundings sweep across the body.
-// Headless: full orbit, 150 PNG frames saved to demos_live/showcase_out/envmap/. No live window.
+// Headless: full orbit, 150 PNG frames saved to SENSOR_OUTPUT/SHOWCASE_ENVMAP/. No live window.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -24,13 +24,9 @@ using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_ENVMAP/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -76,10 +72,10 @@ int main(int argc, char** argv) {
     auto cam = chrono_types::make_shared<ChCameraSensor>(audi.GetChassisBody(), 500.0f, cam_pose, 1280, 720,
                    (float)(CH_PI / 3), 2, CameraLensModelType::PINHOLE, false /*GI*/, false /*denoiser*/);
     cam->SetName("showcase_envmap");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/envmap/"));
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + ""));
     manager->AddSensor(cam);
 
-    printf("Showcase env-map reflections (Metal). PNGs -> demos_live/showcase_out/envmap/. 150 frames...\n");
+    printf("Showcase env-map reflections. PNGs -> SENSOR_OUTPUT/SHOWCASE_ENVMAP/. 150 frames...\n");
     const double step = 2e-3;
     const int nframes = 150;
     double time = 0;

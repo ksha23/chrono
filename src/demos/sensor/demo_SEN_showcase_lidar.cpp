@@ -1,12 +1,13 @@
-// SHOWCASE (Metal RT, HEADLESS): a real 360-degree LIDAR.
+// SHOWCASE (headless): a real 360-degree LIDAR.
 // A roof-mounted multi-beam lidar scans the scene as the Audi drives past a lane of obstacles. Each scan's
 // range/intensity buffer (ChFilterDIAccess) is dumped to a small binary; the webp step reconstructs a
 // car-centric BIRD'S-EYE point cloud (points coloured by height) -- the classic self-driving lidar view.
-//   -> demos_live/showcase_out/lidar/{scan,cam}/   (custom range buffers, rendered to webp in python)
+//   -> SENSOR_OUTPUT/SHOWCASE_LIDAR/{scan,cam}/   (custom range buffers, rendered to webp in python)
 #include <cmath>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <string>
 
@@ -29,13 +30,9 @@ using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_LIDAR/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -108,12 +105,12 @@ int main(int argc, char** argv) {
     auto cam = chrono_types::make_shared<ChCameraSensor>(audi.GetChassisBody(), 10.0f, cam_pose, 720, 720,
                    (float)(CH_PI / 3), 1, CameraLensModelType::PINHOLE, false, false);
     cam->SetName("lidar_companion_cam");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/lidar/cam/"));
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + "cam/"));
     manager->AddSensor(cam);
 
-    printf("Showcase lidar (Metal, headless): 360-degree scan -> BEV point cloud.\n"
-           "  -> demos_live/showcase_out/lidar/{scan,cam}/\n");
-    std::system("mkdir -p demos_live/showcase_out/lidar/scan");
+    printf("Showcase lidar (headless): 360-degree scan -> BEV point cloud.\n"
+           "  -> SENSOR_OUTPUT/SHOWCASE_LIDAR/{scan,cam}/\n");
+    std::filesystem::create_directories(out_dir + "scan");
     const double step = 1e-3;
     double time = 0, last_ts = -1;
     int saved = 0;
@@ -130,7 +127,7 @@ int main(int argc, char** argv) {
         auto buf = lidar->GetMostRecentBuffer<UserDIBufferPtr>();
         if (buf && buf->Buffer && buf->TimeStamp > last_ts + 1e-6) {
             last_ts = buf->TimeStamp;
-            char fn[256]; snprintf(fn, sizeof(fn), "demos_live/showcase_out/lidar/scan/frame_%d.bin", saved++);
+            const std::string fn = out_dir + "scan/frame_" + std::to_string(saved++) + ".bin";
             std::ofstream os(fn, std::ios::binary);
             int32_t w = (int32_t)buf->Width, h = (int32_t)buf->Height;
             float hdr[4] = {HFOV, VMAX, VMIN, MAXD};

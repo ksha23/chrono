@@ -87,11 +87,6 @@ static void Paint(std::shared_ptr<ChBody> b,
 }
 
 int main(int argc, char** argv) {
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/')
-        root += '/';
-    SetChronoDataPath(root + "data/");
 
     std::string out = (argc > 1) ? std::string(argv[1]) : std::string("docs/showcase/golden/_out");
     if (!out.empty() && out.back() != '/')

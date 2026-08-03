@@ -1,15 +1,17 @@
-// SHOWCASE (METAL backend): shallow DEPTH OF FIELD via ChPhysCameraSensor.
+// SHOWCASE: full PHYSICS-BASED SENSOR chain via ChPhysCameraSensor.
+// Strong optical cos^4 vignette + real sensor grain, driven entirely by the physical camera parameters.
 //
-// This is the PHYSICS-BASED camera (ChPhysCameraSensor), the same class the OptiX backend uses -- not the
-// Metal-only scene knobs. Bokeh comes from ChFilterPhysCameraDefocusBlur, whose blur diameter is derived from
-// the real lens geometry and the per-pixel depth:
+// ChPhysCameraSensor, running all four post-render stages on whichever ray-tracing backend is built:
 //
-//     blur_diameter[px] = f^2 * |d - U| / (N * C * d * (U - f))
+//   ChFilterPhysCameraVignetting  E <- E * (1 - G + G * cos^4(theta))          (cos^4 illumination falloff)
+//   ChFilterPhysCameraAggregator  E <- E * G * P / N^2 * C^2 * t * QE          (irradiance -> electrons)
+//   ChFilterPhysCameraNoise       I  = L + N_read, L ~ Poisson(mu + D*t)       (shot / dark / read / FPN noise)
+//   ChFilterPhysCameraExpsrToDV   I  = a * ISO * E + b                         (camera response function)
 //
-// with f = focal length, U = focus distance, N = aperture number (f/D), C = pixel pitch, d = pixel depth.
-// A stationary Audi on flat terrain under the shipped sky_2_4k HDR; the camera orbits with the focal plane on
-// the car, so the terrain and horizon melt into bokeh while the Audi stays sharp.
-// HEADLESS: writes 150 PNGs to demos_live/showcase_out/physcam_dof/ then returns.
+// Camera model parameters are those of a Blackfly S BFS-U3-31S4C with a 12 mm lens, matching
+// src/demos/sensor/demo_SEN_phys_cam.cpp, so the identical setup runs on either backend.
+// A stationary Audi on flat terrain under the shipped sky_2_4k HDR, camera orbiting.
+// HEADLESS: writes 150 PNGs to SENSOR_OUTPUT/SHOWCASE_PHYSCAM_GRAIN/ then returns.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -37,7 +39,7 @@ using namespace chrono::sensor;
 
 // The phys-camera chain ends in an RGBA16 buffer (ChFilterImageHalf4ToRGBA16), which ChFilterSave dumps as a
 // raw .bin. The showcase suite wants PNGs, so tone the 16-bit values down to 8 bits here. Written vertically
-// flipped to match ChFilterSave (docs/showcase/tools/mkwebp.py flips every frame back upright).
+// flipped to match ChFilterSave (docs/chrono_sensor/tools/mkwebp.py flips every frame back upright).
 static void save_rgba16_png(const std::string& path, const UserRGBA16BufferPtr& buf) {
     if (!buf || !buf->Buffer)
         return;
@@ -53,13 +55,9 @@ static void save_rgba16_png(const std::string& path, const UserRGBA16BufferPtr& 
     stbi_write_png(path.c_str(), (int)buf->Width, (int)buf->Height, 4, px.data(), (int)buf->Width * 4);
 }
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_PHYSCAM_GRAIN/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -111,59 +109,73 @@ int main(int argc, char** argv) {
         orbitPose(0.0),                  // offset pose
         W, H,                            // image size, [px]
         CameraLensModelType::PINHOLE,    // lens model
-        2,                               // supersampling factor
+        1,                               // supersampling factor
         false,                           // use_diffuse_reflect (GI)
-        true,                            // use_denoiser
-        true,                            // use_defocus_blur   <-- the effect this demo shows
-        false,                           // use_vignetting
-        false,                           // use_aggregator
-        false,                           // use_noise
-        false,                           // use_expsr_to_dv
+        false,                           // use_denoiser
+        false,                           // use_defocus_blur
+        true,                            // use_vignetting     <-- cos^4 falloff
+        true,                            // use_aggregator     <-- irradiance -> electrons
+        true,                            // use_noise          <-- shot / dark / read / FPN
+        true,                            // use_expsr_to_dv    <-- camera response function
         Integrator::LEGACY,
         2.2f,                            // gamma (sRGB)
         false,                           // use_fog
         false                            // use_motion_blur
     );
 
-    // 12 mm lens focused on the car at the 6 m orbit radius, at f/2.0. The blur diameter is <= 1 px (i.e. the
-    // filter treats the pixel as sharp) while  |d - U| <= N*C*d*(U - f)/f^2, which for these numbers is
-    // d in [4.66 m, 8.41 m]. The car spans roughly 5.1-6.9 m of depth seen side-on from 6 m, so the WHOLE
-    // Audi stays sharp, while the terrain in front (d ~ 3 m) and behind (d -> 30 m+) reaches the blur
-    // asymptote f^2/(N*C*(U-f)) ~ 3.5 px, scaled by defocus_gain into a 35-41 px bokeh.
+    // Camera model parameters: Blackfly S BFS-U3-31S4C, 12 mm lens (as in demo_SEN_phys_cam.cpp).
     const float focal_length = 0.012f;                                       // [m]
     const float hFOV = (float)(CH_PI / 3);                                   // 60 deg, matching the other demos
     const float sensor_width = 2.f * focal_length * std::tan(hFOV / 2.f);    // [m]
-    const float pixel_size = 3.45e-6f;                                       // [m] (Blackfly S BFS-U3-31S4C)
+    const float pixel_size = 3.45e-6f;                                       // [m]
+    const float max_scene_light_amount = 1000.f;                             // [lux], distance-diminished
 
     PhysCameraGainParams gain_params;
     PhysCameraNoiseParams noise_params;
-    gain_params.defocus_gain = 10.0f;    // scales the physical blur diameter (bokeh size)
-    gain_params.defocus_bias = 0.f;     // [px]
-    gain_params.vignetting_gain = 0.f;
+    gain_params.defocus_gain = 0.f;
+    gain_params.defocus_bias = 0.f;
+    // vignetting_gain blends between "no vignette" (0) and the bare optical cos^4 law (1):
+    //   gain = 1 - G + G * cos^4(theta).
+    // G = 1 is therefore the physically pure setting, and it is what this demo wants -- any G < 1 is a fudge
+    // that lifts the corners back toward the centre. The corner field angle follows from the FOV alone:
+    // sensor_width = 2*f*tan(hFOV/2), so theta_corner = atan(1.147*tan(hFOV/2)) and the focal length cancels.
+    // At the suite's standard 60 deg hFOV that is 33.5 deg, giving cos^4 = 0.483 -- the frame corners land at
+    // ~48% of centre. (A wider lens would darken them further: 75 deg -> 0.32, 90 deg -> 0.19.)
+    gain_params.vignetting_gain = 1.0f;
     gain_params.aggregator_gain = 1e8f;
     gain_params.expsr2dv_gamma = 1.0f;
-    gain_params.expsr2dv_crf_type = 2;  // linear
+    gain_params.expsr2dv_crf_type = 2;    // 0: gamma_correct, 1: sigmoid, 2: linear
     gain_params.expsr2dv_gains = {1.0f, 1.0f, 1.0f};
-    gain_params.expsr2dv_biases = {0.f, 0.f, 0.f};
-    noise_params.FPN_rng_seed = 1234;
-    noise_params.dark_currents = {0.f, 0.f, 0.f};
-    noise_params.noise_gains = {0.f, 0.f, 0.f};
-    noise_params.STD_reads = {0.f, 0.f, 0.f};
+    gain_params.expsr2dv_biases = {0.003f, 0.006f, 0.014f};  // slight cool cast in the shadows, as on the real sensor
+    ChVector3f rgb_QE_vec(0.4453f, 0.5621f, 0.4713f);        // measured RGB quantum efficiencies
 
-    // (aperture_num, expsr_time, ISO, focal_length, focus_dist)
-    cam->SetCtrlParameters(2.0f, 0.256f, 100.0f, focal_length, (float)radius);
-    cam->SetModelParameters(sensor_width, pixel_size, 1000.f, ChVector3f(1.f, 1.f, 1.f), gain_params, noise_params);
-    cam->SetName("physcam_dof");
+    // Measured noise figures, scaled up 3x so the grain is actually visible in a showcase animation.
+    noise_params.FPN_rng_seed = 1234;
+    noise_params.dark_currents = {0.000166311f, 0.000341295f, 0.000680946f};  // [electrons/sec]
+    noise_params.noise_gains = {3.f * 0.00182512f, 3.f * 0.00215293f, 3.f * 0.00318984f};
+    noise_params.STD_reads = {3.f * 2.56849e-05f, 3.f * 4.08999e-05f, 3.f * 8.33132e-05f};
+
+    // (aperture_num, expsr_time, ISO, focal_length, focus_dist).
+    // The end-to-end sensitivity is gains * ISO * (G_agg * P / N^2 * C^2 * t * QE); for the green channel that
+    // is 1.0 * 90 * 1.071e-2 = 0.96, so the brightest scene content still clips to white. Do NOT drop
+    // ISO to "under-expose": the exposure math runs on the ALREADY gamma-encoded render (phys_cam_raygen.cu
+    // applies pow(1/gamma) before the filter chain), so halving ISO caps the brightest possible pixel at 54%
+    // grey and crushes the whole frame into the bottom half of the range -- washed out, not under-exposed.
+    // The low-light character here comes from the cos^4 vignette and the sensor grain instead.
+    cam->SetCtrlParameters(4.0f, 0.256f, 90.0f, focal_length, (float)radius);
+    cam->SetModelParameters(sensor_width, pixel_size, max_scene_light_amount, rgb_QE_vec, gain_params,
+                            noise_params);
+    cam->SetName("physcam_grain");
     cam->PushFilter(chrono_types::make_shared<ChFilterRGBA16Access>());
     manager->AddSensor(cam);
 
-    const std::string out_dir = "demos_live/showcase_out/physcam_dof/";
+    const std::string out_dir = out_dir + "";
     if (system(("mkdir -p '" + out_dir + "'").c_str()) != 0) {
         printf("could not create %s\n", out_dir.c_str());
         return 1;
     }
 
-    printf("Depth-of-field showcase, ChPhysCameraSensor (Metal). PNGs -> %s\n", out_dir.c_str());
+    printf("Physics-based sensor showcase, ChPhysCameraSensor. PNGs -> %s\n", out_dir.c_str());
     const double step = 2e-3;
     const int nframes = 150;
     double time = 0;
@@ -175,7 +187,7 @@ int main(int argc, char** argv) {
         terrain.Advance(step);
         audi.Advance(step);
         sys.DoStepDynamics(step);
-        cam->SetOffsetPose(orbitPose(CH_2PI * f / nframes));  // full orbit (synced with the other demos)
+        cam->SetOffsetPose(orbitPose(CH_2PI * f / nframes));  // full orbit over 150 frames
         manager->Update();
         if (auto buf = cam->GetMostRecentBuffer<UserRGBA16BufferPtr>())
             if (buf->Buffer)

@@ -1,7 +1,6 @@
-// SHOWCASE (Metal RT): AREA LIGHTS with SOFT SHADOWS.
-// A dark studio scene (no env map, near-zero ambient) lit only by an overhead disk light and a side-fill
-// rectangle light. The finite light area casts soft, penumbra-edged shadows of the Audi onto the ground.
-// Headless: slow orbit, 150 PNG frames saved to demos_live/showcase_out/arealights/. No live window.
+// SHOWCASE: DISTANCE FOG.
+// A gray-blue scattering fog is applied so the flat terrain and the far side of the Audi fade into the haze
+// with distance. Headless: full orbit, 150 PNG frames saved to SENSOR_OUTPUT/SHOWCASE_FOG/. No live window.
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -24,20 +23,16 @@ using namespace chrono;
 using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
+const std::string out_dir = "SENSOR_OUTPUT/SHOWCASE_FOG/";
+
 int main(int argc, char** argv) {
-    // Data root: $CHRONO_ROOT if set, else the repo this demo was built from (see tools/README.md).
-    const char* env_root = std::getenv("CHRONO_ROOT");
-    std::string root = env_root ? std::string(env_root) : std::string(CHRONO_SHOWCASE_ROOT);
-    if (!root.empty() && root.back() != '/') root += '/';
-    SetChronoDataPath(root + "data/");
-    vehicle::SetVehicleDataPath(root + "data/vehicle/");
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
     sys.SetCollisionSystemType(ChCollisionSystem::Type::BULLET);
     sys.SetNumThreads(4);
 
-    // flat terrain patch (portable) -- catches the soft shadows
+    // flat terrain patch (portable) -- the long tiles trail off into the fog
     RigidTerrain terrain(&sys);
     ChContactMaterialData minfo; minfo.mu = 0.9f; minfo.cr = 0.01f;
     auto patch_mat = minfo.CreateMaterial(ChContactMethod::SMC);
@@ -65,35 +60,33 @@ int main(int argc, char** argv) {
     }
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
-    // dark studio: no env map, near-zero ambient, black background -> only the area lights illuminate.
-    manager->scene->SetAmbientLight(ChVector3f(0.02f, 0.02f, 0.03f));
-    manager->scene->SetBackground(Background{BackgroundMode::SOLID_COLOR, ChVector3f(0.01f, 0.01f, 0.015f), ChVector3f(), ""});
-    // overhead disk key light (5 m up, normal pointing straight down), 1.2 m radius -> broad soft shadow
-    manager->scene->AddDiskLight(ChVector3f(0.5f, 0.f, 5.0f), ChColor(9.0f, 8.7f, 8.2f), 60.f,
-                                 ChVector3f(0.f, 0.f, -1.f), 1.2f);
-    // side-fill rectangle light (to the car's left, ~2.5 m up), 3 m long x 1.5 m tall
-    manager->scene->AddRectangleLight(ChVector3f(-1.0f, 4.5f, 2.5f), ChColor(3.5f, 3.6f, 4.2f), 60.f,
-                                      ChVector3f(3.0f, 0.f, 0.f), ChVector3f(0.f, 0.f, 1.5f));
+    manager->scene->AddDirectionalLight(ChColor(1.2f, 1.2f, 1.25f), 1.02625f, 0.50710f);
+    manager->scene->SetAmbientLight(ChVector3f(0.45f, 0.47f, 0.52f));
+    // gray-blue background that the fog blends toward, and moderate exponential fog scattering. The
+    // background gradient IS the fog colour, so distant tiles dissolve seamlessly into the haze.
+    manager->scene->SetBackground(Background{BackgroundMode::GRADIENT,
+                                          ChVector3f(0.70f, 0.75f, 0.82f), ChVector3f(0.80f, 0.83f, 0.88f), ""});
+    manager->scene->SetFogColor(ChVector3f(0.78f, 0.82f, 0.88f));
+    manager->scene->SetFogScattering(0.075f);
 
     ChVector3d look(0, 0, 0.8);
     ChVector3d cam_off(6.0, 0.0, 1.8);
     ChVector3d d = (look - cam_off).GetNormalized();
     ChFrame<double> cam_pose(cam_off, QuatFromAngleZ(std::atan2(d.y(), d.x())) * QuatFromAngleY(-std::asin(d.z())));
-    // Area-light soft shadows are stochastic (each sample jitters the light-surface point), so they need
-    // many samples/pixel to smooth out -> ss=4 (16 samples) + denoiser kills the penumbra grain.
     auto cam = chrono_types::make_shared<ChCameraSensor>(audi.GetChassisBody(), 500.0f, cam_pose, 1280, 720,
-                   (float)(CH_PI / 3), 4, CameraLensModelType::PINHOLE, false /*GI*/, true /*denoiser*/);
-    cam->SetName("showcase_arealights");
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("demos_live/showcase_out/arealights/"));
+                   (float)(CH_PI / 3), 2, CameraLensModelType::PINHOLE, false /*GI*/, false /*denoiser*/);
+    cam->SetUseFog(true);  // <-- REQUIRED: without this the shader leaves fogScatter=0 and no fog is applied
+    cam->SetName("showcase_fog");
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir + ""));
     manager->AddSensor(cam);
 
-    printf("Showcase area lights (Metal). PNGs -> demos_live/showcase_out/arealights/. 150 frames...\n");
+    printf("Showcase fog. PNGs -> SENSOR_OUTPUT/SHOWCASE_FOG/. 150 frames...\n");
     const double step = 2e-3;
     const int nframes = 150;
     double time = 0;
     DriverInputs in; in.m_throttle = 0; in.m_steering = 0; in.m_braking = 1.0;  // parked
     for (int f = 0; f < nframes; ++f) {
-        double ang = 2.0 * CH_PI * (double)f / (double)nframes;  // full orbit (synced with the other demos)
+        double ang = 2.0 * CH_PI * (double)f / (double)nframes;  // full orbit
         cam_off = ChVector3d(6.0 * std::cos(ang), 6.0 * std::sin(ang), 1.8);
         d = (look - cam_off).GetNormalized();
         cam->SetOffsetPose(ChFrame<double>(cam_off,
