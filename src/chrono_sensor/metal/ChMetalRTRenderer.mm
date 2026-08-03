@@ -27,7 +27,7 @@
 
 #include "chrono_thirdparty/stb/stb_image.h"  // stbi_loadf (impl already in the sensor lib)
 #include "chrono_sensor/metal/ChMetalRTRenderer.h"
-#include "chrono_sensor/metal/ChMetalRTShaderMSL.h"  // kRaytraceMSL
+#include "chrono_sensor/metal/shaders/ChMetalRTShaderMSL.h"  // kRaytraceMSL
 
 namespace chrono {
 namespace sensor {

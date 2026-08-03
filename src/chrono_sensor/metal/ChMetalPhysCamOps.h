@@ -14,7 +14,7 @@
 // GPU (Metal compute) implementation of the physics-based camera image
 // pipeline. The Metal analogue of chrono_sensor/cuda/phys_cam_ops.cuh: same
 // five stages, same parameters and units, ported kernel-for-kernel in
-// ChMetalPhysCamOpsMSL.h.
+// shaders/ChMetalPhysCamOpsMSL.h.
 //
 // Unlike the CUDA entry points these take HOST pointers (the Metal sensor
 // buffers live in host memory) and stage them through a shared MTLBuffer.

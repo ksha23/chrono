@@ -538,9 +538,7 @@ if(CH_USE_SENSOR_METAL_RT)
       metal/ChMetalRTDefinitions.h
       metal/ChMetalRenderTypes.h
       metal/ChMetalSceneBuilder.h
-      metal/ChMetalRTShaderMSL.h
       metal/ChMetalPhysCamOps.h
-      metal/ChMetalPhysCamOpsMSL.h
       metal/ChMetalRTDevice.h
       metal/ChMetalRTScene.h
       metal/ChMetalRTRenderer.h
@@ -561,10 +559,20 @@ if(CH_USE_SENSOR_METAL_RT)
       metal/ChFilterMetalVisualizePointCloud.mm
       metal/ChMetalPerfOverlay.mm
       PROPERTIES LANGUAGE CXX COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
+  # Metal Shading Language sources. Embedded as C string literals and compiled at run time
+  # by the Metal driver, so they are headers rather than separately-compiled shader files,
+  # but they live under shaders/ like the OptiX and Vulkan RT programs do.
+  set(Chrono_sensor_METAL_SHADER_HEADERS
+      metal/shaders/ChMetalRTShaderMSL.h
+      metal/shaders/ChMetalPhysCamOpsMSL.h
+  )
+
   source_group("Metal RT" FILES ${Chrono_sensor_METAL_SOURCES} ${Chrono_sensor_METAL_HEADERS})
+  source_group("Metal RT\\Shaders" FILES ${Chrono_sensor_METAL_SHADER_HEADERS})
 else()
   set(Chrono_sensor_METAL_SOURCES "")
   set(Chrono_sensor_METAL_HEADERS "")
+  set(Chrono_sensor_METAL_SHADER_HEADERS "")
 endif()
 
 #-----------------------------------------------------------------------------
@@ -826,6 +834,7 @@ list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_VULKAN_SOURCES})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_VULKAN_HEADERS})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_METAL_SOURCES})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_METAL_HEADERS})
+list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_METAL_SHADER_HEADERS})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_FILTERS_SOURCES})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_FILTERS_HEADERS})
 list(APPEND ALL_CH_SENSOR_FILES ${Chrono_sensor_SCENE_SOURCES})

@@ -12,7 +12,7 @@
 // Authors: (Metal RT backend)
 // =============================================================================
 // Metal compute implementation of the physics-based camera image pipeline.
-// See ChMetalPhysCamOpsMSL.h for the kernels (ported from phys_cam_ops.cu).
+// See shaders/ChMetalPhysCamOpsMSL.h for the kernels (ported from phys_cam_ops.cu).
 // =============================================================================
 
 #import <Metal/Metal.h>
@@ -21,7 +21,7 @@
 #include <mutex>
 
 #include "chrono_sensor/metal/ChMetalPhysCamOps.h"
-#include "chrono_sensor/metal/ChMetalPhysCamOpsMSL.h"  // kPhysCamOpsMSL
+#include "chrono_sensor/metal/shaders/ChMetalPhysCamOpsMSL.h"  // kPhysCamOpsMSL
 
 namespace chrono {
 namespace sensor {
