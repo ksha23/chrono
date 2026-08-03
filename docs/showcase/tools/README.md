@@ -1,3 +1,15 @@
+> **Looking for the test suite?** The scripts in this directory serve two purposes. The animation
+> pipeline is documented below; the automated tests live alongside it:
+>
+> | script | purpose |
+> |---|---|
+> | `run_tests.py` | **single entry point** — runs every test tier that works on this machine and prints a pass/fail summary |
+> | `golden.py` | tier 0, golden-image regression against `../golden/` (`--bless` to update) |
+> | `parity.py` + `PARITY.md` | tier 4, cross-backend Metal-vs-OptiX parity **report** (needs an NVIDIA GPU) |
+>
+> The tiers, why bit-exact cross-backend comparison is impossible, and how to add a test are all
+> documented in [`src/tests/unit_tests/sensor/README.md`](../../../src/tests/unit_tests/sensor/README.md).
+
 # Reproducing the showcase animations
 
 Every `.webp` in [`../../../media/sensor-showcase/`](../../../media/sensor-showcase/) is produced by a two-step pipeline: a **simulation demo** writes raw
