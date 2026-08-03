@@ -25,6 +25,8 @@
 #include "chrono_vehicle/utils/ChVehicleUtilsJSON.h"
 #include "chrono_vehicle/wheeled_vehicle/vehicle/WheeledVehicle.h"
 
+#include <filesystem>
+
 #include "chrono_sensor/ChSensorManager.h"
 #include "chrono_sensor/sensors/ChPhysCameraSensor.h"
 #include "chrono_sensor/filters/ChFilterAccess.h"
@@ -36,8 +38,8 @@ using namespace chrono::vehicle;
 using namespace chrono::sensor;
 
 // The phys-camera chain ends in an RGBA16 buffer (ChFilterImageHalf4ToRGBA16), which ChFilterSave dumps as a
-// raw .bin. The showcase suite wants PNGs, so tone the 16-bit values down to 8 bits here. Written vertically
-// flipped to match ChFilterSave (src/chrono_sensor/tools/mkwebp.py flips every frame back upright).
+// raw .bin. The showcase suite wants PNGs, so tone the 16-bit values down to 8 bits here. The sensor
+// buffer is bottom-up, so write it through stbi_flip_vertically_on_write exactly as ChFilterSave does.
 static void save_rgba16_png(const std::string& path, const UserRGBA16BufferPtr& buf) {
     if (!buf || !buf->Buffer)
         return;
@@ -153,9 +155,10 @@ int main(int argc, char** argv) {
     cam->PushFilter(chrono_types::make_shared<ChFilterRGBA16Access>());
     manager->AddSensor(cam);
 
-    const std::string out_dir = out_dir + "";
-    if (system(("mkdir -p '" + out_dir + "'").c_str()) != 0) {
-        printf("could not create %s\n", out_dir.c_str());
+    std::error_code ec;
+    std::filesystem::create_directories(out_dir, ec);
+    if (ec) {
+        printf("could not create %s: %s\n", out_dir.c_str(), ec.message().c_str());
         return 1;
     }
 
