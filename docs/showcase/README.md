@@ -10,7 +10,9 @@ Each animation links to the **single self-contained simulation** that produced i
 
 The Metal scene exposes the **same public API as `chrono::sensor::ChScene`** (the OptiX scene) — same names, parameter order, types, units, and angle conventions. Simulation code that sets up lighting, background, and fog therefore compiles and behaves identically whether `manager->scene` is a `ChScene` (OptiX build) or a `ChMetalRTScene` (Metal build).
 
-**14 of the 16 demos below use only that shared API and are backend-portable as written.** The two exceptions are `physcam_dof` and `physcam_grain`: depth of field, exposure, vignetting, and sensor noise are scene-level knobs on the Metal backend, whereas OptiX models them on `ChPhysCameraSensor` (aperture number, focal length, gain/noise params) with dedicated filters. Those two stay Metal-specific until that sensor is ported.
+**All 16 demos below use only that shared API and are backend-portable as written.** `ChPhysCameraSensor` is now supported on Metal too, so `physcam_dof` and `physcam_grain` drive the same physical camera model OptiX uses — f-number, focal length, exposure time, ISO, quantum efficiency and dark current — rather than any Metal-specific knob.
+
+One consequence worth knowing when reading the depth-of-field animation: the backdrop trees come from the HDR environment map, and a ray that misses all geometry carries no distance, so the sky is never defocused. That is the faithful behaviour on **both** backends. Only real geometry — the tiled ground — falls out of focus.
 
 ---
 
