@@ -33,7 +33,10 @@ struct VOut { float4 pos [[position]]; float2 uv; };
 vertex VOut vmain(uint vid [[vertex_id]]) {
     float2 p[3] = { float2(-1,-1), float2(3,-1), float2(-1,3) };
     VOut o; o.pos = float4(p[vid], 0, 1);
-    float2 t = p[vid]*0.5 + 0.5; o.uv = float2(t.x, 1.0 - t.y); return o;
+    // Sensor host buffers are BOTTOM-UP (row 0 = bottom), matching OptiX's camera_raygen.cu and
+    // what ChFilterSave assumes (it calls stbi_flip_vertically_on_write). Clip-space y is already
+    // bottom-up, so sample straight through -- no vertical flip here.
+    float2 t = p[vid]*0.5 + 0.5; o.uv = t; return o;
 }
 fragment float4 fmain(VOut in [[stage_in]], texture2d<float> tex [[texture(0)]]) {
     constexpr sampler s(filter::linear); return tex.sample(s, in.uv);

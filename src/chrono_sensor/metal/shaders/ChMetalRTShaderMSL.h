@@ -287,7 +287,9 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
 
   // primary ray for the pixel center (used by all non-color modes)
   float ncx=(2.0*(float(tid.x)+0.5)/float(u.width)-1.0)*aspect;
-  float ncy=(1.0-2.0*(float(tid.y)+0.5)/float(u.height));
+  float ncy=(2.0*(float(tid.y)+0.5)/float(u.height)-1.0);  // row 0 = BOTTOM, matching
+                                                          // OptiX's camera_raygen.cu; the shared
+                                                          // filters assume that convention
   float3 cdir=camRayDir(ncx,ncy,u);
 
   if(u.mode==1u){ // DEPTH: min(max_depth, distance); a miss returns max_depth.
@@ -364,7 +366,8 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     float physDist=0.0;   // primary-hit distance of the last sample (mode 6 alpha channel)
     for(uint s=0;s<spp;s++){
       float jx=rndf(seed), jy=rndf(seed);
-      float nx=(2.0*(float(tid.x)+jx)/float(u.width)-1.0)*aspect, ny=(1.0-2.0*(float(tid.y)+jy)/float(u.height));
+      // row 0 = BOTTOM, matching OptiX camera_raygen.cu (uv = (idx+jitter)/size*2-1)
+      float nx=(2.0*(float(tid.x)+jx)/float(u.width)-1.0)*aspect, ny=(2.0*(float(tid.y)+jy)/float(u.height)-1.0);
       ray r; r.origin=float3(u.camPos); r.direction=camRayDir(nx,ny,u); r.min_distance=1e-3; r.max_distance=INFINITY;
       float3 thru=float3(1.0), rad=float3(0.0);
       for(int bnc=0;bnc<5;bnc++){
@@ -393,7 +396,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
   for(uint sy=0;sy<aa;sy++) for(uint sx=0;sx<aa;sx++){
     float ox=(float(sx)+0.5)/float(aa), oy=(float(sy)+0.5)/float(aa);
     float nx=(2.0*(float(tid.x)+ox)/float(u.width)-1.0)*aspect;
-    float ny=(1.0-2.0*(float(tid.y)+oy)/float(u.height));
+    float ny=(2.0*(float(tid.y)+oy)/float(u.height)-1.0);  // row 0 = BOTTOM (OptiX camera_raygen.cu)
     float3 dir=camRayDir(nx,ny,u);
     ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=1e-3; r.max_distance=INFINITY;
     if(u.apertureR>0.0 && u.mode!=6u){   // thin-lens depth of field: jitter the ray origin on the aperture, aim at the focal plane
