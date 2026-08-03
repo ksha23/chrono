@@ -60,6 +60,7 @@ struct MetalCameraParams {
     float noiseSigma = 0.f; ///< gaussian sensor-noise stddev (0 = off)
     float envIntensity = 1.f; ///< environment-map radiance scale (OptiX AddEnvironmentLight intensity_scale)
     float gamma = 2.2f;     ///< output gamma (OptiX camera.gamma; 2.2 = sRGB, 1 = linear)
+    int texMip = 1;         ///< 1 = mipmapped textures + ray-cone LOD (anti-shimmer); 0 = full-res (LOD 0)
     bool useDenoiser = false; ///< run the spatial despeckle/denoise pass
 };
 

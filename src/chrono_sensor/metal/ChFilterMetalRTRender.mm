@@ -156,6 +156,7 @@ void ChFilterMetalRTRender::Apply() {
         cam.fogColor[0]=fc.R; cam.fogColor[1]=fc.G; cam.fogColor[2]=fc.B;
         cam.fogScatter = 0.f; cam.useGi = 0;
         cam.envIntensity = m_scene->GetEnvIntensity();   // env-map radiance scale (OptiX AddEnvironmentLight)
+        cam.texMip = m_scene->GetTextureFiltering() ? 1 : 0;   // mipmap + ray-cone LOD (anti-shimmer)
         if (auto cc = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) {
             if (cc->GetUseFog()) cam.fogScatter = m_scene->GetFogScattering();
             cam.useGi = cc->GetUseGI() ? 1 : 0;
