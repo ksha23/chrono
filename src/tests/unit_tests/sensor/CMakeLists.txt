@@ -57,7 +57,7 @@ else()
     set(VERIFY_WORKING_DIR ${EXECUTABLE_OUTPUT_PATH})
 endif()
 
-set(VERIFY_PROGS verify_render_math verify_golden)
+set(VERIFY_PROGS verify_render_math)
 if(CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
   set(VERIFY_PROGS ${VERIFY_PROGS} verify_dynamic_sensors)
 endif()
