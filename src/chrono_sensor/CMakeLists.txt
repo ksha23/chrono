@@ -644,6 +644,7 @@ if(CH_USE_SENSOR_METAL_RT)
       filters/ChFilterVisualizePointCloud.cpp
       filters/ChFilterLidarIntensityClip.cpp
       filters/ChFilterLidarReduce.cpp
+      filters/ChFilterRadarVisualizeCluster.cpp
   )
   set(Chrono_sensor_FILTERS_HEADERS ${Chrono_sensor_FILTERS_HEADERS}
       filters/ChFilterVisualize.h
@@ -666,6 +667,7 @@ if(CH_USE_SENSOR_METAL_RT)
       filters/ChFilterVisualizePointCloud.h
       filters/ChFilterLidarIntensityClip.h
       filters/ChFilterLidarReduce.h
+      filters/ChFilterRadarVisualizeCluster.h
   )
 endif()
 

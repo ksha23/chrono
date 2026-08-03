@@ -64,11 +64,25 @@ if(CH_USE_SENSOR_METAL_RT)
         demo_SEN_radar
         demo_SEN_phys_cam
         demo_SEN_tachometer
+        demo_SEN_cornell_box
+        demo_SEN_radar1
     )
+    # demo_SEN_buildtest is intentionally absent: it drives ChScene::ModifyPointLight, whose
+    # signature takes a ChOptixLight (built from CUDA vector types), so it cannot be mirrored
+    # without pulling the CUDA toolchain into a Metal-only build.
 
     if(CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
         set(DEMOS ${DEMOS}
           demo_SEN_metal_quarterpanel
+        )
+    endif()
+
+    # Sensor + vehicle dynamics demos (need the Irrlicht run-time visualization)
+    if(CH_ENABLE_MODULE_IRRLICHT AND CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
+        set(DEMOS ${DEMOS}
+          demo_SEN_HMMWV
+          demo_SEN_Gator
+          demo_SEN_deformableSoil
         )
     endif()
 endif()
