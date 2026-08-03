@@ -1,13 +1,8 @@
-> **Looking for the test suite?** The scripts in this directory serve two purposes. The animation
-> pipeline is documented below; the automated tests live alongside it:
->
-> | script | purpose |
-> |---|---|
-> | `golden.py` | tier 0, golden-image regression against `../golden/` (`--bless` to update) |
-> | `parity.py` + `PARITY.md` | tier 4, cross-backend Metal-vs-OptiX parity **report** (needs an NVIDIA GPU) |
->
-> The tiers, why bit-exact cross-backend comparison is impossible, and how to add a test are all
-> documented in [`src/tests/unit_tests/sensor/README.md`](../../../src/tests/unit_tests/sensor/README.md).
+> **Looking for the test suite?** These scripts are the animation pipeline only. The automated
+> sensor tests are CTest targets under `src/tests/unit_tests/sensor/` (run them with
+> `ctest -L sensor`); see
+> [`src/tests/unit_tests/sensor/README.md`](../../../src/tests/unit_tests/sensor/README.md) for
+> what they cover and why bit-exact cross-backend comparison is not possible.
 
 # Reproducing the showcase animations
 
@@ -23,16 +18,17 @@ cmake -S . -B build && ninja -C build      # demos build with the rest of Chrono
 ```
 
 The showcase demos are ordinary Chrono demos (`src/demos/sensor/demo_SEN_showcase_*.cpp`) and land in
-`build/bin`. Run them from there -- Chrono resolves its data directory relative to the working directory.
-it was compiled against.
+`build/bin`.
 
 ## 2. Run a demo
 
-Demos are headless and finite — they render a fixed number of frames, write them under
-`demos_live/showcase_out/<name>/`, and exit. Run them from the repo root:
+Demos are headless and finite — they render 150 frames (about 25 s each), write them under
+`SENSOR_OUTPUT/SHOWCASE_<NAME>/`, and exit. **Run them from `build/bin`**: Chrono resolves its
+data directory relative to the working directory, so launching from anywhere else silently drops
+every texture and HDR map.
 
 ```bash
-./build/bin/showcase_camera_rgb
+cd build/bin && ./demo_SEN_showcase_camera_rgb
 ```
 
 ## 3. Convert frames to an animated WebP
@@ -45,14 +41,25 @@ Demos are headless and finite — they render a fixed number of frames, write th
 | `mkradar.py` | Decodes dumped radar returns into a top-down Doppler plot, paired with the companion camera view. |
 | `segutil.py` | Shared helpers (frame loading, segmentation palette, depth contrast stretch). |
 
+Paths below are relative to the repo root; `$OUT` is `build/bin/SENSOR_OUTPUT`. Every animation in
+`webp/` is produced with the scripts' **default** settings (see below) plus the per-demo flags shown
+here — nothing else is passed.
+
 ```bash
-python3 mkwebp.py     demos_live/showcase_out/camera_rgb  src/chrono_sensor/webp/camera_rgb.webp --fps 24
-python3 mkwebp.py     demos_live/showcase_out/camera_segmentation \
-                      src/chrono_sensor/webp/camera_segmentation.webp --fps 24 --seg
-python3 mkcomposite.py demos_live/showcase_out/multisensor src/chrono_sensor/webp/multisensor.webp --fps 24
-python3 mklidar.py    demos_live/showcase_out/lidar       src/chrono_sensor/webp/lidar.webp --fps 18
-python3 mkradar.py    demos_live/showcase_out/radar       src/chrono_sensor/webp/radar.webp --fps 18
+T=src/chrono_sensor/tools; W=src/chrono_sensor/webp; OUT=build/bin/SENSOR_OUTPUT
+
+python3 $T/mkwebp.py      $OUT/SHOWCASE_CAMERA_RGB          $W/camera_rgb.webp
+python3 $T/mkwebp.py      $OUT/SHOWCASE_CAMERA_DEPTH        $W/camera_depth.webp --synthetic
+python3 $T/mkwebp.py      $OUT/SHOWCASE_CAMERA_NORMAL       $W/camera_normal.webp --synthetic
+python3 $T/mkwebp.py      $OUT/SHOWCASE_CAMERA_SEGMENTATION $W/camera_segmentation.webp --seg
+python3 $T/mkcomposite.py $OUT/SHOWCASE_MULTISENSOR         $W/multisensor.webp
+python3 $T/mklidar.py     $OUT/SHOWCASE_LIDAR               $W/lidar.webp
+python3 $T/mkradar.py     $OUT/SHOWCASE_RADAR               $W/radar.webp
 ```
+
+The remaining nine (`arealights`, `envmap`, `fog`, `gi`, `lens_fisheye`, `lens_radial`,
+`night_headlights`, `physcam_dof`, `physcam_grain`) are plain `mkwebp.py` runs with no flags, from
+their matching `$OUT/SHOWCASE_<NAME>` directory.
 
 Requires **Pillow** and **NumPy** (both already in the `chronopc` conda env). Pillow's WebP encoder is used
 directly — the `cwebp` / `img2webp` CLI tools are not needed.
