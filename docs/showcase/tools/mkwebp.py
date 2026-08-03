@@ -30,7 +30,10 @@ def main():
         if im.width > width:
             im = im.resize((width, round(im.height*width/im.width)), Image.LANCZOS)
         imgs.append(im)
-    save_webp(imgs, out, fps, quality=arg("--quality", 58))
+    # Label masks are encoded losslessly (a smeared class boundary is semantically wrong);
+    # other synthetic modalities force all-keyframe to kill inter-frame ghosting.
+    save_webp(imgs, out, fps, quality=arg("--quality", 58),
+              synthetic=("--synthetic" in sys.argv), lossless=(seg or "--lossless" in sys.argv))
     return 0
 
 if __name__ == "__main__":

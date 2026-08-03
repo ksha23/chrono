@@ -77,6 +77,23 @@ multi-panel ones, which need the extra width to stay legible). Override per run 
 `--quality`. Encoding is a one-off, but the bytes live in git history forever — hence the slow-but-smaller
 settings.
 
+### Ghosting on synthetic imagery
+
+Animated WebP delta-codes each frame inside a bounding rectangle and only emits a keyframe every `kmax`
+frames. On photographic content the residue hides in the texture, but on **synthetic imagery with hard edges
+over large flat areas** — depth maps, label masks, point-cloud plots — the rectangle's stale contents stay
+visible, so a moving object drags a visible outline behind it for up to `kmax` frames (over a second at
+24 fps).
+
+Pass `--synthetic` to force every frame to be a keyframe, removing inter-frame prediction entirely. On the
+depth demo that cut mean error from **2.67 to 0.51** (5×) for +34% size, and removed a hard-edged rectangular
+block that was clearly visible around the car. `--seg` implies **lossless** (a smeared class boundary is not
+just ugly but semantically wrong); `--lossless` forces it for anything else. Lossless is exact but ~11× larger
+on gradient content, so it is not the default.
+
+Currently `--synthetic`: `camera_depth`, `camera_normal`, `multisensor`, `lidar`, `radar`.
+Lossless: `camera_segmentation`.
+
 ## Notes
 
 - `ChFilterSave` writes frames **vertically flipped**; every script flips them upright.

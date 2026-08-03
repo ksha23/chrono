@@ -82,7 +82,7 @@ def main():
             imgs.append(plot)
     if imgs[0].width > outw:   # downscale the camera|plot pair for a smaller repo footprint
         imgs = [f.resize((outw, round(f.height*outw/f.width)), Image.LANCZOS) for f in imgs]
-    save_webp(imgs, out, fps, quality=arg("--quality", 58))
+    save_webp(imgs, out, fps, quality=arg("--quality", 58), synthetic=True)
     return 0
 
 if __name__ == "__main__":

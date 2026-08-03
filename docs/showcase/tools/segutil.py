@@ -4,19 +4,35 @@ import numpy as np
 from PIL import Image, ImageOps
 
 
-def save_webp(imgs, out, fps, quality=58):
-    """Encode a frame list as an animated WebP, tuned for repo size.
+def save_webp(imgs, out, fps, quality=58, synthetic=False, lossless=False):
+    """Encode a frame list as an animated WebP.
 
-    Measured on a 120-frame 820px clip (4160 KB at the old quality=70/method=4 defaults):
-    `method=6` and `minimize_size` alone only recover ~5% for ~14x the encode time -- the
-    real levers are frame count and pixel width, which together roughly halve the file.
+    Size tuning: measured on a 120-frame 820px clip (4160 KB at the old quality=70/method=4
+    defaults), `method=6` and `minimize_size` alone only recover ~5% for ~14x the encode time
+    -- the real levers are frame count and pixel width, which together roughly halve the file.
     So callers downscale and decimate, and we still pay for method=6 since encoding is a
     one-off while the bytes live in git forever.
+
+    GHOSTING: animated WebP delta-codes each frame inside a bounding rectangle and only emits
+    a keyframe every `kmax` frames. On photographic content the residue is masked by texture,
+    but on synthetic imagery with hard edges over large flat areas -- depth maps, label masks,
+    point-cloud plots -- the rectangle's stale contents stay visible, so a moving object leaves
+    an outline hanging behind it for up to kmax frames (over a second at 24 fps). Passing
+    `synthetic=True` forces every frame to be a keyframe, which removes the inter-frame
+    prediction entirely: on the depth demo that cut mean error from 2.67 to 0.51 for +34% size.
+    `lossless=True` additionally guarantees exact pixels -- worth it for label data, where a
+    smeared class boundary is not just ugly but semantically wrong.
     """
     os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    kw = dict(method=6)
+    if lossless:
+        kw.update(lossless=True, kmax=1)
+    elif synthetic:
+        kw.update(quality=quality, kmax=1)          # every frame a keyframe -> no lingering ghost
+    else:
+        kw.update(quality=quality, minimize_size=True, kmax=30, kmin=9)
     imgs[0].save(out, format="WEBP", save_all=True, append_images=imgs[1:],
-                 duration=int(1000 / fps), loop=0, quality=quality,
-                 method=6, minimize_size=True, kmax=30, kmin=9)
+                 duration=int(1000 / fps), loop=0, **kw)
     print("wrote %s (%d frames, %d KB)" % (out, len(imgs), os.path.getsize(out) // 1024))
 
 # distinct, index-stable palette; index 0 = unlabeled/background (dark)

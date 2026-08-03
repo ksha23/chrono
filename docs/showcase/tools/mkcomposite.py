@@ -49,7 +49,7 @@ def main():
         print("NO COMPOSITE FRAMES"); return 1
     if frames[0].width > outw:   # downscale the 2x2 panel for a smaller repo footprint
         frames = [f.resize((outw, round(f.height*outw/f.width)), Image.LANCZOS) for f in frames]
-    save_webp(frames, out, fps, quality=arg("--quality", 58))
+    save_webp(frames, out, fps, quality=arg("--quality", 58), synthetic=True)
     return 0
 
 if __name__ == "__main__":
