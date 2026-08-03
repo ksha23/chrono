@@ -102,12 +102,16 @@ int main(int argc, char** argv) {
         ChVector3d R = base + rgt * 0.75;
         ChColor beam(12.0f * k, 11.0f * k, 9.0f * k);
         manager->scene->ClearLights();
-        // ChScene::AddSpotLight(pos, color, max_range, light_dir, angle_falloff_start, angle_range).
+        // ChScene::AddSpotLight(pos, color, max_range, light_dir, angle_falloff_start, angle_range,
+        //                       const_color).
         // Angles are FULL cone angles in radians: 32 deg cone with a 20 deg soft edge.
+        // const_color must be false to get that soft edge: const_color = true (the default) means
+        // "no attenuation", which in ChOptixSpotLight skips the angular falloff as well as the
+        // distance falloff, leaving a flat beam with a hard cone cutoff.
         manager->scene->AddSpotLight(ChVector3f((float)L.x(), (float)L.y(), (float)L.z()),
-                                     beam, 60.f, bdir, 0.20944f, 0.55851f);
+                                     beam, 60.f, bdir, 0.20944f, 0.55851f, false);
         manager->scene->AddSpotLight(ChVector3f((float)R.x(), (float)R.y(), (float)R.z()),
-                                     beam, 60.f, bdir, 0.20944f, 0.55851f);
+                                     beam, 60.f, bdir, 0.20944f, 0.55851f, false);
 
         terrain.Synchronize(time);
         audi.Synchronize(time, in, terrain);
