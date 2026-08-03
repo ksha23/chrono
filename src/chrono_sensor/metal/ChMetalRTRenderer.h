@@ -63,16 +63,20 @@ struct MetalCameraParams {
     bool useDenoiser = false; ///< run the spatial despeckle/denoise pass
 };
 
-/// One light, GPU layout (matches the shader's Light struct: 16 floats).
+/// One light, GPU layout (matches the shader's Light struct: 16 floats / 64 bytes).
+/// KEEP IN SYNC with `struct Light` in metal/shaders/ChMetalRTShaderMSL.h -- the field
+/// order and sizes must match exactly, the buffer is uploaded raw.
 struct MetalLightGPU {
     float pos[3];    ///< world position (point/spot) or direction (directional)
-    float range;     ///< falloff range for point/spot lights (0 = no falloff)
+    float range;     ///< max_range (informational; the attenuation itself comes from attenScale)
     float color[3];  ///< light color * intensity
-    float type;      ///< 0 = point, 1 = directional, 2 = spot
-    float dir[3];    ///< spot axis direction
-    float cosOuter;  ///< spot: cos(outer cone half-angle)  (attenuation reaches 0)
-    float cosInner;  ///< spot: cos(inner cone half-angle)  (full intensity)
-    float pad[3];
+    float type;      ///< 0 = point, 1 = directional, 2 = spot, 3 = disk, 4 = rectangle
+    float dir[3];    ///< spot axis / disk normal / rectangle edge-1
+    float cosOuter;  ///< spot: angle_range (full cone, rad)  | rect: edge-2 .x
+    float cosInner;  ///< spot: angle_atten_rate              | rect: edge-2 .y
+    float p0;        ///< disk: radius                        | rect: edge-2 .z
+    float attenScale;  ///< OptiX atten_scale: max_range > 0 ? 0.01*max_range^2 : 1
+    float constColor;  ///< 1 = constant colour (no distance attenuation), 0 = inverse-square
 };
 
 class CH_SENSOR_API ChMetalRTRenderer {

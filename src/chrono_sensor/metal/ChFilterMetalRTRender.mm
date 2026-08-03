@@ -261,17 +261,25 @@ void ChFilterMetalRTRender::Apply() {
         }
 
         // Lights from the scene; if the user set none, synthesize a key + directional fill.
+        // atten_scale follows ChScene/ChOptixLightStructs exactly: max_range > 0 gives the
+        // "1% of peak at max_range" scale, max_range <= 0 (the -1 sentinel) gives plain
+        // inverse-square. const_color suppresses the distance falloff entirely, so it has to
+        // reach the GPU -- without it a max_range=500 light is amplified ~100x at close range.
+        auto atten_scale = [](float range) { return range > 0.f ? 0.01f * range * range : 1.f; };
         std::vector<MetalLightGPU> lights;
         const auto& sl = m_scene->GetLights();
         if (!sl.empty()) {
             for (const auto& L : sl)
                 lights.push_back({{(float)L.pos.x(), (float)L.pos.y(), (float)L.pos.z()}, L.range,
                                   {L.color.R, L.color.G, L.color.B}, (float)L.type,
-                                  {(float)L.dir.x(), (float)L.dir.y(), (float)L.dir.z()}, L.cosOuter, L.cosInner, {L.p0,0,0}});
+                                  {(float)L.dir.x(), (float)L.dir.y(), (float)L.dir.z()}, L.cosOuter, L.cosInner,
+                                  L.p0, atten_scale(L.range), L.const_color ? 1.f : 0.f});
         } else {
             ChVector3d key = o + fwd * 4.0 + rgt * 4.0 + ChVector3d(0, 0, 12.0);
-            lights.push_back({{(float)key.x(), (float)key.y(), (float)key.z()}, 0.f, {1.05f, 1.02f, 0.98f}, 0.f});
-            lights.push_back({{0.35f, 0.25f, -1.0f}, 0.f, {0.22f, 0.24f, 0.30f}, 1.f});
+            lights.push_back({{(float)key.x(), (float)key.y(), (float)key.z()}, 0.f, {1.05f, 1.02f, 0.98f}, 0.f,
+                              {0.f, 0.f, 0.f}, 0.f, 0.f, 0.f, 1.f, /*constColor=*/1.f});
+            lights.push_back({{0.35f, 0.25f, -1.0f}, 0.f, {0.22f, 0.24f, 0.30f}, 1.f,
+                              {0.f, 0.f, 0.f}, 0.f, 0.f, 0.f, 1.f, /*constColor=*/1.f});
         }
 
         std::vector<float> scratch(count * 4);

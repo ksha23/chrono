@@ -60,8 +60,11 @@ static inline float3 camRayDir(float nx, float ny, constant Uniforms& u) {
     float px=nx*k*u.tanHalfFov, py=ny*k*u.tanHalfFov;
     return normalize(px*right+py*up+fwd);
 }
-// type: 0 point, 1 directional, 2 spot. dir/cosOuter/cosInner used by spot only.
-struct Light { packed_float3 pos; float range; packed_float3 color; float type; packed_float3 dir; float cosOuter; float cosInner; float p0; float p1; float p2; };
+// type: 0 point, 1 directional, 2 spot, 3 disk, 4 rectangle. KEEP IN SYNC with MetalLightGPU
+// in metal/ChMetalRTRenderer.h (same 16 floats / 64 bytes, uploaded raw).
+// attenScale mirrors OptiX's atten_scale (max_range > 0 ? 0.01*max_range^2 : 1) and constColor
+// mirrors OptiX's const_color (!=0 -> no distance attenuation at all).
+struct Light { packed_float3 pos; float range; packed_float3 color; float type; packed_float3 dir; float cosOuter; float cosInner; float p0; float attenScale; float constColor; };
 
 static inline float3 skycol(float3 d, texture2d<float> env, sampler samp, constant Uniforms& u){
   float3 dn=normalize(d);
@@ -211,6 +214,9 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
       float3 nrm=normalize(cross(e1,e2)); float cosL=dot(nrm,-toL);
       if(cosL<=0.0) continue;                                             // hit point behind the emitter
       float area=length(cross(e1,e2)); atten=cosL*area/max(dL*dL,1e-6);   // area -> solid-angle weight
+      // OptiX geom_term = cos_on_light * (const_color ? 1 : atten_scale/dist^2); the estimator above already
+      // carries the const_color case, so only the extra distance term is conditional (ChOptixRectangleLight).
+      if(L.constColor<0.5) atten *= L.attenScale/max(dL*dL,1e-4);
     } else if(L.type>2.5){ // DISK area light (OptiX ChOptixDiskLight): center=pos, normal=dir, radius=p0
       float3 n=normalize(float3(L.dir));
       float3 t=normalize(cross(abs(n.z)<0.99?float3(0,0,1):float3(1,0,0), n)), b=cross(n,t);
@@ -219,15 +225,21 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
       float3 d=p-h.pos; dL=length(d); toL=d/max(dL,1e-4);
       float cosL=dot(n,-toL); if(cosL<=0.0) continue;
       float area=3.14159265*L.p0*L.p0; atten=cosL*area/max(dL*dL,1e-6);
+      if(L.constColor<0.5) atten *= L.attenScale/max(dL*dL,1e-4);          // see the rectangle case above
     } else if(L.type>1.5){ // SPOT: point-light falloff * angular cone falloff (OptiX ChOptixSpotLight)
       float3 d=float3(L.pos)-h.pos; dL=length(d); toL=d/max(dL,1e-4);
-      if(L.range>0.0){ float as=0.01*L.range*L.range; atten=as/max(dL*dL,1e-4); }
       float ang=acos(clamp(dot(-toL, normalize(float3(L.dir))),-1.0,1.0)); // angle from spot axis
       float angleRange=L.cosOuter, attenRate=L.cosInner;                   // (repurposed) full cone angle, 1/falloff-width
-      if(2.0*ang > angleRange) atten=0.0;                                  // outside the cone
-      else { float ai=(attenRate<0.0)?1.0:clamp(attenRate*(angleRange-2.0*ang),0.0,1.0); atten*=ai*ai; }  // linear-in-angle, squared
-    } else if(L.type>0.5){ toL=normalize(-float3(L.pos)); dL=1e4; }       // DIRECTIONAL
-    else { float3 d=float3(L.pos)-h.pos; dL=length(d); toL=d/max(dL,1e-4); if(L.range>0.0){ float as=0.01*L.range*L.range; atten=as/max(dL*dL,1e-4); } }  // POINT: geom_term = atten_scale/dist^2, atten_scale=0.01*max_range^2
+      if(2.0*ang > angleRange) atten=0.0;                                  // outside the cone (hard cutoff, always)
+      else if(L.constColor<0.5) {
+        // OptiX: geom_term = const_color ? 1 : (atten_scale/dist^2 * angle_atten^2). const_color skips BOTH
+        // the distance and the angular falloff -- only the cone cutoff above survives (ChOptixSpotLight).
+        float ai=(attenRate<0.0)?1.0:clamp(attenRate*(angleRange-2.0*ang),0.0,1.0);  // linear-in-angle, squared
+        atten = (L.attenScale/max(dL*dL,1e-4)) * ai*ai;
+      }
+    } else if(L.type>0.5){ toL=normalize(-float3(L.pos)); dL=1e4; }       // DIRECTIONAL (no distance falloff)
+    // POINT (OptiX ChOptixPointLight): geom_term = const_color ? 1 : atten_scale/dist^2
+    else { float3 d=float3(L.pos)-h.pos; dL=length(d); toL=d/max(dL,1e-4); if(L.constColor<0.5) atten=L.attenScale/max(dL*dL,1e-4); }
     float NdL = dot(N, toL);
     if(NdL <= 0.0) continue;                                     // light below the surface (OptiX: NdL<0 -> L=0)
     // Coordinate-scaled shadow epsilon: the NADS course spans ~1600 m, where a fixed 1e-3 offset is
