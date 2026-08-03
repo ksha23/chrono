@@ -44,7 +44,6 @@ struct Uniforms {
     float noiseSigma;                                  // gaussian sensor noise stddev (0 = none)
     float envIntensity;                                // environment-map radiance scale (OptiX AddEnvironmentLight intensity_scale)
     float gamma;                                       // output gamma (OptiX camera.gamma; 2.2 = sRGB, 1 = linear)
-    uint texMip;                                       // 1 = ray-cone texture LOD (anti-shimmer), 0 = full-res LOD 0
 };
 
 // Camera ray direction for a normalized image coord (nx includes aspect, ny does not).
@@ -84,12 +83,6 @@ static inline float3 skycol(float3 d, texture2d<float> env, sampler samp, consta
 static inline float NormalDist(float NdH, float rough){ float r2=rough*rough; float d=NdH*NdH*(r2-1.0)+1.0; return r2/max(d*d,1e-6); }
 static inline float HammonSmith(float NdV, float NdL, float rough){ float den=mix(2.0*abs(NdV)*abs(NdL), abs(NdL)+abs(NdV), rough); return 0.5/max(den,1e-4); }
 
-// Ray-cone texture LOD sampling: uvFoot = the ray's texture-space footprint in tiled-UV units at the hit;
-// x the texture's pixel size = footprint in texels -> log2 = mip level. uvFoot=0 -> level 0 (full res).
-static inline float4 sampLod(texture2d<float> t, sampler s, float2 uv, float uvFoot){
-  return t.sample(s, uv, level(log2(max(uvFoot*float(t.get_width()), 1.0))));
-}
-
 // PCG hash RNG + cosine-weighted hemisphere sampling for the path-traced GI integrator.
 static inline uint pcg(thread uint& s){ s=s*747796405u+2891336453u; uint w=((s>>((s>>28u)+4u))^s)*277803737u; return (w>>22u)^w; }
 static inline float rndf(thread uint& s){ return float(pcg(s))*(1.0/4294967296.0); }
@@ -113,7 +106,7 @@ struct Hit { bool sky; float3 albedo; float3 n; float3 pos; uint mat; float dist
 static Hit trace(ray r, instance_acceleration_structure accel,
    device const packed_float3* gN, device const packed_float3* gA, device const packed_float3* tint,
    device const float* iR, device const uint* nBase, device const uint* matI,
-   device const float* gUV, device const int* gTexId, device const float* gOpacity, device const float* gRough, device const float* gMetallic, device const int* gRoughTexId, device const int* gMetalTexId, device const int* gOpacityTexId, device const packed_float3* gTangent, device const int* gNormalTexId, device const float* gSpecular, device const float* gEmissive, device const float* gTexScale, device const int* gKsTexId, device const int* gKeTexId, device const int* gBlendKdTexId, device const int* gBlendWeightTexId, device const float* gUvDensity, array<texture2d<float>,64> texs, sampler samp, texture2d<float> env, constant Uniforms& u){
+   device const float* gUV, device const int* gTexId, device const float* gOpacity, device const float* gRough, device const float* gMetallic, device const int* gRoughTexId, device const int* gMetalTexId, device const int* gOpacityTexId, device const packed_float3* gTangent, device const int* gNormalTexId, device const float* gSpecular, device const float* gEmissive, device const float* gTexScale, device const int* gKsTexId, device const int* gKeTexId, device const int* gBlendKdTexId, device const int* gBlendWeightTexId, array<texture2d<float>,64> texs, sampler samp, texture2d<float> env, constant Uniforms& u){
   Hit h; h.sky=true; h.albedo=float3(0); h.n=float3(0,0,1); h.pos=r.origin; h.mat=0; h.dist=0; h.inst=0; h.opacity=1.0; h.rough=1.0; h.metallic=0.0; h.ks=float3(0); h.useSpec=0.0; h.emissive=float3(0);
   intersector<triangle_data,instancing> it; it.assume_geometry_type(geometry_type::triangle); it.force_opacity(forced_opacity::opaque);
   // OptiX (material_shaders.cu) uses the geometric world normal as-is -- it does NOT face-forward toward
@@ -131,37 +124,29 @@ static Hit trace(ray r, instance_acceleration_structure accel,
     uint mat=matI[id];
     float2 uv=w0*float2(gUV[tri*6],gUV[tri*6+1])+bc.x*float2(gUV[tri*6+2],gUV[tri*6+3])+bc.y*float2(gUV[tri*6+4],gUV[tri*6+5]); uv.y=1.0-uv.y;
     uv *= float2(gTexScale[tri*2],gTexScale[tri*2+1]);    // per-material UV scale (OptiX tex_scale)
-    // Ray-cone texture footprint (tiled-UV units): coneWidth(m) [grows with distance & grazing] * uvDensity
-    // (uv per m) * texScale. sampLod() turns this into a per-texture mip level -> distant textures stop
-    // shimmering. texMip=0 -> uvFoot 0 -> full-res LOD 0.
-    float uvFoot=0.0;
-    if(u.texMip!=0u){ float dens=gUvDensity[tri];
-      if(dens>0.0){ float3 ng=normalize(c0*on.x+c1*on.y+c2*on.z);
-        float ndv=max(abs(dot(ng,r.direction)),0.15), pxs=2.0*u.tanHalfFov/float(max(u.height,1u));
-        uvFoot=(res.distance*pxs/ndv)*dens*0.5*(gTexScale[tri*2]+gTexScale[tri*2+1]); } }
     int texId=gTexId[tri]; float3 base;
-    if(texId>=0){ float4 t=sampLod(texs[texId],samp,uv,uvFoot);
+    if(texId>=0){ float4 t=texs[texId].sample(samp,uv);
       if(t.a < 0.1){ r.origin=hit+r.direction*max(5e-3,length(hit)*3e-5); continue; }  // alpha cutout (coord-scaled advance)
       base=pow(t.rgb/max(t.a,1e-3),2.2); } else base=float3(gA[tri]);  // un-premultiply, then linearize sRGB tex (OptiX Pow 2.2)
     // Normal map (object space, matches OptiX material_shaders.cu): perturb the object normal, then transform to world.
     int ntx=gNormalTexId[tri];
-    if(ntx>=0){ float3 bit=normalize(cross(on,ot)); float3 nd=sampLod(texs[ntx],samp,uv,uvFoot).rgb*2.0-1.0; on=normalize(nd.x*ot+nd.y*bit+nd.z*on); }
+    if(ntx>=0){ float3 bit=normalize(cross(on,ot)); float3 nd=texs[ntx].sample(samp,uv).rgb*2.0-1.0; on=normalize(nd.x*ot+nd.y*bit+nd.z*on); }
     float3 n=normalize(c0*on.x+c1*on.y+c2*on.z);          // world normal (after any normal-map perturbation)
     float3 albedo=base*float3(tint[id]);
     // Weight-blended materials (OptiX): mix in the 2nd-layer albedo by its weight texture (foliage/splatting)
     int bkt=gBlendKdTexId[tri], bwt=gBlendWeightTexId[tri];
-    if(bkt>=0 && bwt>=0){ float bw=clamp(sampLod(texs[bwt],samp,uv,uvFoot).r,0.0,1.0);
-      float4 b1=sampLod(texs[bkt],samp,uv,uvFoot); float3 kd1=pow(b1.rgb/max(b1.a,1e-3),2.2)*float3(tint[id]);
+    if(bkt>=0 && bwt>=0){ float bw=clamp(texs[bwt].sample(samp,uv).r,0.0,1.0);
+      float4 b1=texs[bkt].sample(samp,uv); float3 kd1=pow(b1.rgb/max(b1.a,1e-3),2.2)*float3(tint[id]);
       albedo=mix(albedo,kd1,bw); }
     // Roughness/metallic come from PBR maps when present (OptiX samples map_Pr/map_Pm) -- this is what makes
     // the Audi paint glossy metallic; scalar GetRoughness()/GetMetallic() are only the fallback. Data maps
     // are linear (no sRGB), so sample .r directly.
-    float rough=gRough[tri]; int rtx=gRoughTexId[tri]; if(rtx>=0) rough=sampLod(texs[rtx],samp,uv,uvFoot).r;
-    float metal=gMetallic[tri]; int mtx=gMetalTexId[tri]; if(mtx>=0) metal=sampLod(texs[mtx],samp,uv,uvFoot).r;
-    float opac=gOpacity[tri]; int otx=gOpacityTexId[tri]; if(otx>=0) opac=sampLod(texs[otx],samp,uv,uvFoot).r;  // map_d opacity (OptiX: opacity_tex overrides) -> glass/windows
+    float rough=gRough[tri]; int rtx=gRoughTexId[tri]; if(rtx>=0) rough=texs[rtx].sample(samp,uv).r;
+    float metal=gMetallic[tri]; int mtx=gMetalTexId[tri]; if(mtx>=0) metal=texs[mtx].sample(samp,uv).r;
+    float opac=gOpacity[tri]; int otx=gOpacityTexId[tri]; if(otx>=0) opac=texs[otx].sample(samp,uv).r;  // map_d opacity (OptiX: opacity_tex overrides) -> glass/windows
     // Specular workflow (Ks/ks_tex, not sRGB-linearized -- matches OptiX legacy) + emissive (Ke*power, ke_tex)
-    int ktx=gKsTexId[tri]; float3 ksv = ktx>=0 ? sampLod(texs[ktx],samp,uv,uvFoot).rgb : float3(gSpecular[tri*4],gSpecular[tri*4+1],gSpecular[tri*4+2]);
-    int etx=gKeTexId[tri]; float3 kev = etx>=0 ? sampLod(texs[etx],samp,uv,uvFoot).rgb : float3(gEmissive[tri*4],gEmissive[tri*4+1],gEmissive[tri*4+2]);
+    int ktx=gKsTexId[tri]; float3 ksv = ktx>=0 ? texs[ktx].sample(samp,uv).rgb : float3(gSpecular[tri*4],gSpecular[tri*4+1],gSpecular[tri*4+2]);
+    int etx=gKeTexId[tri]; float3 kev = etx>=0 ? texs[etx].sample(samp,uv).rgb : float3(gEmissive[tri*4],gEmissive[tri*4+1],gEmissive[tri*4+2]);
     h.sky=false; h.dist=length(hit-o0); h.inst=id; h.albedo=albedo; h.n=n; h.pos=hit; h.mat=mat; h.opacity=opac; h.rough=rough; h.metallic=metal;
     h.ks=ksv; h.useSpec=gSpecular[tri*4+3]; h.emissive=kev*gEmissive[tri*4+3];
     return h;
@@ -277,7 +262,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
   device const packed_float3* gTangent [[buffer(18)]], device const int* gNormalTexId [[buffer(19)]],
   device const float* gSpecular [[buffer(20)]], device const float* gEmissive [[buffer(21)]], device const float* gTexScale [[buffer(22)]],
   device const int* gKsTexId [[buffer(23)]], device const int* gKeTexId [[buffer(24)]],
-  device const int* gBlendKdTexId [[buffer(25)]], device const int* gBlendWeightTexId [[buffer(26)]], device const float* gUvDensity [[buffer(27)]],
+  device const int* gBlendKdTexId [[buffer(25)]], device const int* gBlendWeightTexId [[buffer(26)]],
   array<texture2d<float>,64> texs [[texture(0)]], sampler samp [[sampler(0)]], texture2d<float, access::write> outTex [[texture(64)]], texture2d<float> envTex [[texture(65)]]) {
   if(tid.x>=u.width||tid.y>=u.height) return; float aspect=float(u.width)/float(u.height);
 
@@ -288,17 +273,17 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
 
   if(u.mode==1u){ // DEPTH (distance to first hit; 0 = sky/miss)
     ray r; r.origin=float3(u.camPos); r.direction=cdir; r.min_distance=1e-3; r.max_distance=INFINITY;
-    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
     outTex.write(float4(h.sky?0.0:h.dist,0,0,1), tid); return;
   }
   if(u.mode==2u){ // NORMAL (world-space; 0 = sky/miss)
     ray r; r.origin=float3(u.camPos); r.direction=cdir; r.min_distance=1e-3; r.max_distance=INFINITY;
-    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
     outTex.write(h.sky?float4(0,0,0,1):float4(h.n,1.0), tid); return;
   }
   if(u.mode==3u){ // SEGMENTATION (class id, instance id)
     ray r; r.origin=float3(u.camPos); r.direction=cdir; r.min_distance=1e-3; r.max_distance=INFINITY;
-    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
     float cls=0, inst=0; if(!h.sky){ cls=float(instIds[h.inst*2u]); inst=float(instIds[h.inst*2u+1u]); }
     outTex.write(float4(cls,inst,0,1), tid); return;
   }
@@ -314,7 +299,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       float az=baseAz+oaz, el=baseEl+oel;
       float3 dir=normalize(cos(el)*(cos(az)*fwd + sin(az)*leftv) + sin(el)*up);
       ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=1e-3; r.max_distance=(u.maxDist>0.0)?u.maxDist:INFINITY;
-      Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+      Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
       if(!h.sky){ hits++;
         float inten=abs(dot(h.n,-dir));                                          // OptiX lidar: lidar_intensity(=1) * |N.V|
         sumR+=h.dist; sumI+=inten; lastR=max(lastR,h.dist);
@@ -340,7 +325,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     float3 fwd=float3(u.camForward), up=float3(u.camUp), leftv=-float3(u.camRight);
     float3 dir=normalize(cos(el)*(cos(az)*fwd + sin(az)*leftv) + sin(el)*up);
     ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=1e-3; r.max_distance=(u.maxDist>0.0)?u.maxDist:INFINITY;
-    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+    Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
     if(h.sky){ outTex.write(float4(0,0,-1,0), tid); return; }
     float amp=abs(dot(h.n,-dir));   // OptiX radar: radar_backscatter(=1) * |N.V|
     outTex.write(float4(h.dist, amp, float(h.inst), 1.0), tid); return;  // b = hit instance index
@@ -358,7 +343,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       ray r; r.origin=float3(u.camPos); r.direction=camRayDir(nx,ny,u); r.min_distance=1e-3; r.max_distance=INFINITY;
       float3 thru=float3(1.0), rad=float3(0.0);
       for(int bnc=0;bnc<5;bnc++){
-        Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+        Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
         if(h.sky){ rad += thru*h.albedo; break; }                                  // sky/env is the light source
         float3 view=-r.direction;
         rad += thru * h.emissive * abs(dot(h.n,view));                             // emissive
@@ -389,7 +374,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     }
     float3 color=float3(0.0); float trans=1.0; float primDist=-1.0;
     for(int layer=0; layer<8 && trans>0.02; layer++){
-      Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+      Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
       if(primDist<0.0 && !h.sky) primDist=h.dist;   // first surface distance (for fog)
       if(h.sky){ color += trans*h.albedo; trans=0.0; break; }
       float3 shaded = lighting(h,-r.direction,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp,pseed);
@@ -430,7 +415,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
           // ("wavy" self-reflection); OptiX legacy has the same behaviour. (A glossy/blurred variant fixes
           // the look but costs many extra rays; see OPTIX_COMPARISON.md.)
           ray rr; rr.origin=h.pos+h.n*max(1e-2,length(h.pos)*3e-5); rr.direction=rd; rr.min_distance=1e-3; rr.max_distance=INFINITY;
-          Hit hr=trace(rr,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,gUvDensity,texs,samp,envTex,u);
+          Hit hr=trace(rr,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
           float3 rc=hr.sky?hr.albedo:lighting(hr,-rd,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp,pseed);
           shaded += w * rc;                          // ADDITIVE, BRDF-weighted (OptiX: color = mirror_reflection_color + ...)
         }

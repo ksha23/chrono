@@ -35,13 +35,6 @@ static void addTri(Geometry& g, V3 a,V3 b,V3 c, V3 na,V3 nb,V3 nc, float* col, f
     g.colors.insert(g.colors.end(),{col[0],col[1],col[2]});
     if(uvs) g.uv.insert(g.uv.end(),{uvs[0],uvs[1],uvs[2],uvs[3],uvs[4],uvs[5]});
     else    g.uv.insert(g.uv.end(),{0,0,0,0,0,0});
-    { // per-triangle texel-density (UV units per world metre) for ray-cone texture LOD; 0 => no mip (LOD 0)
-        V3 e1=sub3(b,a), e2=sub3(c,a);
-        double cx=e1.y*e2.z-e1.z*e2.y, cy=e1.z*e2.x-e1.x*e2.z, cz=e1.x*e2.y-e1.y*e2.x;
-        double wa=0.5*std::sqrt(cx*cx+cy*cy+cz*cz), ua=0.0;
-        if(uvs){ double du1=uvs[2]-uvs[0],dv1=uvs[3]-uvs[1],du2=uvs[4]-uvs[0],dv2=uvs[5]-uvs[1]; ua=0.5*std::fabs(du1*dv2-du2*dv1); }
-        g.uvDensity.push_back((wa>1e-12 && ua>0.0)? (float)std::sqrt(ua/wa) : 0.f);
-    }
     if(tan9){ g.tangents.insert(g.tangents.end(), tan9, tan9+9); return; }  // smooth per-vertex tangents (from meshToGeom)
     // fallback: flat per-face tangent from edges + UV deltas (primitives / no smoothing); default +X if degenerate
     V3 T{1,0,0};

@@ -70,10 +70,6 @@ class CH_SENSOR_API ChMetalRTScene {
     void AddEnvironmentLight(const std::string& path, float intensity_scale = 1.f) { m_env_tex = path; m_env_intensity = intensity_scale; }
     void SetEnvIntensity(float s) { m_env_intensity = s; }
     float GetEnvIntensity() const { return m_env_intensity; }
-    /// Mipmapped textures + ray-cone LOD to stop distant textures (gravel, tree cards) from shimmering.
-    /// On by default; disable to match OptiX's full-res (LOD 0) look.
-    void SetTextureFiltering(bool on) { m_tex_mip = on; }
-    bool GetTextureFiltering() const { return m_tex_mip; }
     void AddPointLight(const ChVector3f& pos, const ChColor& color, float range) {
         m_lights.push_back({pos, range, color, 0});
     }
@@ -150,7 +146,6 @@ class CH_SENSOR_API ChMetalRTScene {
     std::vector<MetalSceneLight> m_lights;
     std::string m_env_tex;
     float m_env_intensity = 1.f;
-    bool m_tex_mip = true;
     int m_bg_mode = 2;                        // 1 = gradient, else solid (matches OptiX Background default:
     ChColor m_bg_zenith{0.f, 0.f, 0.f};       //   SOLID_COLOR black when no env map / background is set)
     ChColor m_bg_horizon{0.f, 0.f, 0.f};
