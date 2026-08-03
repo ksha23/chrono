@@ -38,6 +38,10 @@
 #include "chrono_irrlicht/ChIrrMeshTools.h"
 #include "chrono_irrlicht/ChIrrSkyBoxSceneNode.h"
 
+#ifdef __APPLE__
+    #include "chrono_irrlicht/ChIrrMacOS.h"
+#endif
+
 namespace chrono {
 namespace irrlicht {
 
@@ -223,6 +227,21 @@ void ChVisualSystemIrrlicht::Initialize() {
 
     if (restore_cwd)
         std::filesystem::current_path(saved_cwd, cwd_ec);
+
+#ifdef __APPLE__
+    // On a Retina display AppKit hands Irrlicht's OpenGL view a backing store backingScaleFactor times larger than the
+    // window measured in points, but Irrlicht keeps everything it knows about - screen size, viewport, 2D GUI layout,
+    // reported mouse coordinates - in points. Left alone, it draws the scene into the bottom-left quarter of the
+    // surface and the rest of the window stays black. Shrink the surface to the window's point size so that Irrlicht's
+    // viewport covers all of it and macOS scales it up to fill the window.
+    {
+        double backing_scale = ChIrrMacOSMatchGLSurfaceToWindowSize();
+        if (m_verbose && backing_scale > 1.0) {
+            std::cout << "Matched the Irrlicht OpenGL surface to the window size (backing scale " << backing_scale
+                      << ")" << std::endl;
+        }
+    }
+#endif
 
     // m_device->grab();
 
