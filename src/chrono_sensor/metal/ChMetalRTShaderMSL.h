@@ -192,11 +192,13 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
   float3 col = float3(0.0);
   for(uint i=0;i<u.numLights;i++){
     Light L=lights[i]; float3 toL; float dL; float atten=1.0;
-    if(L.type>1.5){ // SPOT: point-light falloff * angular cone falloff
+    if(L.type>1.5){ // SPOT: point-light falloff * angular cone falloff (OptiX ChOptixSpotLight)
       float3 d=float3(L.pos)-h.pos; dL=length(d); toL=d/max(dL,1e-4);
       if(L.range>0.0){ float as=0.01*L.range*L.range; atten=as/max(dL*dL,1e-4); }
-      float cd=dot(-toL, normalize(float3(L.dir)));                       // cos angle from spot axis
-      atten *= smoothstep(L.cosOuter, L.cosInner, cd);                    // inner=full, outer=0
+      float ang=acos(clamp(dot(-toL, normalize(float3(L.dir))),-1.0,1.0)); // angle from spot axis
+      float angleRange=L.cosOuter, attenRate=L.cosInner;                   // (repurposed) full cone angle, 1/falloff-width
+      if(2.0*ang > angleRange) atten=0.0;                                  // outside the cone
+      else { float ai=(attenRate<0.0)?1.0:clamp(attenRate*(angleRange-2.0*ang),0.0,1.0); atten*=ai*ai; }  // linear-in-angle, squared
     } else if(L.type>0.5){ toL=normalize(-float3(L.pos)); dL=1e4; }       // DIRECTIONAL
     else { float3 d=float3(L.pos)-h.pos; dL=length(d); toL=d/max(dL,1e-4); if(L.range>0.0){ float as=0.01*L.range*L.range; atten=as/max(dL*dL,1e-4); } }  // POINT: geom_term = atten_scale/dist^2, atten_scale=0.01*max_range^2
     float NdL = dot(N, toL);

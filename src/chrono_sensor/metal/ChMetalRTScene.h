@@ -80,9 +80,13 @@ class CH_SENSOR_API ChMetalRTScene {
                       float cone_deg, float penumbra_deg = 5.f) {
         MetalSceneLight L{pos, range, color, 2};
         L.dir = dir.GetNormalized();
-        float outer = 0.5f * cone_deg * (float)CH_PI / 180.f;
-        float inner = std::max(0.f, outer - penumbra_deg * (float)CH_PI / 180.f);
-        L.cosOuter = std::cos(outer); L.cosInner = std::cos(inner);
+        // OptiX spot model: cosOuter/cosInner are repurposed to carry the full cone angle (angle_range) and
+        // the angular attenuation rate 1/(angle_range - angle_falloff_start). penumbra_deg = half-angle soft
+        // edge width -> full-angle falloff region = 2*penumbra.
+        float rng = cone_deg * (float)CH_PI / 180.f;          // full cone angle (angle_range)
+        float pen = std::max(0.f, penumbra_deg) * (float)CH_PI / 180.f;
+        L.cosOuter = rng;                                     // angle_range
+        L.cosInner = (pen > 1e-6f) ? (1.f / (2.f * pen)) : -1.f;  // atten_rate (-1 = hard cutoff, no falloff)
         m_lights.push_back(L);
     }
     void ClearLights() { m_lights.clear(); }
