@@ -45,7 +45,6 @@ struct MetalPerfOverlay::Impl {
     double accWall = 0.0;      // wall seconds accumulated in the current window
     double accSim = 0.0;       // sim seconds accumulated in the current window
     double fps = 0.0, rtf = 0.0;
-    double sinceStdout = 0.0;
     std::string label;
     std::string text;          // current HUD text
     std::string texText;       // text currently baked into the texture
@@ -146,7 +145,6 @@ void MetalPerfOverlay::Tick(double simTime, const std::string& label) {
     p->frames += 1;
     p->accWall += dw;
     p->accSim += ds;
-    p->sinceStdout += dw;
     if (p->accWall >= 0.4) {  // refresh estimate a few times a second
         p->fps = p->frames / p->accWall;
         p->rtf = p->accSim / p->accWall;
@@ -156,11 +154,6 @@ void MetalPerfOverlay::Tick(double simTime, const std::string& label) {
         p->frames = 0;
         p->accWall = 0.0;
         p->accSim = 0.0;
-    }
-    if (p->sinceStdout >= 1.0) {
-        p->sinceStdout = 0.0;
-        printf("[perf] %-22s %6.1f fps   RTF %.2f\n", label.c_str(), p->fps, p->rtf);
-        fflush(stdout);
     }
 }
 

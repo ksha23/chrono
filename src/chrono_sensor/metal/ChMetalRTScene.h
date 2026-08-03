@@ -121,9 +121,9 @@ class CH_SENSOR_API ChMetalRTScene {
     ChColor m_ambient{0.30f, 0.30f, 0.35f};
     std::vector<MetalSceneLight> m_lights;
     std::string m_env_tex;
-    int m_bg_mode = 0;                        // 0 procedural, 1 gradient, 2 solid
-    ChColor m_bg_zenith{0.26f, 0.48f, 0.82f};
-    ChColor m_bg_horizon{0.58f, 0.72f, 0.88f};
+    int m_bg_mode = 2;                        // 1 = gradient, else solid (matches OptiX Background default:
+    ChColor m_bg_zenith{0.f, 0.f, 0.f};       //   SOLID_COLOR black when no env map / background is set)
+    ChColor m_bg_horizon{0.f, 0.f, 0.f};
     ChColor m_fog_color{0.6f, 0.7f, 0.8f};
     float m_fog_scatter = 0.f;
     float m_exposure = 1.f, m_vignette = 0.f, m_noise_sigma = 0.f, m_aperture_r = 0.f, m_focal_dist = 10.f;

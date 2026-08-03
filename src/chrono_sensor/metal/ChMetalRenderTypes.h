@@ -37,7 +37,7 @@ struct Instance {
     float    xform[12];       // object->world 4x3, column-major: col0,col1,col2 (basis), col3 (translation)
     float    rot[9];          // rotation (basis columns) used to transform normals to world
     float    tint[3] = {1,1,1};
-    uint32_t mat = 0;         // 0 = shaded mesh, 1 = checker ground, 2 = procedural soil
+    uint32_t mat = 0;         // material class (always 0 = normal material-shaded mesh; reserved)
     uint32_t classId = 0;     // semantic class id (from ChVisualMaterial)
     uint32_t instanceId = 0;  // semantic instance id (from ChVisualMaterial)
     float    vel[3] = {0,0,0};// world linear velocity (for radar Doppler)

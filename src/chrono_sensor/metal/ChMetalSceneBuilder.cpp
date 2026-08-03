@@ -191,8 +191,7 @@ void ChScene::build(RenderScene& scene){
 
     auto processItem=[&](ChObj* obj, ChBody* body, bool isTerrain){
         auto vm=obj->GetVisualModel(); if(!vm) return;
-        std::string nm=obj->GetName(); float vdef[3]={0.55f,0.55f,0.58f};
-        if(nm.find("heel")!=std::string::npos||nm.find("ire")!=std::string::npos||nm.find("pindle")!=std::string::npos){vdef[0]=0.06f;vdef[1]=0.06f;vdef[2]=0.07f;}
+        float vdef[3]={0.55f,0.55f,0.58f};   // generic fallback color for faces with no material (matches OptiX default)
         for(auto& si: vm->GetShapeInstances()){
             auto sh=si.shape; ChFramed sf=si.frame; Geometry g;
             { auto& mm=sh->GetMaterials(); curClass = mm.empty()?0u:(uint32_t)mm[0]->GetClassID(); curInst = mm.empty()?0u:(uint32_t)mm[0]->GetInstanceID(); }
@@ -200,7 +199,7 @@ void ChScene::build(RenderScene& scene){
             if(auto tm=std::dynamic_pointer_cast<ChVisualShapeTriangleMesh>(sh)){
                 auto mesh=tm->GetMesh(); if(!mesh) continue;
                 if(isTerrain){ meshToGeom(mesh,g,faceMat,{},0.52f,0.40f,0.27f,ChVector3d(1,1,1)); if(g.verts.empty()) continue; g.texId.assign(g.triCount(),-1); g.opacity.assign(g.triCount(),1.0f); g.roughness.assign(g.triCount(),1.0f); g.metallic.assign(g.triCount(),0.0f); g.roughTexId.assign(g.triCount(),-1); g.metalTexId.assign(g.triCount(),-1); g.opacityTexId.assign(g.triCount(),-1); g.normalTexId.assign(g.triCount(),-1); g.specular.assign(g.triCount()*4,0.f); g.emissive.assign(g.triCount()*4,0.f); g.texScale.assign(g.triCount()*2,1.f); g.ksTexId.assign(g.triCount(),-1); g.keTexId.assign(g.triCount(),-1); g.dynamic=true;
-                    int gi=(int)scene.geometries.size(); scene.geometries.push_back(std::move(g)); float t[3]={1,1,1}; addInstance(gi,nullptr,sf,t,2,true,mesh); }
+                    int gi=(int)scene.geometries.size(); scene.geometries.push_back(std::move(g)); float t[3]={1,1,1}; addInstance(gi,nullptr,sf,t,0,true,mesh); }
                 else { char k[64]; snprintf(k,64,"mesh:%p",(void*)mesh.get());
                     if(!geomCache_.count(k)){ meshToGeom(mesh,g,faceMat,tm->GetMaterials(),vdef[0],vdef[1],vdef[2],ChVector3d(1,1,1)); if(g.verts.empty()) continue; toTexIds(g,faceMat,tm->GetMaterials()); geomCache_[k]=(int)scene.geometries.size(); scene.geometries.push_back(std::move(g)); }
                     float t[3]={1,1,1}; addInstance(geomCache_[k],body,sf,t,0,false,nullptr); }
@@ -227,10 +226,6 @@ void ChScene::build(RenderScene& scene){
     };
     for(auto& it: sys_->GetOtherPhysicsItems()) processItem(it.get(),nullptr,true);
     for(auto& b: sys_->GetBodies()) processItem(b.get(),b.get(),false);
-    if(groundOn_){ Geometry g={}; double gg=groundSize_,z=groundZ_; float w[3]={0.5f,0.5f,0.52f};
-        addTri(g,{-gg,-gg,z},{-gg,gg,z},{gg,gg,z},{0,0,1},{0,0,1},{0,0,1},w,nullptr); addTri(g,{-gg,-gg,z},{gg,gg,z},{gg,-gg,z},{0,0,1},{0,0,1},{0,0,1},w,nullptr);
-        g.texId.assign(2,-1); g.opacity.assign(2,1.0f); g.roughness.assign(2,1.0f); g.metallic.assign(2,0.0f); g.roughTexId.assign(2,-1); g.metalTexId.assign(2,-1); g.opacityTexId.assign(2,-1); g.normalTexId.assign(2,-1); g.specular.assign(8,0.f); g.emissive.assign(8,0.f); g.texScale.assign(4,1.f); g.ksTexId.assign(2,-1); g.keTexId.assign(2,-1); int gi=(int)scene.geometries.size(); scene.geometries.push_back(std::move(g));
-        float t[3]={1,1,1}; addInstance(gi,nullptr,ChFramed(),t,groundChecker_?1u:0u,false,nullptr); }
 
     lastShapeCount_=countShapes();
     refresh(scene);

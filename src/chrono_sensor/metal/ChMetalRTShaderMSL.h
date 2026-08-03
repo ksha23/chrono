@@ -69,20 +69,8 @@ static inline float3 skycol(float3 d, texture2d<float> env, sampler samp, consta
     return max(env.sample(samp,float2(uu,v)).rgb,0.0);  // .hdr is already linear radiance -> no sRGB linearize (else the sky/backdrop is too dark)
   }
   if(u.bgMode==1u){ float m=max(0.0,dn.z); return m*float3(u.bgZenith)+(1.0-m)*float3(u.bgHorizon); }  // GRADIENT (OptiX miss.cu)
-  if(u.bgMode==2u){ return float3(u.bgZenith); }                                                        // SOLID
-  float t=clamp(dn.z*0.5+0.5,0.0,1.0);
-  float3 horizon=float3(0.58,0.72,0.88), zenith=float3(0.26,0.48,0.82);               // light-blue horizon -> blue zenith
-  float3 sky=mix(horizon,zenith,pow(t,0.9));
-  if(dn.z<0.0) sky=mix(horizon,float3(0.52,0.58,0.62),clamp(-dn.z*3.0,0.0,1.0));       // below horizon: light haze (not white)
-  float3 sundir=normalize(float3(0.35,0.18,0.55));
-  float s=max(dot(dn,sundir),0.0);
-  sky+=float3(1.0,0.95,0.85)*(pow(s,500.0)*1.5+pow(s,16.0)*0.05);                      // subtle sun
-  return sky;
+  return float3(u.bgZenith);                                                                            // SOLID (OptiX default = black)
 }
-static inline float hash2(float2 p){ p=fract(p*float2(123.34,456.21)); p+=dot(p,p+45.32); return fract(p.x*p.y); }
-static inline float vnoise(float2 p){ float2 i=floor(p),f=fract(p),u=f*f*(3.0-2.0*f);
-  float a=hash2(i),b=hash2(i+float2(1,0)),c=hash2(i+float2(0,1)),d=hash2(i+float2(1,1)); return mix(mix(a,b,u.x),mix(c,d,u.x),u.y); }
-static inline float fbm(float2 p){ float s=0.0,a=0.5; for(int i=0;i<4;i++){ s+=a*vnoise(p); p*=2.0; a*=0.5;} return s; }
 
 // Microfacet BRDF terms ported verbatim from Chrono's OptiX shader_utils.cuh (GGX D, Hammon-Smith G;
 // the 1/pi in D and the 4*NdV*NdL in G are omitted exactly as in the OptiX code).
@@ -139,8 +127,6 @@ static Hit trace(ray r, instance_acceleration_structure accel,
     if(ntx>=0){ float3 bit=normalize(cross(on,ot)); float3 nd=texs[ntx].sample(samp,uv).rgb*2.0-1.0; on=normalize(nd.x*ot+nd.y*bit+nd.z*on); }
     float3 n=normalize(c0*on.x+c1*on.y+c2*on.z);          // world normal (after any normal-map perturbation)
     float3 albedo=base*float3(tint[id]);
-    if(mat==1u){ bool c=(int(floor(hit.x))+int(floor(hit.y)))&1; albedo=c?float3(0.80):float3(0.34); }
-    if(mat==2u){ float t=fbm(hit.xy*1.3),sp=vnoise(hit.xy*22.0); albedo*=(0.78+0.42*t); albedo=mix(albedo,float3(0.40,0.30,0.19),0.35*t); albedo+=(sp-0.5)*0.05; }
     // Roughness/metallic come from PBR maps when present (OptiX samples map_Pr/map_Pm) -- this is what makes
     // the Audi paint glossy metallic; scalar GetRoughness()/GetMetallic() are only the fallback. Data maps
     // are linear (no sRGB), so sample .r directly.
@@ -364,11 +350,6 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       if(h.sky){ color += trans*h.albedo; trans=0.0; break; }
       float3 shaded = lighting(h,-r.direction,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp);
       shaded += h.emissive * abs(dot(h.n,-r.direction));   // emissive (OptiX: emissive_power*Ke*abs(NdV))
-      if(h.mat==1u){ // subtle reflection on the checker ground
-        float3 rd=reflect(r.direction,h.n); ray rr; rr.origin=h.pos+h.n*max(1e-2,length(h.pos)*3e-5); rr.direction=rd; rr.min_distance=1e-3; rr.max_distance=INFINITY;
-        Hit h2=trace(rr,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,texs,samp,envTex,u);
-        float3 rc = h2.sky ? h2.albedo : lighting(h2,-rd,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp); shaded=mix(shaded,rc,0.18);
-      }
       if(h.opacity < 0.999){
         // Colored/semi-transparent surface (illum 9), exactly like OptiX legacy: the shaded surface color is
         // weighted by opacity and (1-opacity) passes straight through with no bend (CalculateRefractedColor).

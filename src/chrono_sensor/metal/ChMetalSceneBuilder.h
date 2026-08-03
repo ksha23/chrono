@@ -15,9 +15,6 @@ class ChScene {
 public:
     explicit ChScene(chrono::ChSystem* sys) : sys_(sys) {}
 
-    // optional flat ground plane (opt-in; never auto-added to avoid z-fighting)
-    void setGround(bool on, double z, double size, bool checker) { groundOn_=on; groundZ_=z; groundSize_=size; groundChecker_=checker; }
-
     // true if the number of visual shapes changed (bodies/shapes added or removed)
     bool topologyChanged() const;
 
@@ -41,7 +38,6 @@ private:
     std::vector<InstSrc> srcs_;
     std::map<std::string,int> geomCache_;         // shared-geometry key -> geometry index
     mutable int lastShapeCount_ = -1;
-    bool groundOn_=false; double groundZ_=0, groundSize_=200; bool groundChecker_=true;
     int countShapes() const;
 };
 
