@@ -64,12 +64,14 @@ int main(int argc, char** argv) {
     }
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
-    manager->scene->AddDirectionalLight(ChVector3f(-0.45f, -0.25f, -0.85f), ChColor(1.2f, 1.2f, 1.25f));
-    manager->scene->SetAmbientLight(ChColor(0.45f, 0.47f, 0.52f));
+    manager->scene->AddDirectionalLight(ChColor(1.2f, 1.2f, 1.25f), 1.02625f, 0.50710f);
+    manager->scene->SetAmbientLight(ChVector3f(0.45f, 0.47f, 0.52f));
     // gray-blue background that the fog blends toward, and moderate exponential fog scattering. The
     // background gradient IS the fog colour, so distant tiles dissolve seamlessly into the haze.
-    manager->scene->SetBackgroundGradient(ChColor(0.70f, 0.75f, 0.82f), ChColor(0.80f, 0.83f, 0.88f));
-    manager->scene->SetFog(ChColor(0.78f, 0.82f, 0.88f), 0.075f);
+    manager->scene->SetBackground(Background{BackgroundMode::GRADIENT,
+                                          ChVector3f(0.70f, 0.75f, 0.82f), ChVector3f(0.80f, 0.83f, 0.88f), ""});
+    manager->scene->SetFogColor(ChVector3f(0.78f, 0.82f, 0.88f));
+    manager->scene->SetFogScattering(0.075f);
 
     ChVector3d look(0, 0, 0.8);
     ChVector3d cam_off(6.0, 0.0, 1.8);

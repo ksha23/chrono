@@ -82,9 +82,9 @@ int main(int argc, char** argv) {
     tag(audi.GetChassisBody(), 2, 2);    // car     = class 2
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
-    manager->scene->AddDirectionalLight(ChVector3f(-0.45f, -0.25f, -0.85f), ChColor(1.4f, 1.37f, 1.3f));
-    manager->scene->SetAmbientLight(ChColor(0.35f, 0.35f, 0.37f));
-    manager->scene->SetEnvMap(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
+    manager->scene->AddDirectionalLight(ChColor(1.4f, 1.37f, 1.3f), 1.02625f, 0.50710f);
+    manager->scene->SetAmbientLight(ChVector3f(0.35f, 0.35f, 0.37f));
+    manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
 
     // Segmentation camera attached to the chassis; pose is updated each frame to orbit the car.
     // ChSegmentationCamera(parent, updateRate, offsetPose, w, h, hFOV, lens=PINHOLE) -- no supersample arg.

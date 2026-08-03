@@ -84,9 +84,9 @@ int main(int argc, char** argv) {
     addBox({1.4, 1.4, 2.0}, {52, -4.0, 1.0});
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
-    manager->scene->AddDirectionalLight(ChVector3f(-0.45f, -0.25f, -0.85f), ChColor(1.4f, 1.37f, 1.3f));
-    manager->scene->SetAmbientLight(ChColor(0.35f, 0.35f, 0.37f));
-    manager->scene->SetEnvMap(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
+    manager->scene->AddDirectionalLight(ChColor(1.4f, 1.37f, 1.3f), 1.02625f, 0.50710f);
+    manager->scene->SetAmbientLight(ChVector3f(0.35f, 0.35f, 0.37f));
+    manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
 
     // front-mounted forward-looking radar
     const unsigned RW = 250, RH = 100;

@@ -148,6 +148,14 @@ class CH_SENSOR_API ChScene {
     /// @return A vector of lights in the scene currently
     std::vector<ChOptixLight> GetLights() { return m_lights; }
 
+    /// Remove every light from the scene. Simplest way to re-specify lighting each frame
+    /// (as an alternative to Modify*Light), and mirrored by the Metal backend's scene so
+    /// the same simulation code drives either renderer.
+    void ClearLights() {
+        m_lights.clear();
+        lights_changed = true;
+    }
+
     /// Function for gaining access to the background. Can be used to dynamically change the background color, or
     /// texture
     /// @return m_background the background used for rendering

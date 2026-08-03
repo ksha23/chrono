@@ -6,6 +6,12 @@ Every animation below is rendered live by the Metal backend on an Apple GPU and 
 
 Each animation links to the **single self-contained simulation** that produced it — build it with [`demos/build.sh`](demos/build.sh), run it, and it writes exactly the frames shown. The frames→WebP step and full instructions live in [`tools/`](tools/README.md). All parked-car demos share one canonical camera orbit, so their animations are frame-synchronized with each other.
 
+### Backend portability
+
+The Metal scene exposes the **same public API as `chrono::sensor::ChScene`** (the OptiX scene) — same names, parameter order, types, units, and angle conventions. Simulation code that sets up lighting, background, and fog therefore compiles and behaves identically whether `manager->scene` is a `ChScene` (OptiX build) or a `ChMetalRTScene` (Metal build).
+
+**14 of the 16 demos below use only that shared API and are backend-portable as written.** The two exceptions are `physcam_dof` and `physcam_grain`: depth of field, exposure, vignetting, and sensor noise are scene-level knobs on the Metal backend, whereas OptiX models them on `ChPhysCameraSensor` (aperture number, focal length, gain/noise params) with dedicated filters. Those two stay Metal-specific until that sensor is ported.
+
 ---
 
 ## 📷 Camera modes

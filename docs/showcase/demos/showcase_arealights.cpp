@@ -66,8 +66,8 @@ int main(int argc, char** argv) {
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
     // dark studio: no env map, near-zero ambient, black background -> only the area lights illuminate.
-    manager->scene->SetAmbientLight(ChColor(0.02f, 0.02f, 0.03f));
-    manager->scene->SetBackgroundSolid(ChColor(0.01f, 0.01f, 0.015f));
+    manager->scene->SetAmbientLight(ChVector3f(0.02f, 0.02f, 0.03f));
+    manager->scene->SetBackground(Background{BackgroundMode::SOLID_COLOR, ChVector3f(0.01f, 0.01f, 0.015f), ChVector3f(), ""});
     // overhead disk key light (5 m up, normal pointing straight down), 1.2 m radius -> broad soft shadow
     manager->scene->AddDiskLight(ChVector3f(0.5f, 0.f, 5.0f), ChColor(9.0f, 8.7f, 8.2f), 60.f,
                                  ChVector3f(0.f, 0.f, -1.f), 1.2f);

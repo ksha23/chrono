@@ -67,8 +67,8 @@ int main(int argc, char** argv) {
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
     // night: no sun, no env map, only a whisper of blue ambient + near-black sky. Kept very low so the
     // gamma curve doesn't lift it into "dusk" -- the headlight pools should be the only bright thing.
-    manager->scene->SetAmbientLight(ChColor(0.008f, 0.008f, 0.014f));
-    manager->scene->SetBackgroundSolid(ChColor(0.01f, 0.01f, 0.03f));
+    manager->scene->SetAmbientLight(ChVector3f(0.008f, 0.008f, 0.014f));
+    manager->scene->SetBackground(Background{BackgroundMode::SOLID_COLOR, ChVector3f(0.01f, 0.01f, 0.03f), ChVector3f(), ""});
 
     // STATIC camera behind & above the parked car, looking forward down the road. The car sits dark; part-
     // way through, the headlights switch ON and two beams light up the road ahead (seen from behind).
@@ -106,10 +106,12 @@ int main(int argc, char** argv) {
         ChVector3d R = base + rgt * 0.75;
         ChColor beam(12.0f * k, 11.0f * k, 9.0f * k);
         manager->scene->ClearLights();
+        // ChScene::AddSpotLight(pos, color, max_range, light_dir, angle_falloff_start, angle_range).
+        // Angles are FULL cone angles in radians: 32 deg cone with a 20 deg soft edge.
         manager->scene->AddSpotLight(ChVector3f((float)L.x(), (float)L.y(), (float)L.z()),
-                                     bdir, beam, 60.f, 32.f, 10.f);
+                                     beam, 60.f, bdir, 0.20944f, 0.55851f);
         manager->scene->AddSpotLight(ChVector3f((float)R.x(), (float)R.y(), (float)R.z()),
-                                     bdir, beam, 60.f, 32.f, 10.f);
+                                     beam, 60.f, bdir, 0.20944f, 0.55851f);
 
         terrain.Synchronize(time);
         audi.Synchronize(time, in, terrain);

@@ -66,9 +66,9 @@ int main(int argc, char** argv) {
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
     // low baked ambient -- GI supplies the fill light via indirect bounces off the ground + HDR sky
-    manager->scene->AddDirectionalLight(ChVector3f(-0.45f, -0.25f, -0.85f), ChColor(1.4f, 1.37f, 1.3f));
-    manager->scene->SetAmbientLight(ChColor(0.12f, 0.12f, 0.14f));
-    manager->scene->SetEnvMap(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
+    manager->scene->AddDirectionalLight(ChColor(1.4f, 1.37f, 1.3f), 1.02625f, 0.50710f);
+    manager->scene->SetAmbientLight(ChVector3f(0.12f, 0.12f, 0.14f));
+    manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
 
     // GI camera: use_gi = true, denoiser = true (smooths the path-traced fill)
     ChVector3d look(0, 0, 0.8);

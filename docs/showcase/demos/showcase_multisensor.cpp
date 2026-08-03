@@ -118,9 +118,9 @@ int main(int argc, char** argv) {
                 ChVector3d(44.0, 2.5, 0.7), ChColor(0.85f, 0.35f, 0.85f));
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
-    manager->scene->AddDirectionalLight(ChVector3f(-0.45f, -0.25f, -0.85f), ChColor(1.4f, 1.37f, 1.3f));
-    manager->scene->SetAmbientLight(ChColor(0.35f, 0.35f, 0.37f));
-    manager->scene->SetEnvMap(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
+    manager->scene->AddDirectionalLight(ChColor(1.4f, 1.37f, 1.3f), 1.02625f, 0.50710f);
+    manager->scene->SetAmbientLight(ChVector3f(0.35f, 0.35f, 0.37f));
+    manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
 
     // one shared chase pose; each sensor is 640x360 so a 2x2 tile is exactly 1280x720
     const unsigned W = 640, H = 360;

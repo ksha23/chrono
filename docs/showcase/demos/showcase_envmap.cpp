@@ -66,9 +66,8 @@ int main(int argc, char** argv) {
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
     // Striking HDR environment: lights the scene and provides the reflected surroundings on the paint.
-    manager->scene->SetEnvMap(GetChronoDataFile("sensor/textures/driving_school_4k.hdr"));
-    manager->scene->SetEnvIntensity(1.2f);
-    manager->scene->SetAmbientLight(ChColor(0.20f, 0.20f, 0.22f));
+    manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/driving_school_4k.hdr"), 1.2f);
+    manager->scene->SetAmbientLight(ChVector3f(0.20f, 0.20f, 0.22f));
 
     ChVector3d look(0, 0, 0.8);
     ChVector3d cam_off(6.0, 0.0, 1.8);

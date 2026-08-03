@@ -63,9 +63,9 @@ int main(int argc, char** argv) {
     }
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
-    manager->scene->AddDirectionalLight(ChVector3f(-0.45f, -0.25f, -0.85f), ChColor(1.4f, 1.37f, 1.3f));
-    manager->scene->SetAmbientLight(ChColor(0.35f, 0.35f, 0.37f));
-    manager->scene->SetEnvMap(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
+    manager->scene->AddDirectionalLight(ChColor(1.4f, 1.37f, 1.3f), 1.02625f, 0.50710f);
+    manager->scene->SetAmbientLight(ChVector3f(0.35f, 0.35f, 0.37f));
+    manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
     // Depth of field: aperture sized so the WHOLE ~4.8 m-long car sits inside the in-focus zone (front
     // bumper to tail sharp) while the distant terrain/trees still melt into bokeh. A larger aperture (0.35)
     // made the depth of field so shallow that only the car's mid-slice was sharp.

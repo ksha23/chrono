@@ -121,8 +121,8 @@ void ChFilterMetalRTRender::Apply() {
         const cr::RenderScene& rs = m_scene->GetRenderScene();
         if (!m_renderer_built) {
             m_renderer->Build(rs);
-            if (!m_scene->GetEnvMap().empty())  // HDR environment map for sky + reflections
-                m_renderer->SetEnvMap(m_scene->GetEnvMap());
+            if (!m_scene->GetBackground().env_tex.empty())  // HDR environment map for sky + reflections
+                m_renderer->SetEnvMap(m_scene->GetBackground().env_tex);
             m_renderer_built = true;
         } else {
             m_renderer->UpdateDynamic(rs);
@@ -146,14 +146,22 @@ void ChFilterMetalRTRender::Apply() {
         cam.forward[0]=(float)fwd.x();cam.forward[1]=(float)fwd.y();cam.forward[2]=(float)fwd.z();
         cam.right[0]=(float)rgt.x(); cam.right[1]=(float)rgt.y(); cam.right[2]=(float)rgt.z();
         cam.up[0]=(float)up.x();     cam.up[1]=(float)up.y();     cam.up[2]=(float)up.z();
-        ChColor amb = m_scene->GetAmbientLight();
-        cam.ambient[0]=amb.R; cam.ambient[1]=amb.G; cam.ambient[2]=amb.B;
-        // background (env map overrides gradient/solid) + fog + GI, mirroring the OptiX scene
-        cam.bgMode = m_scene->GetEnvMap().empty() ? m_scene->GetBackgroundMode() : 0;
-        ChColor bz=m_scene->GetBgZenith(), bh=m_scene->GetBgHorizon(), fc=m_scene->GetFogColor();
-        cam.bgZenith[0]=bz.R; cam.bgZenith[1]=bz.G; cam.bgZenith[2]=bz.B;
-        cam.bgHorizon[0]=bh.R; cam.bgHorizon[1]=bh.G; cam.bgHorizon[2]=bh.B;
-        cam.fogColor[0]=fc.R; cam.fogColor[1]=fc.G; cam.fogColor[2]=fc.B;
+        ChVector3f amb = m_scene->GetAmbientLight();
+        cam.ambient[0]=amb.x(); cam.ambient[1]=amb.y(); cam.ambient[2]=amb.z();
+        // Background + fog + GI, mirroring the OptiX scene. Map the shared BackgroundMode enum
+        // onto the shader's encoding (0 = env map / procedural, 1 = gradient, 2 = solid).
+        const Background bg = m_scene->GetBackground();
+        switch (bg.mode) {
+            case BackgroundMode::ENVIRONMENT_MAP: cam.bgMode = 0; break;
+            case BackgroundMode::GRADIENT:        cam.bgMode = 1; break;
+            default:                              cam.bgMode = 2; break;  // SOLID_COLOR
+        }
+        if (bg.mode == BackgroundMode::ENVIRONMENT_MAP && bg.env_tex.empty())
+            cam.bgMode = 2;  // env map requested but none supplied -> fall back to solid
+        ChVector3f bz = bg.color_zenith, bh = bg.color_horizon, fc = m_scene->GetFogColor();
+        cam.bgZenith[0]=bz.x(); cam.bgZenith[1]=bz.y(); cam.bgZenith[2]=bz.z();
+        cam.bgHorizon[0]=bh.x(); cam.bgHorizon[1]=bh.y(); cam.bgHorizon[2]=bh.z();
+        cam.fogColor[0]=fc.x(); cam.fogColor[1]=fc.y(); cam.fogColor[2]=fc.z();
         cam.fogScatter = 0.f; cam.useGi = 0;
         cam.envIntensity = m_scene->GetEnvIntensity();   // env-map radiance scale (OptiX AddEnvironmentLight)
         if (auto cc = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) {
