@@ -49,6 +49,8 @@ int main(int argc, char* argv[]) {
 
     // Optional CLI arg: supersample factor (default 1 to match the Metal demo). Pass 2/3 for AA comparison.
     unsigned int ss = (argc > 1) ? (unsigned int)std::max(1, atoi(argv[1])) : 1u;
+    // Optional second CLI arg: nonzero enables the OptiX denoiser (off by default, matching the Metal demo).
+    bool use_denoiser = (argc > 2) && atoi(argv[2]) != 0;
 
     ChSystemSMC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
@@ -107,13 +109,17 @@ int main(int argc, char* argv[]) {
                                                          cam_pose,                // offset pose
                                                          1280, 720,               // resolution
                                                          (float)(CH_PI / 3),      // 60 deg HFOV
-                                                         ss);                     // supersample factor (default 1)
+                                                         ss,                      // supersample factor (default 1)
+                                                         CameraLensModelType::PINHOLE,
+                                                         false,                   // no diffuse/GI (LEGACY default)
+                                                         use_denoiser);           // denoiser (off unless argv[2])
     cam->SetName("quarter_panel");
+    std::string out_dir = "quarterpanel_out/optix_ss" + std::to_string(ss) + (use_denoiser ? "_denoise" : "") + "/";
     cam->PushFilter(chrono_types::make_shared<ChFilterVisualize>(1280, 720, "Left rear quarter panel (OptiX)"));
-    cam->PushFilter(chrono_types::make_shared<ChFilterSave>("quarterpanel_out/optix/"));
+    cam->PushFilter(chrono_types::make_shared<ChFilterSave>(out_dir));
     manager->AddSensor(cam);
 
-    std::cout << "Quarter-panel scene (OptiX). PNGs -> quarterpanel_out/optix/. Runs 3 s then exits.\n";
+    std::cout << "Quarter-panel scene (OptiX). PNGs -> " << out_dir << ". Runs 3 s then exits.\n";
 
     // ---- run: parked car settles; save a handful of frames ----
     const double step = 2e-3;
