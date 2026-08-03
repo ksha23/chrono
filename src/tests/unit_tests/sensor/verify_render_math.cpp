@@ -207,11 +207,12 @@ static Frame frame_of(const ChFrame<double>& cf) {
 }
 
 // Pinhole ray for a sub-pixel position (fx,fy) in [0,W]x[0,H] (pixel centre = x+0.5).
+// Row 0 is the BOTTOM of the image, matching OptiX's camera_raygen.cu and the Metal raygen.
 static void pixel_ray(const Frame& f, unsigned W, unsigned H, double hfov, double fx, double fy, double d[3]) {
     const double aspect = (double)W / (double)H;
     const double tanHalfV = std::tan(0.5 * hfov) / aspect;
     const double ncx = (2.0 * fx / (double)W - 1.0) * aspect;
-    const double ncy = 1.0 - 2.0 * fy / (double)H;
+    const double ncy = 2.0 * fy / (double)H - 1.0;
     const double px = ncx * tanHalfV, py = ncy * tanHalfV;
     double v[3];
     for (int a = 0; a < 3; ++a)
@@ -457,7 +458,7 @@ int main(int argc, char** argv) {
         const unsigned sx[2] = {W / 2 - W / 8, W / 2 + W / 8};
         for (int k = 0; k < 2; ++k) {
             const unsigned x = sx[k], y = H / 2;
-            const double ncx = (2.0 * (x + 0.5) / W - 1.0) * aspect, ncy = 1.0 - 2.0 * (y + 0.5) / H;
+            const double ncx = (2.0 * (x + 0.5) / W - 1.0) * aspect, ncy = 2.0 * (y + 0.5) / H - 1.0;
             const double dep = d->Buffer[(size_t)y * W + x].depth;
             const double r = dep / WALL_FACE;
             t_est[k] = std::sqrt(std::max(0.0, r * r - 1.0) / (ncx * ncx + ncy * ncy));
@@ -547,19 +548,22 @@ int main(int argc, char** argv) {
               fmt("%.6f m, expected %.6f (wall face at x=%.2f)", got, expect, WALL_FACE));
     }
     {
-        // an explicitly off-axis pixel: depth must be face_distance * sqrt(1 + px^2 + py^2)
-        const unsigned px = 3 * W / 8, py = H / 4;
+        // an explicitly off-axis pixel: depth must be face_distance * sqrt(1 + px^2 + py^2).
+        // Row 0 is the bottom, so pick a row in the upper half -- below the centre the ray
+        // leaves the wall and lands on the floor instead.
+        const unsigned px = 3 * W / 8, py = 3 * H / 4;
         const double aspect = (double)W / (double)H, tanHalfV = std::tan(0.5 * EFF_HFOV) / aspect;
         const double a = (2.0 * (px + 0.5) / W - 1.0) * aspect * tanHalfV;
-        const double b = (1.0 - 2.0 * (py + 0.5) / H) * tanHalfV;
+        const double b = (2.0 * (py + 0.5) / H - 1.0) * tanHalfV;
         const double expect = WALL_FACE * std::sqrt(1.0 + a * a + b * b);
         const double got = d->Buffer[(size_t)py * W + px].depth;
         check("depth: off-axis pixel obeys 1/cos(theta)", std::fabs(got - expect) < TOL_RANGE,
               fmt("px(%u,%u) = %.6f m, expected %.6f", px, py, got, expect));
     }
     {
-        // a ray aimed below the horizon must hit the floor plane z = FLOOR_TOP
-        const unsigned px = W / 2, py = H - 1;
+        // a ray aimed below the horizon must hit the floor plane z = FLOOR_TOP.
+        // Row 0 is the bottom of the image, so that is the steepest downward ray.
+        const unsigned px = W / 2, py = 0;
         double dir[3];
         pixel_ray(F, W, H, EFF_HFOV, px + 0.5, py + 0.5, dir);
         const double expect = FLOOR_TOP / dir[2];  // camera at z = 0
@@ -652,7 +656,7 @@ int main(int argc, char** argv) {
               std::fabs(g.normal_x + 1.0) < TOL_NORMAL && std::fabs(g.normal_y) < TOL_NORMAL &&
                   std::fabs(g.normal_z) < TOL_NORMAL,
               fmt("(%.6f, %.6f, %.6f)", g.normal_x, g.normal_y, g.normal_z));
-        const PixelNormal& gf = n->Buffer[(size_t)(H - 1) * W + (W / 2)];
+        const PixelNormal& gf = n->Buffer[(size_t)0 * W + (W / 2)];  // row 0 = bottom of the image
         check("normal: floor face is exactly +Z",
               std::fabs(gf.normal_x) < TOL_NORMAL && std::fabs(gf.normal_y) < TOL_NORMAL &&
                   std::fabs(gf.normal_z - 1.0) < TOL_NORMAL,
@@ -722,13 +726,13 @@ int main(int argc, char** argv) {
     {
         // Screen right is -Y and screen up is +Z, so for a point (x,y,z) in the sensor frame
         //     ncx = (-y/x)/tanHalfV,  ncy = (z/x)/tanHalfV
-        //     col = (ncx/aspect * 0.5 + 0.5)*W - 0.5,   row = (1 - ncy)*0.5*H - 0.5
+        //     col = (ncx/aspect * 0.5 + 0.5)*W - 0.5,   row = (1 + ncy)*0.5*H - 0.5  (row 0 = bottom)
         const double mx = BOXES[IDX_MARK].c[0], my = BOXES[IDX_MARK].c[1], mz = BOXES[IDX_MARK].c[2];
         const double aspect = (double)W / (double)H, tanHalfV = std::tan(0.5 * EFF_HFOV) / aspect;
         const double ncx = (-my / mx) / tanHalfV;
         const double ncy = (mz / mx) / tanHalfV;
         const double col = (ncx / aspect * 0.5 + 0.5) * W - 0.5;
-        const double row = (1.0 - ncy) * 0.5 * H - 0.5;
+        const double row = (1.0 + ncy) * 0.5 * H - 0.5;
         const int ic = (int)std::lround(col), ir = (int)std::lround(row);
         const bool inside = ic >= 0 && ic < (int)W && ir >= 0 && ir < (int)H;
         const unsigned short cls = inside ? s->Buffer[(size_t)ir * W + ic].class_id : (unsigned short)0;
