@@ -16,7 +16,9 @@
 //// Allow attaching more than one ChSystem to the same Irrlicht visualization
 
 #include <codecvt>
+#include <filesystem>
 #include <locale>
+#include <system_error>
 
 #include "chrono/utils/ChProfiler.h"
 #include "chrono/utils/ChUtils.h"
@@ -195,6 +197,16 @@ void ChVisualSystemIrrlicht::Initialize() {
     if (!m_verbose)
         m_device_params.LoggingLevel = irr::ELL_NONE;
 
+    // Irrlicht's Cocoa device (CIrrDeviceMacOSX) chdir()s the whole process to the parent of
+    // [[NSBundle mainBundle] bundlePath] when the device is created. That is meant for .app bundles, but for a plain
+    // command-line executable bundlePath is the directory holding the executable, so the process silently ends up one
+    // directory above where it was launched. Every relative path used afterwards (the Chrono data path, demo output
+    // directories, ...) then resolves against the wrong directory. Remember the working directory and put it back once
+    // the device exists. This is a no-op on platforms where Irrlicht leaves the working directory alone.
+    std::error_code cwd_ec;
+    auto saved_cwd = std::filesystem::current_path(cwd_ec);
+    bool restore_cwd = !cwd_ec;
+
     // Create Irrlicht device using current parameter values.
     m_device = irr::createDeviceEx(m_device_params);
     if (!m_device) {
@@ -202,10 +214,15 @@ void ChVisualSystemIrrlicht::Initialize() {
         m_device_params.DriverType = video::EDT_OPENGL;
         m_device = irr::createDeviceEx(m_device_params);
         if (!m_device) {
+            if (restore_cwd)
+                std::filesystem::current_path(saved_cwd, cwd_ec);
             std::cerr << "Failed to create the video driver - giving up" << std::endl;
             return;
         }
     }
+
+    if (restore_cwd)
+        std::filesystem::current_path(saved_cwd, cwd_ec);
 
     // m_device->grab();
 
