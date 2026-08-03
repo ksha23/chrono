@@ -11,7 +11,7 @@
 
 # Reproducing the showcase animations
 
-Every `.webp` in [`../../../docs/chrono_sensor/webp/`](../../../docs/chrono_sensor/webp/) is produced by a two-step pipeline: a **simulation demo** writes raw
+Every `.webp` in [`../../../src/chrono_sensor/webp/`](../../../src/chrono_sensor/webp/) is produced by a two-step pipeline: a **simulation demo** writes raw
 sensor frames, then a **Python post-processing script** turns that frame sequence into an animated WebP.
 
 ## 1. Build the demos
@@ -46,12 +46,12 @@ Demos are headless and finite — they render a fixed number of frames, write th
 | `segutil.py` | Shared helpers (frame loading, segmentation palette, depth contrast stretch). |
 
 ```bash
-python3 mkwebp.py     demos_live/showcase_out/camera_rgb  docs/chrono_sensor/webp/camera_rgb.webp --fps 24
+python3 mkwebp.py     demos_live/showcase_out/camera_rgb  src/chrono_sensor/webp/camera_rgb.webp --fps 24
 python3 mkwebp.py     demos_live/showcase_out/camera_segmentation \
-                      docs/chrono_sensor/webp/camera_segmentation.webp --fps 24 --seg
-python3 mkcomposite.py demos_live/showcase_out/multisensor docs/chrono_sensor/webp/multisensor.webp --fps 24
-python3 mklidar.py    demos_live/showcase_out/lidar       docs/chrono_sensor/webp/lidar.webp --fps 18
-python3 mkradar.py    demos_live/showcase_out/radar       docs/chrono_sensor/webp/radar.webp --fps 18
+                      src/chrono_sensor/webp/camera_segmentation.webp --fps 24 --seg
+python3 mkcomposite.py demos_live/showcase_out/multisensor src/chrono_sensor/webp/multisensor.webp --fps 24
+python3 mklidar.py    demos_live/showcase_out/lidar       src/chrono_sensor/webp/lidar.webp --fps 18
+python3 mkradar.py    demos_live/showcase_out/radar       src/chrono_sensor/webp/radar.webp --fps 18
 ```
 
 Requires **Pillow** and **NumPy** (both already in the `chronopc` conda env). Pillow's WebP encoder is used

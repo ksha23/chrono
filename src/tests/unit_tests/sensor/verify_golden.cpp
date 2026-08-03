@@ -3,7 +3,7 @@
 // =============================================================================
 //
 // Renders a small, fast, fully DETERMINISTIC set of frames that the golden-image
-// harness (docs/showcase/tools/golden.py) pixel-diffs against blessed references.
+// harness (tools/golden.py) pixel-diffs against blessed references.
 //
 // "Deterministic" is a hard requirement here, and it is enforced by construction:
 //   * nothing in the scene moves (zero gravity, every body fixed), and the frame is
@@ -88,7 +88,7 @@ static void Paint(std::shared_ptr<ChBody> b,
 
 int main(int argc, char** argv) {
 
-    std::string out = (argc > 1) ? std::string(argv[1]) : std::string("docs/showcase/golden/_out");
+    std::string out = (argc > 1) ? std::string(argv[1]) : std::string("golden_out");
     if (!out.empty() && out.back() != '/')
         out += '/';
     const std::string mode = (argc > 2) ? std::string(argv[2]) : std::string("base");

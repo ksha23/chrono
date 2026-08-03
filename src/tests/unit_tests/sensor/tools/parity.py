@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """TIER 4 -- cross-backend PARITY REPORT (Metal RT vs OptiX).
 
-    python3 docs/chrono_sensor/tools/parity.py METAL_DIR OPTIX_DIR [--out DIR]
+    python3 src/tests/unit_tests/sensor/tools/parity.py METAL_DIR OPTIX_DIR [--out DIR]
 
 This is a REPORT TO READ, NOT A PASS/FAIL GATE. It has no opinion about whether the two
 backends "match"; it measures how far apart they are, channel by channel, and groups the
@@ -238,7 +238,7 @@ def read_signature(path):
 
 
 def write_visuals(pa, fa, pb, fb, dst_prefix):
-    """Side-by-side plus an amplified difference map, matching the docs/optix_compare
+    """Side-by-side plus an amplified difference map, matching the src/tests/unit_tests/sensor/tools
     convention of shipping a readable picture next to the numbers."""
     A = load_frame(pa, fa).convert("RGB")
     B = load_frame(pb, fb).convert("RGB")

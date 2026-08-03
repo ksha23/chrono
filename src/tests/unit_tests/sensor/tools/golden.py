@@ -33,9 +33,9 @@ a bigger one, and never add multi-frame sequences here.
 
 Usage
 -----
-    python3 docs/chrono_sensor/tools/golden.py                 # check against references
-    python3 docs/chrono_sensor/tools/golden.py --bless         # update the references
-    python3 docs/chrono_sensor/tools/golden.py --keep-out DIR  # keep the rendered frames
+    python3 src/tests/unit_tests/sensor/tools/golden.py                 # check against references
+    python3 src/tests/unit_tests/sensor/tools/golden.py --bless         # update the references
+    python3 src/tests/unit_tests/sensor/tools/golden.py --keep-out DIR  # keep the rendered frames
 
 Exit code is 0 only if every image and every scalar signature is within tolerance.
 Requires Pillow and NumPy (both already in the ``chronopc`` conda env).
@@ -54,9 +54,20 @@ import numpy as np
 from PIL import Image, ImageOps
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
+def _find_repo(start):
+    """Walk up to the repository root. Located by marker rather than a fixed number of
+    parent hops, so moving this script does not silently point it at the wrong tree."""
+    d = start
+    while d != os.path.dirname(d):
+        if os.path.isdir(os.path.join(d, ".git")) or os.path.isfile(os.path.join(d, "CMakeLists.txt")) \
+           and os.path.isdir(os.path.join(d, "src")):
+            return d
+        d = os.path.dirname(d)
+    raise SystemExit("golden: could not locate the repository root from " + start)
+
+REPO = _find_repo(HERE)
 DEFAULT_BIN = os.path.join(REPO, "build", "bin", "verify_golden")
-DEFAULT_REFS = os.path.join(REPO, "docs", "chrono_sensor", "golden")
+DEFAULT_REFS = os.path.join(REPO, "src", "tests", "unit_tests", "sensor", "golden")
 
 # Rendered by verify_golden; "base" uses a procedural sky, "env" the shipped HDR map.
 MODES = ("base", "env")

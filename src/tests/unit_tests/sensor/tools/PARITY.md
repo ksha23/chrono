@@ -50,7 +50,7 @@ from primitives plus two files that ship with Chrono
 (`data/sensor/textures/checkerboard.png` and `data/sensor/textures/sky_2_4k.hdr`).
 
 Build Chrono with the sensor module and OptiX enabled the same way you would for `demo_SEN_camera`
-(see `docs/optix_compare/OPTIX_COMPARISON.md` §3 for a worked cmake invocation), then:
+(see `src/tests/unit_tests/sensor/tools/OPTIX_COMPARISON.md` §3 for a worked cmake invocation), then:
 
 ```bash
 # from the repo root, with the Chrono libs already built in $CHRONO_BUILD
@@ -81,7 +81,7 @@ mkdir -p /tmp/metal_golden
 ./build/bin/verify_golden /tmp/metal_golden env
 ```
 
-or just use the blessed references already committed at `docs/chrono_sensor/golden/`, which are the same
+or just use the blessed references already committed at `src/tests/unit_tests/sensor/golden/`, which are the same
 frames stored upright. `parity.py` accepts either layout and flips as needed.
 
 ---
@@ -89,7 +89,7 @@ frames stored upright. `parity.py` accepts either layout and flips as needed.
 ## 4. Running the comparison
 
 ```bash
-python3 docs/chrono_sensor/tools/parity.py docs/chrono_sensor/golden /tmp/optix_golden --out /tmp/parity_report
+python3 src/tests/unit_tests/sensor/tools/parity.py src/tests/unit_tests/sensor/golden /tmp/optix_golden --out /tmp/parity_report
 ```
 
 This prints a Markdown report and writes it to `/tmp/parity_report/REPORT.md`, along with
@@ -133,7 +133,7 @@ on a driver update. The GEOMETRY group *is* tight enough to gate on, and `parity
 the segmentation class IoU. Day-to-day regression protection comes from the tiers that do not need a
 second GPU at all:
 
-- `docs/chrono_sensor/tools/golden.py` — pixel-exact self-comparison on one machine (tier 0)
+- `src/tests/unit_tests/sensor/tools/golden.py` — pixel-exact self-comparison on one machine (tier 0)
 - `src/demos/sensor/verify_render_math.cpp` — analytic ground truth, no second renderer involved
   (tier 1)
 - `src/tests/unit_tests/sensor/utest_SEN_metal_stochastic.cpp` — statistical properties (tier 2)
@@ -152,9 +152,9 @@ See `src/tests/unit_tests/sensor/README.md` for the whole picture.
 
 ---
 
-## 6. Relationship to `docs/optix_compare/`
+## 6. Relationship to `src/tests/unit_tests/sensor/tools/`
 
-`docs/optix_compare/` is the earlier, targeted version of this: one scene, one artifact (the car-paint
+`src/tests/unit_tests/sensor/tools/` is the earlier, targeted version of this: one scene, one artifact (the car-paint
 reflection of issue #31), rendered on an OptiX box and reported by eye. This directory generalises it
 — same idea of shipping the exact scene to the other machine and getting images back, but across ten
 channels with numbers attached instead of one channel judged visually. The conventions are shared:

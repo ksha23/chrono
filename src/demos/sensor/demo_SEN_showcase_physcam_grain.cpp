@@ -39,7 +39,7 @@ using namespace chrono::sensor;
 
 // The phys-camera chain ends in an RGBA16 buffer (ChFilterImageHalf4ToRGBA16), which ChFilterSave dumps as a
 // raw .bin. The showcase suite wants PNGs, so tone the 16-bit values down to 8 bits here. Written vertically
-// flipped to match ChFilterSave (docs/chrono_sensor/tools/mkwebp.py flips every frame back upright).
+// flipped to match ChFilterSave (src/chrono_sensor/tools/mkwebp.py flips every frame back upright).
 static void save_rgba16_png(const std::string& path, const UserRGBA16BufferPtr& buf) {
     if (!buf || !buf->Buffer)
         return;

@@ -50,11 +50,11 @@ that is actually valid for it.
 
 | tier | what | where | asserts |
 |---|---|---|---|
-| **0** | golden images | `docs/chrono_sensor/tools/golden.py`, `src/demos/sensor/verify_golden.cpp` | pixel-exact self-comparison on one machine |
+| **0** | golden images | `src/tests/unit_tests/sensor/tools/golden.py`, `src/demos/sensor/verify_golden.cpp` | pixel-exact self-comparison on one machine |
 | **1** | analytic ground truth | `src/demos/sensor/verify_render_math.cpp` | closed-form geometry, no renderer involved |
 | **2** | statistical / convergence | `utest_SEN_metal_stochastic.cpp` | properties of the estimator, not pixel values |
 | **3** | backend-agnostic unit tests | `utest_SEN_{gps,data_access,interface,threadsafety,radar}.cpp` | public sensor API behaviour |
-| **4** | cross-backend parity | `docs/chrono_sensor/tools/parity.py`, `PARITY.md` | a report to read; needs an NVIDIA GPU |
+| **4** | cross-backend parity | `src/tests/unit_tests/sensor/tools/parity.py`, `PARITY.md` | a report to read; needs an NVIDIA GPU |
 | — | dynamic sensors | `src/demos/sensor/verify_dynamic_sensors.cpp` | IMU / GPS / magnetometer / tachometer liveness |
 
 ### Tier 0 — golden images (the cheapest useful net)
@@ -166,7 +166,7 @@ output is never compared; since `verify_golden` never enables any of it, that ru
 construction rather than by convention.
 
 It is explicitly a report to read, not a pass/fail gate. The full procedure for someone with an
-NVIDIA GPU is in `docs/chrono_sensor/tools/PARITY.md`. **The OptiX half has never been executed** — there
+NVIDIA GPU is in `src/chrono_sensor/tools/PARITY.md`. **The OptiX half has never been executed** — there
 is no NVIDIA GPU on the development machine. The script itself is exercised on two Metal renders,
 identical and perturbed.
 
@@ -195,7 +195,7 @@ ninja -C build Chrono_sensor utest_SEN_metal_stochastic       # library + tier 2
 ninja -C build verify_render_math                          # one program
 ./build/bin/verify_render_math --strict         # tier 1, gaps fatal
 ./build/bin/utest_SEN_metal_stochastic                        # tier 2
-python3 docs/chrono_sensor/tools/golden.py                         # tier 0
+python3 src/tests/unit_tests/sensor/tools/golden.py                         # tier 0
 ```
 
 Unit tests need `BUILD_TESTING=ON` and the googletest submodule:
@@ -218,14 +218,14 @@ When a rendering change is intentional:
 
 ```bash
 bash src/demos/sensor/build.sh verify_golden       # rebuild against the new library
-python3 docs/chrono_sensor/tools/golden.py                 # LOOK at what changed first
-python3 docs/chrono_sensor/tools/golden.py --keep-out /tmp/g   # inspect diff_*.png if unsure
-python3 docs/chrono_sensor/tools/golden.py --bless         # then, and only then, re-bless
+python3 src/tests/unit_tests/sensor/tools/golden.py                 # LOOK at what changed first
+python3 src/tests/unit_tests/sensor/tools/golden.py --keep-out /tmp/g   # inspect diff_*.png if unsure
+python3 src/tests/unit_tests/sensor/tools/golden.py --bless         # then, and only then, re-bless
 ```
 
 Re-blessing is how a rendering bug becomes permanent, so treat a diff as guilty until proven
 innocent. `golden.py` writes an 8×-amplified `diff_<channel>.png` on every failure precisely so that
-"what actually changed" is a picture rather than a number. Commit the updated `docs/chrono_sensor/golden/`
+"what actually changed" is a picture rather than a number. Commit the updated `src/tests/unit_tests/sensor/golden/`
 in the same commit as the change that caused it, and say in the message why the pixels moved.
 
 ---

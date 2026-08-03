@@ -17,7 +17,7 @@
 // the car-paint reflection there against the Metal backend's output for issue #31 ("wavy self-reflection"
 // on curved body panels).
 //
-// It uses ONLY data that ships with Chrono, so no external data dir is required. See OPTIX_COMPARISON.md.
+// It uses ONLY data that ships with Chrono, so no external data dir is required.
 //
 // Camera settings are chosen to match the Metal demo exactly: 1280x720, 60 deg HFOV, supersample_factor = 1,
 // PINHOLE lens, LEGACY integrator (no GI), no denoiser, gamma 2.2.
