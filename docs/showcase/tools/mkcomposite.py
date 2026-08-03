@@ -4,7 +4,7 @@
 import sys, os, glob, re
 from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from segutil import load_rgb, load_seg, load_depth
+from segutil import load_rgb, load_seg, load_depth, save_webp
 
 def nums(d):
     fs = glob.glob(os.path.join(d, "frame_*.png"))
@@ -21,7 +21,7 @@ def label(img, text):
 
 def main():
     base, out = sys.argv[1], sys.argv[2]
-    fps = arg("--fps", 24.0); mx = arg("--max", 120)
+    fps = arg("--fps", 24.0); mx = arg("--max", 90); outw = arg("--width", 1000)
     rgb_d = os.path.join(base, "rgb"); dep_d = os.path.join(base, "depth")
     nrm_d = os.path.join(base, "normal"); seg_d = os.path.join(base, "seg")
     idx = nums(rgb_d)
@@ -47,10 +47,9 @@ def main():
         frames.append(canvas)
     if not frames:
         print("NO COMPOSITE FRAMES"); return 1
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    frames[0].save(out, format="WEBP", save_all=True, append_images=frames[1:],
-                   duration=int(1000/fps), loop=0, quality=70, method=4)
-    print("wrote %s (%d frames, %d KB)" % (out, len(frames), os.path.getsize(out)//1024))
+    if frames[0].width > outw:   # downscale the 2x2 panel for a smaller repo footprint
+        frames = [f.resize((outw, round(f.height*outw/f.width)), Image.LANCZOS) for f in frames]
+    save_webp(frames, out, fps, quality=arg("--quality", 58))
     return 0
 
 if __name__ == "__main__":

@@ -78,8 +78,8 @@ int main(int argc, char** argv) {
     };
     addBox({1.4, 1.4, 1.8}, {18, 4.0, 0.9});
     addBox({1.4, 1.4, 1.8}, {26, -5.0, 0.9});
-    addSphere(1.0, {30, 2.0, 1.0});
-    addBox({1.2, 1.2, 1.6}, {40, -2.0, 0.8});
+    addSphere(1.0, {30, 3.2, 1.0});
+    addBox({1.2, 1.2, 1.6}, {40, -3.2, 0.8});
     addSphere(1.1, {48, 5.0, 1.1});
     addBox({1.4, 1.4, 2.0}, {52, -4.0, 1.0});
 
@@ -119,7 +119,8 @@ int main(int argc, char** argv) {
     double time = 0, last_ts = -1;
     int saved = 0;
     while (time < 6.0) {
-        DriverInputs in; in.m_throttle = 0.5; in.m_steering = 0.10 * std::sin(0.4 * time); in.m_braking = 0.0;
+        DriverInputs in; in.m_throttle = 0.5; in.m_steering = 0.0;  // straight down the lane: a sine input integrates into a net heading change,
+                                              // which curved the car off-course and into the obstacles in.m_braking = 0.0;
         terrain.Synchronize(time);
         audi.Synchronize(time, in, terrain);
         terrain.Advance(step);

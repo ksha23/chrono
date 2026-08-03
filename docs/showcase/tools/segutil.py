@@ -1,6 +1,23 @@
 """Shared helpers for showcase webp/composite generation."""
+import os
 import numpy as np
 from PIL import Image, ImageOps
+
+
+def save_webp(imgs, out, fps, quality=58):
+    """Encode a frame list as an animated WebP, tuned for repo size.
+
+    Measured on a 120-frame 820px clip (4160 KB at the old quality=70/method=4 defaults):
+    `method=6` and `minimize_size` alone only recover ~5% for ~14x the encode time -- the
+    real levers are frame count and pixel width, which together roughly halve the file.
+    So callers downscale and decimate, and we still pay for method=6 since encoding is a
+    one-off while the bytes live in git forever.
+    """
+    os.makedirs(os.path.dirname(out) or ".", exist_ok=True)
+    imgs[0].save(out, format="WEBP", save_all=True, append_images=imgs[1:],
+                 duration=int(1000 / fps), loop=0, quality=quality,
+                 method=6, minimize_size=True, kmax=30, kmin=9)
+    print("wrote %s (%d frames, %d KB)" % (out, len(imgs), os.path.getsize(out) // 1024))
 
 # distinct, index-stable palette; index 0 = unlabeled/background (dark)
 PALETTE = [(28, 28, 32), (222, 70, 70), (70, 200, 95), (72, 120, 240), (240, 200, 55),

@@ -4,6 +4,8 @@
 import sys, os, glob, re, struct
 import numpy as np
 from PIL import Image, ImageDraw, ImageOps
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from segutil import save_webp
 
 def frames(d):
     fs = glob.glob(os.path.join(d, "scan", "frame_*.bin"))
@@ -55,7 +57,7 @@ def render(path, S, view):
 
 def main():
     ind, out = sys.argv[1], sys.argv[2]
-    fps = arg("--fps", 20.0); mx = arg("--max", 120); view = arg("--view", 45.0); S = 720
+    fps = arg("--fps", 20.0); mx = arg("--max", 90); outw = arg("--width", 1100); view = arg("--view", 45.0); S = 720
     fs = frames(ind)[arg("--skip", 8):]   # drop the suspension-settling frames at the start
     if not fs:
         print("NO FRAMES:", ind); return 1
@@ -78,10 +80,9 @@ def main():
             imgs.append(pair)
         else:
             imgs.append(plot)
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    imgs[0].save(out, format="WEBP", save_all=True, append_images=imgs[1:],
-                 duration=int(1000/fps), loop=0, quality=72, method=4)
-    print("wrote %s (%d frames, %d KB)" % (out, len(imgs), os.path.getsize(out)//1024))
+    if imgs[0].width > outw:   # downscale the camera|plot pair for a smaller repo footprint
+        imgs = [f.resize((outw, round(f.height*outw/f.width)), Image.LANCZOS) for f in imgs]
+    save_webp(imgs, out, fps, quality=arg("--quality", 58))
     return 0
 
 if __name__ == "__main__":

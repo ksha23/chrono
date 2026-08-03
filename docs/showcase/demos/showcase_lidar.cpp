@@ -118,7 +118,8 @@ int main(int argc, char** argv) {
     double time = 0, last_ts = -1;
     int saved = 0;
     while (time < 6.0) {
-        DriverInputs in; in.m_throttle = 0.4; in.m_steering = 0.12 * std::sin(0.5 * time); in.m_braking = 0.0;
+        DriverInputs in; in.m_throttle = 0.4; in.m_steering = 0.0;  // straight down the lane: a sine input integrates into a net heading change,
+                                              // which curved the car off-course and into the obstacles in.m_braking = 0.0;
         terrain.Synchronize(time);
         audi.Synchronize(time, in, terrain);
         terrain.Advance(step);

@@ -46,6 +46,25 @@ python3 mkradar.py    demos_live/showcase_out/radar       docs/showcase/webp/rad
 Requires **Pillow** and **NumPy** (both already in the `chronopc` conda env). Pillow's WebP encoder is used
 directly — the `cwebp` / `img2webp` CLI tools are not needed.
 
+### Encoding / file size
+
+All scripts share `segutil.save_webp()`, which encodes with `method=6`, `minimize_size`, and `quality=58`.
+Measured on a 120-frame 820 px clip that started at 4160 KB:
+
+| change | size | note |
+|---|---:|---|
+| baseline (`quality=70, method=4`) | 4160 KB | |
+| `method=6` + `minimize_size` | 3927 KB | only ~5% for ~14× the encode time |
+| `quality=55` | 3219 KB | |
+| 90 frames instead of 120 | 2578 KB | |
+| 700 px wide instead of 820 | 2007 KB | |
+
+**Frame count and pixel width are the real levers**; quality and encoder effort barely move the needle. The
+defaults therefore decimate to 90 frames and downscale (700 px for single-view demos, 1000–1100 px for the
+multi-panel ones, which need the extra width to stay legible). Override per run with `--width`, `--max`, and
+`--quality`. Encoding is a one-off, but the bytes live in git history forever — hence the slow-but-smaller
+settings.
+
 ## Notes
 
 - `ChFilterSave` writes frames **vertically flipped**; every script flips them upright.

@@ -156,7 +156,9 @@ int main(int argc, char** argv) {
     while (time < 5.0) {
         DriverInputs in;
         in.m_throttle = 0.4;
-        in.m_steering = 0.15 * std::sin(0.5 * time);  // mild weave
+        // Straight down the lane. A sine steering input integrates into a net heading change, so the
+        // car drifted off-course and clipped the obstacles instead of driving cleanly past them.
+        in.m_steering = 0.0;
         in.m_braking = 0.0;
         terrain.Synchronize(time);
         audi.Synchronize(time, in, terrain);
