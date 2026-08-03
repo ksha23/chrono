@@ -42,6 +42,8 @@ struct Uniforms {
     float apertureR;                                   // lens aperture radius for depth of field (0 = pinhole)
     float focalDist;                                   // DoF focal distance
     float noiseSigma;                                  // gaussian sensor noise stddev (0 = none)
+    float envIntensity;                                // environment-map radiance scale (OptiX AddEnvironmentLight intensity_scale)
+    float gamma;                                       // output gamma (OptiX camera.gamma; 2.2 = sRGB, 1 = linear)
 };
 
 // Camera ray direction for a normalized image coord (nx includes aspect, ny does not).
@@ -66,7 +68,11 @@ static inline float3 skycol(float3 d, texture2d<float> env, sampler samp, consta
   if(u.hasEnv!=0u){                                      // HDR equirectangular environment map (matches OptiX miss.cu)
     float uu=atan2(dn.y,dn.x)*(0.5/M_PI_F)+0.5;
     float v=acos(clamp(dn.z,-1.0,1.0))*(1.0/M_PI_F);     // z-up: zenith -> v=0 (top of image)
-    return pow(max(env.sample(samp,float2(uu,v)).rgb,0.0), 2.2);  // gamma-correct to match OptiX miss.cu (Pow(tex,2.2))
+    // .hdr is linear radiance -> sample linearly and scale by intensity, matching OptiX's environment LIGHT
+    // (ChOptixEnvironmentLight: L = tex.rgb * intensity_scale). NB: OptiX's LEGACY background (miss.cu) does a
+    // pow(2.2) instead, but scenes that use the env for lighting (e.g. teleopcity, GI) read the map linearly
+    // and brighter -- that is what the driving demos compare against, so we match the light path here.
+    return max(env.sample(samp,float2(uu,v)).rgb,0.0) * u.envIntensity;
   }
   if(u.bgMode==1u){ float m=max(0.0,dn.z); return m*float3(u.bgZenith)+(1.0-m)*float3(u.bgHorizon); }  // GRADIENT (OptiX miss.cu)
   return float3(u.bgZenith);                                                                            // SOLID (OptiX default = black)
@@ -90,7 +96,7 @@ static inline float gaussf(thread uint& s){ float u1=max(rndf(s),1e-6), u2=rndf(
 static inline float3 cameraPost(float3 lin, uint2 tid, constant Uniforms& u, thread uint& seed){
   lin *= (u.exposure>0.0 ? u.exposure : 1.0);
   if(u.vignette>0.0){ float2 p=(float2(float(tid.x),float(tid.y))+0.5)/float2(float(u.width),float(u.height))*2.0-1.0; lin *= max(0.0, 1.0 - u.vignette*dot(p,p)); }
-  float3 o = pow(max(lin,0.0), 1.0/2.2);
+  float3 o = pow(max(lin,0.0), 1.0/max(u.gamma,0.01));   // output gamma (OptiX camera.gamma; default 2.2)
   if(u.noiseSigma>0.0){ o += float3(gaussf(seed),gaussf(seed),gaussf(seed))*u.noiseSigma; }
   return clamp(o,0.0,1.0);
 }

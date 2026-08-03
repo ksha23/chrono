@@ -64,6 +64,11 @@ class CH_SENSOR_API ChMetalRTScene {
     /// HDR equirectangular environment map (Radiance .hdr) for sky + reflections.
     void SetEnvMap(const std::string& path) { m_env_tex = path; }
     const std::string& GetEnvMap() const { return m_env_tex; }
+    /// Environment map as an image-based light: same map, scaled radiance (OptiX AddEnvironmentLight).
+    /// It lights surfaces via GI bounces (in GI mode) and sets the sky/reflection radiance scale.
+    void AddEnvironmentLight(const std::string& path, float intensity_scale = 1.f) { m_env_tex = path; m_env_intensity = intensity_scale; }
+    void SetEnvIntensity(float s) { m_env_intensity = s; }
+    float GetEnvIntensity() const { return m_env_intensity; }
     void AddPointLight(const ChVector3f& pos, const ChColor& color, float range) {
         m_lights.push_back({pos, range, color, 0});
     }
@@ -121,6 +126,7 @@ class CH_SENSOR_API ChMetalRTScene {
     ChColor m_ambient{0.30f, 0.30f, 0.35f};
     std::vector<MetalSceneLight> m_lights;
     std::string m_env_tex;
+    float m_env_intensity = 1.f;
     int m_bg_mode = 2;                        // 1 = gradient, else solid (matches OptiX Background default:
     ChColor m_bg_zenith{0.f, 0.f, 0.f};       //   SOLID_COLOR black when no env map / background is set)
     ChColor m_bg_horizon{0.f, 0.f, 0.f};

@@ -191,6 +191,7 @@ struct ChMetalRTRenderer::Impl {
         uf[46]=cam.fogColor[0]; uf[47]=cam.fogColor[1]; uf[48]=cam.fogColor[2]; uf[49]=cam.fogScatter;
         ui[50]=cam.useGi?1u:0u;
         uf[51]=cam.exposure; uf[52]=cam.vignette; uf[53]=cam.apertureR; uf[54]=cam.focalDist; uf[55]=cam.noiseSigma;
+        uf[56]=cam.envIntensity>0.f?cam.envIntensity:1.f; uf[57]=cam.gamma>0.f?cam.gamma:2.2f;
     }
     void encodeTrace(id<MTLCommandBuffer> cb,id<MTLTexture> tex,int tw,int th) {
         id<MTLComputeCommandEncoder> e=[cb computeCommandEncoder]; [e setComputePipelineState:pso];

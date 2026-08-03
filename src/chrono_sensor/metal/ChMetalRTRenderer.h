@@ -58,6 +58,8 @@ struct MetalCameraParams {
     float apertureR = 0.f;  ///< lens aperture radius for depth of field (0 = pinhole)
     float focalDist = 10.f; ///< depth-of-field focal distance
     float noiseSigma = 0.f; ///< gaussian sensor-noise stddev (0 = off)
+    float envIntensity = 1.f; ///< environment-map radiance scale (OptiX AddEnvironmentLight intensity_scale)
+    float gamma = 2.2f;     ///< output gamma (OptiX camera.gamma; 2.2 = sRGB, 1 = linear)
     bool useDenoiser = false; ///< run the spatial despeckle/denoise pass
 };
 
