@@ -124,7 +124,11 @@ void ChFilterVisualize::CreateGlfwWindow(std::string window_name) {
     glOrtho(0, 1, 0, 1, -1, 1);
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
-    glViewport(0, 0, m_w, m_h);
+    {  // framebuffer size, not window size -- see note above (HiDPI)
+        int fb_w, fb_h;
+        glfwGetFramebufferSize(m_window.get(), &fb_w, &fb_h);
+        glViewport(0, 0, fb_w, fb_h);
+    }
 
     if (!m_gl_tex_id)
         glGenTextures(1, &m_gl_tex_id);
@@ -181,8 +185,12 @@ CH_SENSOR_API void ChFilterVisualize::Apply() {
 
     glfwMakeContextCurrent(m_window.get());
 
+    // Use the FRAMEBUFFER size, not the window size. On a HiDPI/Retina display the
+    // framebuffer is backingScaleFactor times larger than the window in points, so sizing
+    // the viewport from glfwGetWindowSize draws into only the lower-left corner and leaves
+    // the rest of the window black.
     int window_w, window_h;
-    glfwGetWindowSize(m_window.get(), &window_w, &window_h);
+    glfwGetFramebufferSize(m_window.get(), &window_w, &window_h);
     glViewport(0, 0, window_w, window_h);
 
     glBindTexture(GL_TEXTURE_2D, m_gl_tex_id);
@@ -431,7 +439,7 @@ CH_SENSOR_API void ChFilterVisualize::Apply() {
 
         // Set Viewport to window dimensions
         int window_w, window_h;
-        glfwGetWindowSize(m_window.get(), &window_w, &window_h);
+        glfwGetFramebufferSize(m_window.get(), &window_w, &window_h);
         glViewport(0, 0, window_w, window_h);
 
         // update the textures, making sure data has finished memcpy first
@@ -627,7 +635,11 @@ CH_SENSOR_API void ChFilterVisualize::CreateGlfwWindow(std::string window_name) 
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
 
-        glViewport(0, 0, m_w, m_h);
+        {  // framebuffer size, not window size -- see note above (HiDPI)
+        int fb_w, fb_h;
+        glfwGetFramebufferSize(m_window.get(), &fb_w, &fb_h);
+        glViewport(0, 0, fb_w, fb_h);
+    }
     } else {
         std::cerr << "WARNING: requested window could not be created by GLFW. Will proceed with no window.\n";
         m_window_disabled = true;

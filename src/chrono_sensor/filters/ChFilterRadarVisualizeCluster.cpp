@@ -77,10 +77,12 @@ CH_SENSOR_API void ChFilterRadarVisualizeCluster::Apply() {
         glfwMakeContextCurrent(m_window.get());
 
         int window_w, window_h;
-        glfwGetWindowSize(m_window.get(), &window_w, &window_h);
+        glfwGetFramebufferSize(m_window.get(), &window_w, &window_h);
         //
 
         // Set Viewport to window dimensions
+        // Framebuffer size (pixels), not window size (points): on a HiDPI/Retina display
+        // the two differ by backingScaleFactor and the image would fill only the lower-left corner.
         glViewport(0, 0, window_w, window_h);
 
         // Reset projection matrix stack
