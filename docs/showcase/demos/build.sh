@@ -18,7 +18,7 @@ EIGEN="${EIGEN_INCLUDE:-${CONDA_PREFIX:-/usr/local}/include/eigen3}"
 INC="-I src -I $CHRONO_BUILD -isystem $EIGEN -I src/chrono/collision/bullet -I src/chrono_thirdparty/HACDv2 -I src/chrono_thirdparty/yaml-cpp/include"
 LIBS="-L $CHRONO_BUILD/lib -lChrono_core -lChrono_vehicle -lChronoModels_vehicle -lChrono_sensor -Wl,-rpath,$CHRONO_BUILD/lib"
 
-for src in "$DIR"/showcase_*.cpp; do
+for src in "$DIR"/showcase_*.cpp "$DIR"/verify_*.cpp; do
   name="$(basename "${src%.cpp}")"
   echo "building $name"
   c++ -std=c++17 -O2 -DCHRONO_SHOWCASE_ROOT="\"$CHRONO_ROOT\"" "$src" $INC $LIBS -o "$OUT_DIR/$name"
