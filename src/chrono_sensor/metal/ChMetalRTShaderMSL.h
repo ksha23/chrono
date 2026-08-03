@@ -66,7 +66,7 @@ static inline float3 skycol(float3 d, texture2d<float> env, sampler samp, consta
   if(u.hasEnv!=0u){                                      // HDR equirectangular environment map (matches OptiX miss.cu)
     float uu=atan2(dn.y,dn.x)*(0.5/M_PI_F)+0.5;
     float v=acos(clamp(dn.z,-1.0,1.0))*(1.0/M_PI_F);     // z-up: zenith -> v=0 (top of image)
-    return max(env.sample(samp,float2(uu,v)).rgb,0.0);  // .hdr is already linear radiance -> no sRGB linearize (else the sky/backdrop is too dark)
+    return pow(max(env.sample(samp,float2(uu,v)).rgb,0.0), 2.2);  // gamma-correct to match OptiX miss.cu (Pow(tex,2.2))
   }
   if(u.bgMode==1u){ float m=max(0.0,dn.z); return m*float3(u.bgZenith)+(1.0-m)*float3(u.bgHorizon); }  // GRADIENT (OptiX miss.cu)
   return float3(u.bgZenith);                                                                            // SOLID (OptiX default = black)
