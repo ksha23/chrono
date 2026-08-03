@@ -53,6 +53,7 @@ struct ChFilterMetalVisualize::Impl {
     // interactive orbit input (accumulated in pump(), consumed each frame)
     ChOrbitCameraControl orbit;
     double inDX = 0, inDY = 0, inScroll = 0;
+    bool dragActive = false;   // true only while a left-drag that STARTED in the content view is in progress
     void consumeInput(double& dx, double& dy, double& sc) { dx = inDX; dy = inDY; sc = inScroll; inDX = inDY = inScroll = 0; }
 
     void ensureWindow(int w, int h, const std::string& title) {
@@ -99,8 +100,17 @@ struct ChFilterMetalVisualize::Impl {
         NSEvent* e;
         while ((e = [NSApp nextEventMatchingMask:NSEventMaskAny untilDate:[NSDate distantPast]
                                           inMode:NSDefaultRunLoopMode dequeue:YES])) {
-            if (e.type == NSEventTypeLeftMouseDragged) { inDX += e.deltaX; inDY += e.deltaY; }
-            else if (e.type == NSEventTypeScrollWheel)  { inScroll += e.scrollingDeltaY; }
+            // Only orbit for drags that BEGIN inside the content view -- otherwise dragging the title bar to
+            // move the window would also spin the camera (all LeftMouseDragged events land in this queue).
+            if (e.type == NSEventTypeLeftMouseDown) {
+                dragActive = (e.window == window) && NSPointInRect(e.locationInWindow, window.contentView.frame);
+            } else if (e.type == NSEventTypeLeftMouseUp) {
+                dragActive = false;
+            } else if (e.type == NSEventTypeLeftMouseDragged) {
+                if (dragActive) { inDX += e.deltaX; inDY += e.deltaY; }
+            } else if (e.type == NSEventTypeScrollWheel) {
+                inScroll += e.scrollingDeltaY;
+            }
             [NSApp sendEvent:e];
         }
     }
