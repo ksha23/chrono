@@ -95,8 +95,11 @@ Lossless: `camera_segmentation`.
 
 ## Notes
 
-- `ChFilterSave` writes frames **vertically flipped**; every script flips them upright.
+- Frames come out of `ChFilterSave` **upright**: the renderers produce bottom-up buffers
+  (row 0 = bottom, matching OptiX's raygen) and `ChFilterSave` calls
+  `stbi_flip_vertically_on_write(1)`. The scripts load PNGs as-is -- no flip.
 - All *parked* demos share one canonical camera orbit (radius 6.0 m, height 1.8 m, looking at
   `(0, 0, 0.8)`, a full 360° over 150 frames) so their animations stay frame-synchronized with each other.
-- Lidar/radar dump raw sensor buffers as `.bin` (their point-cloud export filters are CUDA-only and are not
-  part of the Metal build), which is why they have dedicated decode scripts.
+- Lidar/radar dump raw sensor buffers as `.bin`, which is why they have dedicated decode scripts.
+  (The point-cloud filters do now build on Metal, via their host fallbacks, but the showcase demos
+  still export raw buffers.)

@@ -1,7 +1,7 @@
 """Shared helpers for showcase webp/composite generation."""
 import os
 import numpy as np
-from PIL import Image, ImageOps
+from PIL import Image
 
 
 def save_webp(imgs, out, fps, quality=58, synthetic=False, lossless=False):
@@ -42,14 +42,14 @@ PALETTE = [(28, 28, 32), (222, 70, 70), (70, 200, 95), (72, 120, 240), (240, 200
 
 
 def load_rgb(path):
-    """ChFilterSave writes vertically flipped -> flip upright."""
-    return ImageOps.flip(Image.open(path).convert("RGB"))
+    """ChFilterSave already writes upright (it calls stbi_flip_vertically_on_write)."""
+    return Image.open(path).convert("RGB")
 
 
 def load_seg(path):
     """Segmentation PNG stores raw (class_id, instance_id) as uint16 pairs in RGBA bytes.
     class_id = R + 256*G. Map each class to a stable palette color."""
-    im = ImageOps.flip(Image.open(path).convert("RGBA"))
+    im = Image.open(path).convert("RGBA")
     a = np.asarray(im)
     cls = a[:, :, 0].astype(np.int32) + 256 * a[:, :, 1].astype(np.int32)
     out = np.zeros((*cls.shape, 3), np.uint8)
@@ -67,7 +67,7 @@ def load_depth(path):
     whole map -- hence the background mask keys on the dark end here. Contrast is stretched
     over the real (non-sky) samples so the foreground gradient is legible.
     """
-    im = ImageOps.flip(Image.open(path).convert("L"))
+    im = Image.open(path).convert("L")
     a = np.asarray(im).astype(np.float32)
     sky = a <= 3                          # miss / max_depth -> background
     fg = a[~sky]

@@ -3,7 +3,7 @@
 # Points coloured by height. Usage: mklidar.py <in_dir> <out.webp> [--fps F] [--max M] [--view R]
 import sys, os, glob, re, struct
 import numpy as np
-from PIL import Image, ImageDraw, ImageOps
+from PIL import Image, ImageDraw
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from segutil import save_webp
 
@@ -70,7 +70,7 @@ def main():
         plot = render(f, S, view)
         campath = os.path.join(ind, "cam", f"frame_{idx}.png")
         if os.path.exists(campath):
-            cam = ImageOps.flip(Image.open(campath).convert("RGB"))   # ChFilterSave saves flipped
+            cam = Image.open(campath).convert("RGB")   # ChFilterSave already writes upright
             if cam.size != (S, S):
                 cam = cam.resize((S, S), Image.LANCZOS)
             d2 = ImageDraw.Draw(cam)

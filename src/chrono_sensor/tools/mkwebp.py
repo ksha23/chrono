@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# ChFilterSave PNG sequence -> animated .webp (via Pillow). Frames are saved vertically
-# flipped by ChFilterSave, so we flip them upright.
+# ChFilterSave PNG sequence -> animated .webp (via Pillow). Frames are already upright:
+# the renderers produce bottom-up buffers and ChFilterSave flips on write.
 # Usage: mkwebp.py <in_dir with frame_*.png> <out.webp> [--skip N] [--fps F] [--width W] [--max M] [--seg]
 #   --seg : colorize a segmentation sequence (raw class-id bytes -> palette)
 import sys, os, glob, re
-from PIL import Image, ImageOps
+from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from segutil import load_seg, save_webp
 
@@ -26,7 +26,7 @@ def main():
         step = len(fs)/float(mx); fs = [fs[int(i*step)] for i in range(mx)]
     imgs = []
     for f in fs:
-        im = load_seg(f) if seg else ImageOps.flip(Image.open(f).convert("RGB"))
+        im = load_seg(f) if seg else Image.open(f).convert("RGB")
         if im.width > width:
             im = im.resize((width, round(im.height*width/im.width)), Image.LANCZOS)
         imgs.append(im)
