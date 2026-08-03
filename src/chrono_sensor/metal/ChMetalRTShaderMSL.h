@@ -218,7 +218,14 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
     float3 hv = normalize(toL+view); float NdH=max(dot(N,hv),0.0), VdH=max(dot(view,hv),0.0);
     float3 F = F0 + (float3(1.0)-F0)*pow(1.0-VdH,5.0);           // Schlick Fresnel
     col += (float3(1.0)-F) * diffAlbedo * incoming;              // diffuse
-    col += F * NormalDist(NdH,rough) * HammonSmith(NdV,NdL,rough) * incoming;  // Cook-Torrance specular
+    // Specular anti-aliasing: floor the roughness used for the *direct-light* specular lobe. At 1 spp the
+    // razor-thin sun highlight on the car's sharp, high-curvature window-frame/panel edges is undersampled
+    // and aliases into a flickering fringe (worst on the sun-facing side -- hence asymmetric). OptiX computes
+    // the identical lobe and hides this with its AI denoiser; we instead widen the lobe just enough that it
+    // can't be sharper than one sample resolves. Only affects the sun glint's sharpness; the sharp *mirror*
+    // reflection (the "shiny" look) is untouched.
+    float rspec = max(rough, 0.16);
+    col += F * NormalDist(NdH,rspec) * HammonSmith(NdV,NdL,rspec) * incoming;  // Cook-Torrance specular
   }
   return col;
 }
@@ -370,15 +377,38 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
         r.origin = h.pos + r.direction*max(5e-3,length(h.pos)*3e-5);  // continue straight through (coord-scaled)
         continue;
       }
-      // Mirror reflection only for smooth *metals* (OptiX mirror_correction = (1-rough)^2 * metallic^2);
-      // sharp single ray (the shiny look). NB: at 1 spp this aliases into speckle on the car's grazing
-      // metallic edges near the windows -- use a higher supersample factor for a clean capture.
-      float mc = pow(1.0-h.rough,2.0) * h.metallic*h.metallic;
-      if(mc > 0.01){
-        float3 rd=reflect(r.direction,h.n); ray rr; rr.origin=h.pos+h.n*max(1e-2,length(h.pos)*3e-5); rr.direction=rd; rr.min_distance=1e-3; rr.max_distance=INFINITY;
-        Hit hr=trace(rr,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,texs,samp,envTex,u);
-        float3 rc=hr.sky?hr.albedo:lighting(hr,-rd,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp);
-        shaded=mix(shaded,rc,clamp(mc,0.0,0.95));
+      // Mirror reflection -- ported verbatim from OptiX CameraLegacyShader::CalculateContributionToPixel.
+      // The reflected color is weighted by the full Cook-Torrance BRDF (F*D*G*NdL/4pi) times the mirror
+      // correction (1-rough)^2*metallic^2, CLAMPED to [0,1], and ADDED on top of the surface shading (not
+      // lerped in). This BRDF weighting + clamp is exactly what keeps reflected high-frequency foliage from
+      // aliasing into "crackle" speckle the way a raw mix() of the full-brightness reflection does.
+      {
+        float rr_rough = clamp(h.rough, 0.045, 1.0);
+        float rr_metal = clamp(h.metallic, 0.0, 1.0);
+        bool  rr_spec  = h.useSpec > 0.5;
+        float3 rd = reflect(r.direction, h.n);
+        float3 vv = -r.direction;
+        float NdV = dot(h.n, vv);
+        float NdL = dot(h.n, rd);
+        float3 hw = normalize(rd + vv);          // halfway = normalize(next_dir - ray_dir)
+        float NdH = dot(h.n, hw);
+        float VdH = dot(vv, hw);
+        float3 F;
+        if(rr_spec){ float3 F0=h.ks*0.08; F = clamp(F0 + (float3(1.0)-F0)*pow(max(0.0,1.0-VdH),5.0), F0, float3(1.0)); }
+        else       { F = rr_metal*h.albedo + (1.0-rr_metal)*float3(0.04); }
+        float3 f_ct = F * NormalDist(NdH,rr_rough) * HammonSmith(NdV,NdL,rr_rough);
+        float mirrorCorr = (1.0-h.rough)*(1.0-h.rough) * h.metallic*h.metallic;
+        float3 w = clamp(mirrorCorr * f_ct * NdL / (4.0*3.14159265), 0.0, 1.0);
+        if(dot(w, float3(0.30,0.59,0.11)) > 0.01){   // OptiX importance_cutoff
+          // Single sharp mirror ray, exactly like OptiX legacy CalculateContributionToPixel. NB: on curved
+          // low-roughness panels this reflects the car's own silhouette against the sky as a hard boundary
+          // ("wavy" self-reflection); OptiX legacy has the same behaviour. (A glossy/blurred variant fixes
+          // the look but costs many extra rays; see OPTIX_COMPARISON.md.)
+          ray rr; rr.origin=h.pos+h.n*max(1e-2,length(h.pos)*3e-5); rr.direction=rd; rr.min_distance=1e-3; rr.max_distance=INFINITY;
+          Hit hr=trace(rr,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,texs,samp,envTex,u);
+          float3 rc=hr.sky?hr.albedo:lighting(hr,-rd,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp);
+          shaded += w * rc;                          // ADDITIVE, BRDF-weighted (OptiX: color = mirror_reflection_color + ...)
+        }
       }
       color += trans*shaded; trans=0.0; break;                   // opaque -> stop
     }

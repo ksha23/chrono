@@ -41,6 +41,13 @@ if(CH_USE_SENSOR_OPTIX)
       )
   endif()
 
+  # Quarter-panel reflection comparison scene (no Irrlicht needed; uses the sensor viewer)
+  if(CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
+      set(DEMOS ${DEMOS}
+        demo_SEN_metal_quarterpanel
+      )
+  endif()
+
   if(CH_ENABLE_MODULE_FSI_SPH AND CH_ENABLE_MODULE_VEHICLE)
       set(DEMOS ${DEMOS}
         demo_SEN_CRM_Rendering
