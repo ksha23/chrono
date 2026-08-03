@@ -99,7 +99,10 @@ struct ChMetalRTRenderer::Impl {
     id<MTLAccelerationStructure> buildBLAS(id<MTLBuffer> vb,int tc,bool refit,id<MTLBuffer>* scr) {
         MTLAccelerationStructureTriangleGeometryDescriptor* g=[MTLAccelerationStructureTriangleGeometryDescriptor descriptor];
         g.vertexBuffer=vb; g.vertexStride=12; g.vertexFormat=MTLAttributeFormatFloat3; g.triangleCount=tc;
-        MTLPrimitiveAccelerationStructureDescriptor* pd=[MTLPrimitiveAccelerationStructureDescriptor descriptor]; pd.geometryDescriptors=@[g]; if(refit)pd.usage=MTLAccelerationStructureUsageRefit;
+        MTLPrimitiveAccelerationStructureDescriptor* pd=[MTLPrimitiveAccelerationStructureDescriptor descriptor]; pd.geometryDescriptors=@[g];
+        // Dynamic geometry: refittable (rebuilt cheaply each frame). Static geometry (terrain + trees, the bulk):
+        // build a higher-quality BVH once -> faster ray traversal every frame (helps supersampling most).
+        pd.usage = refit ? MTLAccelerationStructureUsageRefit : MTLAccelerationStructureUsagePreferFastIntersection;
         MTLAccelerationStructureSizes sz=[dev accelerationStructureSizesWithDescriptor:pd];
         id<MTLAccelerationStructure> as=[dev newAccelerationStructureWithSize:sz.accelerationStructureSize];
         id<MTLBuffer> bs=[dev newBufferWithLength:MAX(sz.buildScratchBufferSize,16) options:MTLResourceStorageModePrivate];
@@ -174,7 +177,9 @@ struct ChMetalRTRenderer::Impl {
         [ae endEncoding];
         id<MTLAccelerationStructureCommandEncoder> te=[cb accelerationStructureCommandEncoder];
         [te buildAccelerationStructure:tlas descriptor:idesc scratchBuffer:tlasScratch scratchBufferOffset:0]; [te endEncoding];
-        [cb commit]; [cb waitUntilCompleted];
+        // Commit WITHOUT blocking: the render command buffer is submitted to the same queue right after, so it
+        // executes after this AS build completes (in-order) -- no CPU stall needed here. render() waits once.
+        [cb commit];
     } }
 
     void fillUniforms(const MetalCameraParams& cam,int tw,int th,int numLights) {
