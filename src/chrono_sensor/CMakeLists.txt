@@ -615,9 +615,12 @@ if(CH_USE_SENSOR_OPTIX OR CH_USE_SENSOR_VULKAN_RT)
 endif()
 
 if(CH_USE_SENSOR_METAL_RT)
-  # Host-buffer camera filters for the Metal backend. ChFilterVisualize is GL-based
-  # (replaced by ChFilterMetalVisualize), so it is intentionally excluded.
+  # Host-buffer camera filters for the Metal backend. ChFilterVisualize is included: it
+  # already carries a CHRONO_HAS_METAL_RT branch that displays a host buffer through GLFW,
+  # and every pre-existing sensor demo uses it to open a window. ChFilterMetalVisualize
+  # remains available as the native viewer with orbit controls.
   set(Chrono_sensor_FILTERS_SOURCES ${Chrono_sensor_FILTERS_SOURCES}
+      filters/ChFilterVisualize.cpp
       filters/ChFilterImageOps.cpp
       filters/ChFilterGrayscale.cpp
       filters/ChFilterCameraNoise.cpp
@@ -629,6 +632,7 @@ if(CH_USE_SENSOR_METAL_RT)
       filters/ChFilterPhysCameraExpsrToDV.cpp
   )
   set(Chrono_sensor_FILTERS_HEADERS ${Chrono_sensor_FILTERS_HEADERS}
+      filters/ChFilterVisualize.h
       filters/ChFilterImageOps.h
       filters/ChFilterGrayscale.h
       filters/ChFilterCameraNoise.h
