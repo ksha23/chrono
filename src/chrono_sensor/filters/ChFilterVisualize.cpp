@@ -24,6 +24,8 @@
 #include <limits>
 #include <vector>
 
+#include "chrono_sensor/filters/ChFilterVisualizeGuards.h"
+
 namespace chrono {
 namespace sensor {
 
@@ -62,6 +64,7 @@ void ChFilterVisualize::OnNewWindow() {
 #ifdef USE_SENSOR_GLFW
     std::lock_guard<std::mutex> lock(s_glfwMutex);
     if (s_windowCount++ == 0) {
+        CocoaAppDelegateGuard delegate_guard;
         if (!glfwInit()) {
             --s_windowCount;
             std::cerr << "WARNING: GLFW initialization failed. Chrono::Sensor visualization window disabled.\n";
@@ -73,8 +76,10 @@ void ChFilterVisualize::OnNewWindow() {
 void ChFilterVisualize::OnCloseWindow() {
 #ifdef USE_SENSOR_GLFW
     std::lock_guard<std::mutex> lock(s_glfwMutex);
-    if (s_windowCount > 0 && --s_windowCount == 0)
+    if (s_windowCount > 0 && --s_windowCount == 0) {
+        CocoaAppDelegateGuard delegate_guard;
         glfwTerminate();
+    }
 #endif
 }
 
@@ -98,8 +103,10 @@ void ChFilterVisualize::CreateGlfwWindow(std::string window_name) {
         std::cerr << "WARNING: requested GLFW window could not be created. Chrono::Sensor will continue without this "
                      "visualization window.\n";
         m_window_disabled = true;
-        if (s_windowCount > 0 && --s_windowCount == 0)
+        if (s_windowCount > 0 && --s_windowCount == 0) {
+            CocoaAppDelegateGuard delegate_guard;
             glfwTerminate();
+        }
         return;
     }
 
@@ -160,6 +167,9 @@ CH_SENSOR_API void ChFilterVisualize::Initialize(std::shared_ptr<ChSensor> pSens
 
 CH_SENSOR_API void ChFilterVisualize::Apply() {
 #ifdef USE_SENSOR_GLFW
+    // Hand back whatever GL context the caller had current (see ChFilterVisualizeGuards.h).
+    GLContextGuard gl_context_guard;
+
     if (!m_window && !m_window_disabled)
         CreateGlfwWindow(Name());
 
