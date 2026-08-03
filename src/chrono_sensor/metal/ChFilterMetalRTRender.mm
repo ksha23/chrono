@@ -249,6 +249,7 @@ void ChFilterMetalRTRender::Apply() {
                 cam.lidarHDiv = ld->GetHorizDivAngle() * (float)(2 * ld->GetSampleRadius());  // spread sub-rays across the beam footprint
                 cam.lidarVDiv = ld->GetVertDivAngle() * (float)(2 * ld->GetSampleRadius());
                 cam.lidarReturnMode = (int)ld->GetReturnMode();
+                cam.clipNear = ld->GetClipNear();  // sensor sits inside its own housing on some vehicles
             }
         }
         if (mode == 5) {
@@ -257,6 +258,7 @@ void ChFilterMetalRTRender::Apply() {
                 cam.lidarVMin = -0.5f * rd->GetVFOV();
                 cam.lidarVMax =  0.5f * rd->GetVFOV();
                 cam.maxDist   = rd->GetMaxDistance();
+                cam.clipNear  = rd->GetClipNear();
             }
         }
 

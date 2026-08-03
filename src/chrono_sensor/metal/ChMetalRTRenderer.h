@@ -45,6 +45,7 @@ struct MetalCameraParams {
     float lidarHDiv;        ///< horizontal beam divergence (rad)
     float lidarVDiv;        ///< vertical beam divergence (rad)
     int lidarReturnMode;    ///< 0 strongest,1 mean,2 first,3 last,4 dual
+    float clipNear = 0.f;   ///< lidar/radar near clip (ChLidarSensor::GetClipNear); returns closer than this are ignored
     int lensModel;          ///< 0 pinhole, 1 FOV (fisheye), 2 radial
     float dk1, dk2, dk3;    ///< radial distortion coefficients
     int bgMode = 0;         ///< background: 0 procedural/env, 1 gradient, 2 solid

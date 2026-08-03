@@ -44,6 +44,9 @@ struct Uniforms {
     float noiseSigma;                                  // gaussian sensor noise stddev (0 = none)
     float envIntensity;                                // environment-map radiance scale (OptiX AddEnvironmentLight intensity_scale)
     float gamma;                                       // output gamma (OptiX camera.gamma; 2.2 = sRGB, 1 = linear)
+    float clipNear;                                    // lidar/radar near clip: returns closer than this are ignored
+                                                       // (OptiX passes ChLidarSensor::GetClipNear() as optixTrace tmin,
+                                                       //  which is what lets a sensor sit inside its own housing)
 };
 
 // Camera ray direction for a normalized image coord (nx includes aspect, ny does not).
@@ -324,7 +327,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       float oel=(n>1u)?((float(sj)/float(n-1u))-0.5)*u.lidarVDiv:0.0;
       float az=baseAz+oaz, el=baseEl+oel;
       float3 dir=normalize(cos(el)*(cos(az)*fwd + sin(az)*leftv) + sin(el)*up);
-      ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=1e-3; r.max_distance=(u.maxDist>0.0)?u.maxDist:INFINITY;
+      ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=max(1e-3,u.clipNear); r.max_distance=(u.maxDist>0.0)?u.maxDist:INFINITY;
       Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
       if(!h.sky){ hits++;
         float inten=abs(dot(h.n,-dir));                                          // OptiX lidar: lidar_intensity(=1) * |N.V|
@@ -350,7 +353,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     float el = u.lidarVMin + ((u.height>1u)? float(tid.y)/float(u.height-1u) : 0.5) * (u.lidarVMax-u.lidarVMin);
     float3 fwd=float3(u.camForward), up=float3(u.camUp), leftv=-float3(u.camRight);
     float3 dir=normalize(cos(el)*(cos(az)*fwd + sin(az)*leftv) + sin(el)*up);
-    ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=1e-3; r.max_distance=(u.maxDist>0.0)?u.maxDist:INFINITY;
+    ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=max(1e-3,u.clipNear); r.max_distance=(u.maxDist>0.0)?u.maxDist:INFINITY;
     Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
     if(h.sky){ outTex.write(float4(0,0,-1,0), tid); return; }
     float amp=abs(dot(h.n,-dir));   // OptiX radar: radar_backscatter(=1) * |N.V|

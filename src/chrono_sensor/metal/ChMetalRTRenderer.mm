@@ -217,6 +217,7 @@ struct ChMetalRTRenderer::Impl {
         ui[50]=cam.useGi?1u:0u;
         uf[51]=cam.exposure; uf[52]=cam.vignette; uf[53]=cam.apertureR; uf[54]=cam.focalDist; uf[55]=cam.noiseSigma;
         uf[56]=cam.envIntensity>0.f?cam.envIntensity:1.f; uf[57]=cam.gamma>0.f?cam.gamma:2.2f;
+        uf[58]=cam.clipNear>0.f?cam.clipNear:0.f;
     }
     void encodeTrace(id<MTLCommandBuffer> cb,id<MTLTexture> tex,int tw,int th) {
         id<MTLComputeCommandEncoder> e=[cb computeCommandEncoder]; [e setComputePipelineState:pso];
