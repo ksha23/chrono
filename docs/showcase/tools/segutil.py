@@ -43,15 +43,21 @@ def load_seg(path):
 
 
 def load_depth(path):
-    """Depth PNG is a low-contrast grayscale visualization. Stretch contrast over the foreground
-    (non-background) pixels so near/far read clearly; keep it grayscale (honest depth look)."""
+    """Depth PNG -> grayscale visualization, near surfaces bright and far ones dark.
+
+    A ray that hits nothing now returns max_depth (matching OptiX), so sky/no-return sits at
+    the DARK end of the range, not the bright end. An earlier revision of the backend returned
+    0.0 for a miss, which made the sky read as the closest possible surface and inverted the
+    whole map -- hence the background mask keys on the dark end here. Contrast is stretched
+    over the real (non-sky) samples so the foreground gradient is legible.
+    """
     im = ImageOps.flip(Image.open(path).convert("L"))
     a = np.asarray(im).astype(np.float32)
-    sky = a >= 252                       # sky/no-return encodes as ~white -> treat as background
-    fg = a[(a > 4) & ~sky]
+    sky = a <= 3                          # miss / max_depth -> background
+    fg = a[~sky]
     if fg.size > 100:
         lo, hi = np.percentile(fg, 2), np.percentile(fg, 98)
         if hi - lo > 1:
             a = np.clip((a - lo) / (hi - lo), 0, 1) * 255.0
-    a[sky] = 0                            # black sky -> the foreground depth gradient reads clearly
+    a[sky] = 0                            # keep the background black
     return Image.fromarray(a.astype(np.uint8), "L").convert("RGB")

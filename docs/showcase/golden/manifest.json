@@ -1,8 +1,8 @@
 {
   "images": {
     "depth": {
-      "bytes": 2115,
-      "sha256": "4a23fb79f65bd1b611fcf75e9431a46ca5238e9e94abcfb40439ee589335cdf5"
+      "bytes": 2258,
+      "sha256": "2bd27b362c920330340527c92516dbd4136b34fd8c3202b98ef64790d04be478"
     },
     "env_rgb": {
       "bytes": 21071,
@@ -21,8 +21,8 @@
       "sha256": "4c771749adfe09043e65af1667f6b160a89fe30c413dcfbbcbc228bb9502e680"
     },
     "normal": {
-      "bytes": 1211,
-      "sha256": "6085268e410f6fb0fbea063fc2cf8db44526c7846bdb60c57380fcff14ca4fc1"
+      "bytes": 1795,
+      "sha256": "f697fddbc1f6b21adf158633d831d0a416c6e95368807b56018533e1a46141fd"
     },
     "radial": {
       "bytes": 6932,
@@ -37,8 +37,8 @@
       "sha256": "48230a1fc3e88c9c2fdb7962e379b4f872ca59707a346e136a76b76d975aaa48"
     },
     "segmentation": {
-      "bytes": 393,
-      "sha256": "ed0d43e4bae28854a2db9e32f92b062ba2b8d7d5ae112ac825b3ca469556dcfa"
+      "bytes": 470,
+      "sha256": "1b8d07179ce9710d3a93b7305c42748916337c67fb51186c6a81ff527f50aeab"
     }
   },
   "signature": {

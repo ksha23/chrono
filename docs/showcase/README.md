@@ -23,7 +23,7 @@ The camera sensor renders four synchronized output types from the same ray-trace
 | RGB | Depth |
 |:---:|:---:|
 | ![RGB](../../media/sensor-showcase/camera_rgb.webp)<br>[▶ showcase_camera_rgb.cpp](demos/showcase_camera_rgb.cpp) | ![Depth](../../media/sensor-showcase/camera_depth.webp)<br>[▶ showcase_camera_depth.cpp](demos/showcase_camera_depth.cpp) |
-| Photorealistic hardware ray tracing — glossy PBR paint, HDR sky, soft shadows. | Per-pixel range as a grayscale depth map (0–20 m). |
+| Photorealistic hardware ray tracing — glossy PBR paint, HDR sky, soft shadows. | Per-pixel range: near surfaces bright, falling to black at the far clip. A ray that hits nothing returns the max depth, matching OptiX. |
 
 | Surface normals | Segmentation |
 |:---:|:---:|
@@ -44,7 +44,7 @@ Realistic optics and sensor imperfections, all computed in the ray generator / p
 | Depth of field | Sensor grain & vignette |
 |:---:|:---:|
 | ![Depth of field](../../media/sensor-showcase/physcam_dof.webp)<br>[▶ showcase_physcam_dof.cpp](demos/showcase_physcam_dof.cpp) | ![Grain](../../media/sensor-showcase/physcam_grain.webp)<br>[▶ showcase_physcam_grain.cpp](demos/showcase_physcam_grain.cpp) |
-| Thin-lens bokeh — the whole car stays sharp while the terrain and trees melt into background blur. | Under-exposed low-light look: vignette + Gaussian sensor noise. |
+| Thin-lens bokeh from a 12 mm lens at f/2.0 focused at 6 m — the whole car sits inside the in-focus zone while the ground falls away. | The physical sensor model: cos⁴ lens vignetting darkening the corners, plus shot and read noise grain. |
 
 ---
 
