@@ -278,10 +278,15 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
   float ncy=(1.0-2.0*(float(tid.y)+0.5)/float(u.height));
   float3 cdir=camRayDir(ncx,ncy,u);
 
-  if(u.mode==1u){ // DEPTH (distance to first hit; 0 = sky/miss)
+  if(u.mode==1u){ // DEPTH: min(max_depth, distance); a miss returns max_depth.
+    // Matches OptiX: depth_cam_shader.cuh does prd->depth = fminf(prd->max_depth, ray_dist) and
+    // miss.cu sets prd->depth = prd->max_depth. u.maxDist carries ChDepthCamera::GetMaxDepth();
+    // 0 means "unlimited", in which case a miss stays at 0 as before.
     ray r; r.origin=float3(u.camPos); r.direction=cdir; r.min_distance=1e-3; r.max_distance=INFINITY;
     Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
-    outTex.write(float4(h.sky?0.0:h.dist,0,0,1), tid); return;
+    float md=u.maxDist;
+    float d = h.sky ? md : ((md>0.0) ? min(md, h.dist) : h.dist);
+    outTex.write(float4(d,0,0,1), tid); return;
   }
   if(u.mode==2u){ // NORMAL (world-space; 0 = sky/miss)
     ray r; r.origin=float3(u.camPos); r.direction=cdir; r.min_distance=1e-3; r.max_distance=INFINITY;

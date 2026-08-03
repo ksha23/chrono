@@ -22,9 +22,12 @@
 
 #include "chrono_sensor/metal/ChFilterMetalRTRender.h"
 #include "chrono_sensor/sensors/ChCameraSensor.h"
+#include "chrono_sensor/sensors/ChDepthCamera.h"
 #include "chrono_sensor/sensors/ChLidarSensor.h"
+#include "chrono_sensor/sensors/ChNormalCamera.h"
 #include "chrono_sensor/sensors/ChPhysCameraSensor.h"
 #include "chrono_sensor/sensors/ChRadarSensor.h"
+#include "chrono_sensor/sensors/ChSegmentationCamera.h"
 
 namespace chrono {
 namespace sensor {
@@ -146,10 +149,45 @@ void ChFilterMetalRTRender::Apply() {
         const ChVector3d rgt = cf.TransformDirectionLocalToParent(ChVector3d(0, -1, 0));
         const ChVector3d up = cf.TransformDirectionLocalToParent(ChVector3d(0, 0, 1));
 
-        float hfov = 1.408f;
-        if (auto c = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) hfov = c->GetHFOV();
+        // ---- camera-like sensor parameters ----
+        // The five rendered camera front-ends do NOT share a common base: ChCameraSensor,
+        // ChPhysCameraSensor, ChDepthCamera, ChNormalCamera and ChSegmentationCamera each derive
+        // straight from ChMetalSensor. So each type has to be probed on its own -- probing only
+        // ChCameraSensor silently left depth/normal/segmentation on the 1.408 rad (80.67 deg)
+        // fallback below and stuck them on PINHOLE, which de-registered them from the RGB view.
+        float hfov = 1.408f;         // fallback only; every camera type overrides it
+        int ss = 1;                  // supersampling
+        int lens_model = 0;          // 0 pinhole, 1 FOV, 2 radial
+        ChVector3f distortion(0.f, 0.f, 0.f);
+        float max_depth = 0.f;       // depth camera far clip; 0 = unlimited
+
         auto phys = std::dynamic_pointer_cast<ChPhysCameraSensor>(sensor);
-        if (phys) hfov = phys->GetHFOV();  // derived from sensor_width / focal_length
+        auto cam_rgb = std::dynamic_pointer_cast<ChCameraSensor>(sensor);
+        auto cam_depth = std::dynamic_pointer_cast<ChDepthCamera>(sensor);
+        auto cam_normal = std::dynamic_pointer_cast<ChNormalCamera>(sensor);
+        auto cam_seg = std::dynamic_pointer_cast<ChSegmentationCamera>(sensor);
+
+        if (cam_rgb) {
+            hfov = cam_rgb->GetHFOV();
+            ss = (int)cam_rgb->GetSampleFactor();
+            lens_model = (int)cam_rgb->GetLensModelType();
+            distortion = cam_rgb->GetCameraDistortionCoefficients();
+        } else if (phys) {
+            hfov = phys->GetHFOV();  // derived from sensor_width / focal_length
+            ss = (int)phys->GetSampleFactor();
+            lens_model = (int)phys->GetLensModelType();
+            distortion = phys->GetCameraDistortionCoefficients();
+        } else if (cam_depth) {
+            hfov = cam_depth->GetHFOV();
+            lens_model = (int)cam_depth->GetLensModelType();
+            max_depth = cam_depth->GetMaxDepth();
+        } else if (cam_normal) {
+            hfov = cam_normal->GetHFOV();
+            lens_model = (int)cam_normal->GetLensModelType();
+        } else if (cam_seg) {
+            hfov = cam_seg->GetHFOV();
+            lens_model = (int)cam_seg->GetLensModelType();
+        }
         const float aspect = (float)width / (float)height;
 
         MetalCameraParams cam{};
@@ -193,23 +231,14 @@ void ChFilterMetalRTRender::Apply() {
         cam.exposure = m_scene->GetExposure(); cam.vignette = m_scene->GetVignette();
         cam.noiseSigma = m_scene->GetSensorNoise(); cam.apertureR = m_scene->GetApertureRadius(); cam.focalDist = m_scene->GetFocalDist();
         cam.tanHalfV = std::tan(0.5f * hfov) / aspect;
-        int ss = 1;
-        if (auto c = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) ss = (int)c->GetSampleFactor();
-        if (phys) ss = (int)phys->GetSampleFactor();
         cam.aa = (mode == 0 || mode == 6) ? (ss < 1 ? 1 : (ss > 4 ? 4 : ss)) : 1;  // AA only for color (can't average ids/depth)
         cam.mode = mode;
-        if (auto c = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) {  // lens model (pinhole/FOV/radial)
-            cam.lensModel = (int)c->GetLensModelType();
-            ChVector3f dd = c->GetCameraDistortionCoefficients();
-            cam.dk1 = dd.x(); cam.dk2 = dd.y(); cam.dk3 = dd.z();
-            cam.lidarHFov = hfov;  // FOV lens uses this
-        }
-        if (phys) {
-            cam.lensModel = (int)phys->GetLensModelType();
-            ChVector3f dd = phys->GetCameraDistortionCoefficients();
-            cam.dk1 = dd.x(); cam.dk2 = dd.y(); cam.dk3 = dd.z();
-            cam.lidarHFov = hfov;
-        }
+        cam.lensModel = lens_model;                                 // pinhole / FOV / radial
+        cam.dk1 = distortion.x(); cam.dk2 = distortion.y(); cam.dk3 = distortion.z();
+        if (mode != 4 && mode != 5)
+            cam.lidarHFov = hfov;   // the FOV (fisheye) lens model reads the horizontal FOV from here
+        if (mode == 1)
+            cam.maxDist = max_depth;  // ChDepthCamera far clip (OptiX/Vulkan honour GetMaxDepth)
         if (mode == 4) {
             if (auto ld = std::dynamic_pointer_cast<ChLidarSensor>(sensor)) {
                 cam.lidarHFov = ld->GetHFOV();

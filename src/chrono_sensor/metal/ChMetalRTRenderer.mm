@@ -70,6 +70,16 @@ struct ChMetalRTRenderer::Impl {
     std::vector<id<MTLBuffer>> retain;
     std::vector<id<MTLTexture>> texList;
 
+    // Scene topology captured at the last build(). Every per-instance buffer, the BLAS list and the
+    // TLAS descriptor are sized from these, so if the counts change (bodies added or removed at
+    // runtime, e.g. ChSensorManager::ReconstructScenes) updateDynamic() would index past the end of
+    // buffers built for the old scene. Detected in UpdateDynamic(), which rebuilds instead.
+    size_t builtGeomCount = 0, builtInstCount = 0, builtTexCount = 0;
+    bool topologyChanged(const RenderScene& s) const {
+        return s.geometries.size() != builtGeomCount || s.instances.size() != builtInstCount ||
+               s.texturePaths.size() != builtTexCount;
+    }
+
     static void c3(float* o, float x, float y, float z) { o[0]=x; o[1]=y; o[2]=z; }
 
     id<MTLBuffer> mkbuf(std::vector<float>& v) {
@@ -156,11 +166,15 @@ struct ChMetalRTRenderer::Impl {
         MTLAccelerationStructureSizes ts=[dev accelerationStructureSizesWithDescriptor:idesc];
         tlas=[dev newAccelerationStructureWithSize:ts.accelerationStructureSize];
         tlasScratch=[dev newBufferWithLength:MAX(ts.buildScratchBufferSize,16) options:MTLResourceStorageModePrivate];
+        builtGeomCount=scene.geometries.size(); builtInstCount=scene.instances.size(); builtTexCount=scene.texturePaths.size();
         updateDynamic(scene);
     } }
 
     void updateDynamic(const RenderScene& scene) { @autoreleasepool {
+        // Defensive: never index the build-time arrays with a scene they were not built for.
+        if(topologyChanged(scene)) return;
         for(size_t i=0;i<scene.instances.size();++i){ auto& in=scene.instances[i];
+            if(in.geom>=(int)geoms.size()) continue;
             float* f=(float*)((char*)instBuf.contents+i*64); for(int k=0;k<12;k++) f[k]=in.xform[k];
             uint32_t* u=(uint32_t*)((char*)instBuf.contents+i*64+48); u[0]=0;u[1]=0xff;u[2]=0;u[3]=(uint32_t)geoms[in.geom].blasIndex;
             float* R=(float*)instRot.contents+i*9; for(int k=0;k<9;k++) R[k]=in.rot[k];
@@ -267,7 +281,12 @@ ChMetalRTRenderer::ChMetalRTRenderer(void* mtlDevice, void* mtlQueue) {
 ChMetalRTRenderer::~ChMetalRTRenderer() { delete p; }
 bool ChMetalRTRenderer::Valid() const { return p && p->dev && p->pso; }
 void ChMetalRTRenderer::Build(const cr::RenderScene& scene) { if(Valid()) p->build(scene); }
-void ChMetalRTRenderer::UpdateDynamic(const cr::RenderScene& scene) { if(Valid()) p->updateDynamic(scene); }
+void ChMetalRTRenderer::UpdateDynamic(const cr::RenderScene& scene) {
+    if(!Valid()) return;
+    // Bodies added or removed at runtime (ChSensorManager::ReconstructScenes) change the scene
+    // topology; the accel structures and per-instance buffers must be rebuilt, not refitted.
+    if(p->topologyChanged(scene)) p->build(scene); else p->updateDynamic(scene);
+}
 void ChMetalRTRenderer::Render(const MetalCameraParams& cam,const MetalLightGPU* lights,int numLights,int w,int h,float* out) { if(Valid()) p->render(cam,lights,numLights,w,h,out); }
 void ChMetalRTRenderer::SetEnvMap(const std::string& path) { if(Valid()) p->setEnvMap(path); }
 

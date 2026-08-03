@@ -1,4 +1,5 @@
 // SHOWCASE (METAL backend): full PHYSICS-BASED SENSOR chain via ChPhysCameraSensor.
+// Strong optical cos^4 vignette + real sensor grain, driven entirely by the physical camera parameters.
 //
 // The same ChPhysCameraSensor the OptiX backend uses, running all four post-render stages on Metal:
 //
@@ -137,23 +138,35 @@ int main(int argc, char** argv) {
     PhysCameraNoiseParams noise_params;
     gain_params.defocus_gain = 0.f;
     gain_params.defocus_bias = 0.f;
-    gain_params.vignetting_gain = 0.75f;  // pronounced corner falloff (~61% of centre at the frame corner)
+    // vignetting_gain blends between "no vignette" (0) and the bare optical cos^4 law (1):
+    //   gain = 1 - G + G * cos^4(theta).
+    // G = 1 is therefore the physically pure setting, and it is what this demo wants -- any G < 1 is a fudge
+    // that lifts the corners back toward the centre. The corner field angle follows from the FOV alone:
+    // sensor_width = 2*f*tan(hFOV/2), so theta_corner = atan(1.147*tan(hFOV/2)) and the focal length cancels.
+    // At the suite's standard 60 deg hFOV that is 33.5 deg, giving cos^4 = 0.483 -- the frame corners land at
+    // ~48% of centre. (A wider lens would darken them further: 75 deg -> 0.32, 90 deg -> 0.19.)
+    gain_params.vignetting_gain = 1.0f;
     gain_params.aggregator_gain = 1e8f;
     gain_params.expsr2dv_gamma = 1.0f;
     gain_params.expsr2dv_crf_type = 2;    // 0: gamma_correct, 1: sigmoid, 2: linear
     gain_params.expsr2dv_gains = {1.0f, 1.0f, 1.0f};
-    gain_params.expsr2dv_biases = {0.005f, 0.01f, 0.03f};  // slight cool cast in the shadows, as on the real sensor
-    ChVector3f rgb_QE_vec(0.4453f, 0.5621f, 0.4713f);      // measured RGB quantum efficiencies
+    gain_params.expsr2dv_biases = {0.003f, 0.006f, 0.014f};  // slight cool cast in the shadows, as on the real sensor
+    ChVector3f rgb_QE_vec(0.4453f, 0.5621f, 0.4713f);        // measured RGB quantum efficiencies
 
-    // Measured noise figures, scaled up 5x so the grain is actually visible in a showcase animation.
+    // Measured noise figures, scaled up 3x so the grain is actually visible in a showcase animation.
     noise_params.FPN_rng_seed = 1234;
     noise_params.dark_currents = {0.000166311f, 0.000341295f, 0.000680946f};  // [electrons/sec]
-    noise_params.noise_gains = {5.f * 0.00182512f, 5.f * 0.00215293f, 5.f * 0.00318984f};
-    noise_params.STD_reads = {5.f * 2.56849e-05f, 5.f * 4.08999e-05f, 5.f * 8.33132e-05f};
+    noise_params.noise_gains = {3.f * 0.00182512f, 3.f * 0.00215293f, 3.f * 0.00318984f};
+    noise_params.STD_reads = {3.f * 2.56849e-05f, 3.f * 4.08999e-05f, 3.f * 8.33132e-05f};
 
-    // (aperture_num, expsr_time, ISO, focal_length, focus_dist). ISO 50 at f/4 under-exposes the frame by
-    // about one stop relative to a neutral rendering -- the low-light look this demo is after.
-    cam->SetCtrlParameters(4.0f, 0.256f, 50.0f, focal_length, (float)radius);
+    // (aperture_num, expsr_time, ISO, focal_length, focus_dist).
+    // The end-to-end sensitivity is gains * ISO * (G_agg * P / N^2 * C^2 * t * QE); for the green channel that
+    // is 1.0 * 90 * 1.071e-2 = 0.96, so the brightest scene content still clips to white. Do NOT drop
+    // ISO to "under-expose": the exposure math runs on the ALREADY gamma-encoded render (phys_cam_raygen.cu
+    // applies pow(1/gamma) before the filter chain), so halving ISO caps the brightest possible pixel at 54%
+    // grey and crushes the whole frame into the bottom half of the range -- washed out, not under-exposed.
+    // The low-light character here comes from the cos^4 vignette and the sensor grain instead.
+    cam->SetCtrlParameters(4.0f, 0.256f, 90.0f, focal_length, (float)radius);
     cam->SetModelParameters(sensor_width, pixel_size, max_scene_light_amount, rgb_QE_vec, gain_params,
                             noise_params);
     cam->SetName("physcam_grain");
