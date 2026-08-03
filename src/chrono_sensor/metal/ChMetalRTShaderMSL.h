@@ -180,7 +180,7 @@ static float shadowRay(float3 origin, float3 dir, float maxd, float minD, instan
 // ambient is exactly what keeps vertical tree cards from going dark under an overhead sun.
 // Per-light direct illumination only (no ambient) -- used by both the legacy shader and the GI integrator.
 static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device const Light* lights, instance_acceleration_structure accel,
-   device const uint* nBase, device const int* gTexId, device const float* gUV, device const float* gOpacity, device const int* gOpacityTexId, device const float* gTexScale, array<texture2d<float>,64> texs, sampler samp){
+   device const uint* nBase, device const int* gTexId, device const float* gUV, device const float* gOpacity, device const int* gOpacityTexId, device const float* gTexScale, array<texture2d<float>,64> texs, sampler samp, thread uint& seed){
   float3 N = h.n;
   float NdV = max(dot(N, view), 0.0);
   float rough = clamp(h.rough, 0.045, 1.0);
@@ -192,7 +192,22 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
   float3 col = float3(0.0);
   for(uint i=0;i<u.numLights;i++){
     Light L=lights[i]; float3 toL; float dL; float atten=1.0;
-    if(L.type>1.5){ // SPOT: point-light falloff * angular cone falloff (OptiX ChOptixSpotLight)
+    if(L.type>3.5){ // RECTANGLE area light (OptiX ChOptixRectangleLight): center=pos, edges=dir & (cosOuter,cosInner,p0)
+      float3 e1=float3(L.dir), e2=float3(L.cosOuter,L.cosInner,L.p0);      // full edge vectors
+      float3 p=float3(L.pos) + (rndf(seed)-0.5)*e1 + (rndf(seed)-0.5)*e2;  // uniform point on the rectangle
+      float3 d=p-h.pos; dL=length(d); toL=d/max(dL,1e-4);
+      float3 nrm=normalize(cross(e1,e2)); float cosL=dot(nrm,-toL);
+      if(cosL<=0.0) continue;                                             // hit point behind the emitter
+      float area=length(cross(e1,e2)); atten=cosL*area/max(dL*dL,1e-6);   // area -> solid-angle weight
+    } else if(L.type>2.5){ // DISK area light (OptiX ChOptixDiskLight): center=pos, normal=dir, radius=p0
+      float3 n=normalize(float3(L.dir));
+      float3 t=normalize(cross(abs(n.z)<0.99?float3(0,0,1):float3(1,0,0), n)), b=cross(n,t);
+      float rr=L.p0*sqrt(rndf(seed)), ph=6.28318530718*rndf(seed);         // uniform disk sample
+      float3 p=float3(L.pos)+(t*cos(ph)+b*sin(ph))*rr;
+      float3 d=p-h.pos; dL=length(d); toL=d/max(dL,1e-4);
+      float cosL=dot(n,-toL); if(cosL<=0.0) continue;
+      float area=3.14159265*L.p0*L.p0; atten=cosL*area/max(dL*dL,1e-6);
+    } else if(L.type>1.5){ // SPOT: point-light falloff * angular cone falloff (OptiX ChOptixSpotLight)
       float3 d=float3(L.pos)-h.pos; dL=length(d); toL=d/max(dL,1e-4);
       if(L.range>0.0){ float as=0.01*L.range*L.range; atten=as/max(dL*dL,1e-4); }
       float ang=acos(clamp(dot(-toL, normalize(float3(L.dir))),-1.0,1.0)); // angle from spot axis
@@ -226,10 +241,10 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
 
 // Legacy shading = OptiX "flashlight" ambient (view-facing NdV + up-hemisphere) + direct lighting.
 static float3 lighting(Hit h, float3 view, constant Uniforms& u, device const Light* lights, instance_acceleration_structure accel,
-   device const uint* nBase, device const int* gTexId, device const float* gUV, device const float* gOpacity, device const int* gOpacityTexId, device const float* gTexScale, array<texture2d<float>,64> texs, sampler samp){
+   device const uint* nBase, device const int* gTexId, device const float* gUV, device const float* gOpacity, device const int* gOpacityTexId, device const float* gTexScale, array<texture2d<float>,64> texs, sampler samp, thread uint& seed){
   float NdV = max(dot(h.n, view), 0.0);
   float3 amb = u.ambient * (NdV + (dot(h.n,float3(0,0,1))*0.5+0.5)) * h.albedo;
-  return amb + directLighting(h,view,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp);
+  return amb + directLighting(h,view,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp,seed);
 }
 
 kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms& u [[buffer(0)]],
@@ -326,7 +341,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
         if(h.sky){ rad += thru*h.albedo; break; }                                  // sky/env is the light source
         float3 view=-r.direction;
         rad += thru * h.emissive * abs(dot(h.n,view));                             // emissive
-        rad += thru * directLighting(h,view,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp);  // NEE direct lighting
+        rad += thru * directLighting(h,view,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp,seed);  // NEE direct lighting
         float3 nd=cosineHemisphere(h.n, rndf(seed), rndf(seed));                   // indirect diffuse bounce
         thru *= h.albedo * (1.0-clamp(h.metallic,0.0,1.0));                        // cosine estimator -> *albedo
         if(bnc>=2){ float p=clamp(max(max(thru.x,thru.y),thru.z),0.05,0.95); if(rndf(seed)>p) break; thru/=p; }  // Russian roulette
@@ -356,7 +371,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,texs,samp,envTex,u);
       if(primDist<0.0 && !h.sky) primDist=h.dist;   // first surface distance (for fog)
       if(h.sky){ color += trans*h.albedo; trans=0.0; break; }
-      float3 shaded = lighting(h,-r.direction,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp);
+      float3 shaded = lighting(h,-r.direction,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp,pseed);
       shaded += h.emissive * abs(dot(h.n,-r.direction));   // emissive (OptiX: emissive_power*Ke*abs(NdV))
       if(h.opacity < 0.999){
         // Colored/semi-transparent surface (illum 9), exactly like OptiX legacy: the shaded surface color is
@@ -395,7 +410,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
           // the look but costs many extra rays; see OPTIX_COMPARISON.md.)
           ray rr; rr.origin=h.pos+h.n*max(1e-2,length(h.pos)*3e-5); rr.direction=rd; rr.min_distance=1e-3; rr.max_distance=INFINITY;
           Hit hr=trace(rr,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,texs,samp,envTex,u);
-          float3 rc=hr.sky?hr.albedo:lighting(hr,-rd,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp);
+          float3 rc=hr.sky?hr.albedo:lighting(hr,-rd,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp,pseed);
           shaded += w * rc;                          // ADDITIVE, BRDF-weighted (OptiX: color = mirror_reflection_color + ...)
         }
       }

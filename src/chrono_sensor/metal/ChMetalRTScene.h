@@ -44,9 +44,10 @@ struct MetalSceneLight {
     float range;       ///< point/spot falloff range (0 = none)
     ChColor color;     ///< color * intensity
     int type;          ///< 0 = point, 1 = directional, 2 = spot
-    ChVector3f dir{0,0,-1};  ///< spot axis
-    float cosOuter = -1.f;   ///< spot: cos(outer half-angle)
-    float cosInner = -1.f;   ///< spot: cos(inner half-angle)
+    ChVector3f dir{0,0,-1};  ///< spot axis / disk normal / rectangle edge-1
+    float cosOuter = -1.f;   ///< spot: full cone angle (angle_range)   | rect: edge-2 .x
+    float cosInner = -1.f;   ///< spot: angular atten rate              | rect: edge-2 .y
+    float p0 = 0.f;          ///< disk: radius | rect: edge-2 .z
 };
 
 class CH_SENSOR_API ChMetalRTScene {
@@ -87,6 +88,20 @@ class CH_SENSOR_API ChMetalRTScene {
         float pen = std::max(0.f, penumbra_deg) * (float)CH_PI / 180.f;
         L.cosOuter = rng;                                     // angle_range
         L.cosInner = (pen > 1e-6f) ? (1.f / (2.f * pen)) : -1.f;  // atten_rate (-1 = hard cutoff, no falloff)
+        m_lights.push_back(L);
+    }
+    /// Disk area light (OptiX AddDiskLight): center + normal + radius. Soft-shadowed, area-weighted.
+    void AddDiskLight(const ChVector3f& pos, const ChColor& color, float range, const ChVector3f& dir, float radius) {
+        MetalSceneLight L{pos, range, color, 3};
+        L.dir = dir.GetNormalized(); L.p0 = radius;
+        m_lights.push_back(L);
+    }
+    /// Rectangle area light (OptiX AddRectangleLight): center + two full edge vectors. Soft-shadowed.
+    void AddRectangleLight(const ChVector3f& pos, const ChColor& color, float range,
+                           const ChVector3f& length_vec, const ChVector3f& width_vec) {
+        MetalSceneLight L{pos, range, color, 4};
+        L.dir = length_vec;                                   // edge-1 (full vector)
+        L.cosOuter = width_vec.x(); L.cosInner = width_vec.y(); L.p0 = width_vec.z();  // edge-2 (full vector)
         m_lights.push_back(L);
     }
     void ClearLights() { m_lights.clear(); }

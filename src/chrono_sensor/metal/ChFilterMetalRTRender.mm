@@ -203,7 +203,7 @@ void ChFilterMetalRTRender::Apply() {
             for (const auto& L : sl)
                 lights.push_back({{(float)L.pos.x(), (float)L.pos.y(), (float)L.pos.z()}, L.range,
                                   {L.color.R, L.color.G, L.color.B}, (float)L.type,
-                                  {(float)L.dir.x(), (float)L.dir.y(), (float)L.dir.z()}, L.cosOuter, L.cosInner, {0,0,0}});
+                                  {(float)L.dir.x(), (float)L.dir.y(), (float)L.dir.z()}, L.cosOuter, L.cosInner, {L.p0,0,0}});
         } else {
             ChVector3d key = o + fwd * 4.0 + rgt * 4.0 + ChVector3d(0, 0, 12.0);
             lights.push_back({{(float)key.x(), (float)key.y(), (float)key.z()}, 0.f, {1.05f, 1.02f, 0.98f}, 0.f});
