@@ -399,6 +399,7 @@ if(CH_USE_SENSOR_METAL_RT)
     # Build the standard render sensor front-ends against the Metal backend.
     list(APPEND Chrono_sensor_SENSORS_SOURCES
         sensors/ChCameraSensor.cpp
+        sensors/ChPhysCameraSensor.cpp
         sensors/ChDepthCamera.cpp
         sensors/ChNormalCamera.cpp
         sensors/ChSegmentationCamera.cpp
@@ -407,6 +408,7 @@ if(CH_USE_SENSOR_METAL_RT)
     )
     list(APPEND Chrono_sensor_SENSORS_HEADERS
         sensors/ChCameraSensor.h
+        sensors/ChPhysCameraSensor.h
         sensors/ChDepthCamera.h
         sensors/ChNormalCamera.h
         sensors/ChSegmentationCamera.h
@@ -608,12 +610,22 @@ if(CH_USE_SENSOR_METAL_RT)
       filters/ChFilterGrayscale.cpp
       filters/ChFilterCameraNoise.cpp
       filters/ChFilterSave.cpp
+      filters/ChFilterPhysCameraDefocusBlur.cpp
+      filters/ChFilterPhysCameraVignetting.cpp
+      filters/ChFilterPhysCameraAggregator.cpp
+      filters/ChFilterPhysCameraNoise.cpp
+      filters/ChFilterPhysCameraExpsrToDV.cpp
   )
   set(Chrono_sensor_FILTERS_HEADERS ${Chrono_sensor_FILTERS_HEADERS}
       filters/ChFilterImageOps.h
       filters/ChFilterGrayscale.h
       filters/ChFilterCameraNoise.h
       filters/ChFilterSave.h
+      filters/ChFilterPhysCameraDefocusBlur.h
+      filters/ChFilterPhysCameraVignetting.h
+      filters/ChFilterPhysCameraAggregator.h
+      filters/ChFilterPhysCameraNoise.h
+      filters/ChFilterPhysCameraExpsrToDV.h
   )
 endif()
 

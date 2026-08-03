@@ -13,8 +13,8 @@
 // =============================================================================
 // Metal Shading Language kernel for Chrono::Sensor Metal RT cameras.
 // Inline ray query (hardware ray tracing). Modes: 0 color, 1 depth, 2 normal,
-// 3 segmentation. Output is RGBA32Float; the filter converts to the sensor's
-// host buffer format.
+// 3 segmentation, 4 lidar, 5 radar, 6 phys-camera RGBD. Output is RGBA32Float;
+// the filter converts to the sensor's host buffer format.
 // =============================================================================
 
 #ifndef CH_METAL_RT_SHADER_MSL_H
@@ -99,6 +99,13 @@ static inline float3 cameraPost(float3 lin, uint2 tid, constant Uniforms& u, thr
   float3 o = pow(max(lin,0.0), 1.0/max(u.gamma,0.01));   // output gamma (OptiX camera.gamma; default 2.2)
   if(u.noiseSigma>0.0){ o += float3(gaussf(seed),gaussf(seed),gaussf(seed))*u.noiseSigma; }
   return clamp(o,0.0,1.0);
+}
+// Physics-based camera (mode 6) post: gamma ONLY, unclamped -- ports phys_cam_raygen.cu, whose last line is
+//   rgbd_buffer[px] = make_half4(pow(c.x,1/gamma), pow(c.y,1/gamma), pow(c.z,1/gamma), distance).
+// Everything else (exposure time, aperture number, vignetting, noise, ISO/CRF) is modelled downstream by the
+// ChFilterPhysCamera* stages, so the scene-level exposure/vignette/noise/DoF knobs must NOT be applied here.
+static inline float3 physCamPost(float3 lin, constant Uniforms& u){
+  return pow(max(lin,0.0), 1.0/max(u.gamma,0.01));
 }
 
 struct Hit { bool sky; float3 albedo; float3 n; float3 pos; uint mat; float dist; uint inst; float opacity; float rough; float metallic; float3 ks; float useSpec; float3 emissive; };
@@ -337,6 +344,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
   // a denoiser for a clean image), so the fast legacy path stays the default.
   if(u.useGi!=0u){
     uint spp=max(u.aa*u.aa,1u); uint seed=(tid.y*u.width+tid.x)*9781u+1u; float3 acc=float3(0.0);
+    float physDist=0.0;   // primary-hit distance of the last sample (mode 6 alpha channel)
     for(uint s=0;s<spp;s++){
       float jx=rndf(seed), jy=rndf(seed);
       float nx=(2.0*(float(tid.x)+jx)/float(u.width)-1.0)*aspect, ny=(1.0-2.0*(float(tid.y)+jy)/float(u.height));
@@ -344,6 +352,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       float3 thru=float3(1.0), rad=float3(0.0);
       for(int bnc=0;bnc<5;bnc++){
         Hit h=trace(r,accel,gN,gA,tint,iR,nBase,matI,gUV,gTexId,gOpacity,gRough,gMetallic,gRoughTexId,gMetalTexId,gOpacityTexId,gTangent,gNormalTexId,gSpecular,gEmissive,gTexScale,gKsTexId,gKeTexId,gBlendKdTexId,gBlendWeightTexId,texs,samp,envTex,u);
+        if(bnc==0) physDist = h.sky?0.0:h.dist;                                    // primary-surface distance (mode 6)
         if(h.sky){ rad += thru*h.albedo; break; }                                  // sky/env is the light source
         float3 view=-r.direction;
         rad += thru * h.emissive * abs(dot(h.n,view));                             // emissive
@@ -355,18 +364,22 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       }
       acc+=rad;   // (GI noise is handled by Russian roulette + the optional denoiser, like OptiX)
     }
+    if(u.mode==6u){ outTex.write(float4(physCamPost(acc/float(spp),u),physDist),tid); return; }
     outTex.write(float4(cameraPost(acc/float(spp),tid,u,seed),1.0),tid); return;
   }
 
-  // COLOR (mode 0): antialiased, lit, alpha-composited through transparent (glass) layers
+  // COLOR (mode 0) / PHYS CAMERA RGBD (mode 6): antialiased, lit, alpha-composited through transparent layers.
+  // Mode 6 differs only in the final write: linear radiance with gamma only, and the primary-surface distance
+  // carried in alpha for the downstream ChFilterPhysCameraDefocusBlur stage.
   uint aa=max(u.aa,1u); float3 acc=float3(0.0); uint pseed=(tid.y*u.width+tid.x)*40503u+13u;
+  float physDist=0.0;
   for(uint sy=0;sy<aa;sy++) for(uint sx=0;sx<aa;sx++){
     float ox=(float(sx)+0.5)/float(aa), oy=(float(sy)+0.5)/float(aa);
     float nx=(2.0*(float(tid.x)+ox)/float(u.width)-1.0)*aspect;
     float ny=(1.0-2.0*(float(tid.y)+oy)/float(u.height));
     float3 dir=camRayDir(nx,ny,u);
     ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=1e-3; r.max_distance=INFINITY;
-    if(u.apertureR>0.0){   // thin-lens depth of field: jitter the ray origin on the aperture, aim at the focal plane
+    if(u.apertureR>0.0 && u.mode!=6u){   // thin-lens depth of field: jitter the ray origin on the aperture, aim at the focal plane
       float3 fp=r.origin + dir*u.focalDist;
       float a1=rndf(pseed), a2=rndf(pseed), rad=u.apertureR*sqrt(a1), ang=6.28318530718*a2;
       r.origin += float3(u.camRight)*(rad*cos(ang)) + float3(u.camUp)*(rad*sin(ang));
@@ -424,7 +437,9 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     }
     color += trans*skycol(dir,envTex,samp,u);              // any remaining transmission shows the sky/background
     if(u.fogScatter>0.0 && primDist>0.0){ float ba=exp(-u.fogScatter*primDist); color=ba*color+(1.0-ba)*float3(u.fogColor); }  // exp fog (OptiX)
+    physDist = max(primDist, 0.0);                         // sky -> 0, matching phys_cam_raygen.cu's default prd.distance
     acc+=color; }
+  if(u.mode==6u){ outTex.write(float4(physCamPost(acc/float(aa*aa),u),physDist), tid); return; }
   outTex.write(float4(cameraPost(acc/float(aa*aa),tid,u,pseed),1.0), tid);
 }
 
@@ -435,7 +450,8 @@ kernel void denoiseMain(uint2 tid [[thread_position_in_grid]],
    texture2d<float, access::read> inTex [[texture(0)]], texture2d<float, access::write> dstTex [[texture(1)]],
    constant uint2& dims [[buffer(0)]]) {
   if(tid.x>=dims.x||tid.y>=dims.y) return;
-  float3 c=inTex.read(tid).rgb, mn=float3(1e9), mx=float3(-1e9), avg=c; int cnt=1;
+  float4 c4=inTex.read(tid);
+  float3 c=c4.rgb, mn=float3(1e9), mx=float3(-1e9), avg=c; int cnt=1;
   for(int dy=-1;dy<=1;dy++) for(int dx=-1;dx<=1;dx++){
     if(dx==0&&dy==0) continue;
     int2 p=clamp(int2(int(tid.x)+dx,int(tid.y)+dy), int2(0,0), int2(int(dims.x)-1,int(dims.y)-1));
@@ -446,7 +462,7 @@ kernel void denoiseMain(uint2 tid [[thread_position_in_grid]],
   // (small range) are left crisp; noisy/z-fighting bands & 1-spp aliasing (large range) get smoothed out.
   float3 rng=mx-mn; float r=max(rng.x,max(rng.y,rng.z));
   float k=clamp((r-0.05)*3.5, 0.0, 0.9);
-  dstTex.write(float4(mix(c, avg, k),1.0), tid);
+  dstTex.write(float4(mix(c, avg, k), c4.a), tid);   // alpha passes through untouched (mode 6 carries depth there)
 }
 )MSLGEN";
 

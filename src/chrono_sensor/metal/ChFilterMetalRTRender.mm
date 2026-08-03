@@ -23,6 +23,7 @@
 #include "chrono_sensor/metal/ChFilterMetalRTRender.h"
 #include "chrono_sensor/sensors/ChCameraSensor.h"
 #include "chrono_sensor/sensors/ChLidarSensor.h"
+#include "chrono_sensor/sensors/ChPhysCameraSensor.h"
 #include "chrono_sensor/sensors/ChRadarSensor.h"
 
 namespace chrono {
@@ -76,6 +77,13 @@ void ChFilterMetalRTRender::Initialize(std::shared_ptr<ChSensor> pSensor, std::s
             m_buffer_di->Dual_return = dual;
             bufferInOut = m_buffer_di; break;
         }
+        case MetalPipelineType::PHYS_CAMERA:
+            // Physics-based camera: the ChFilterPhysCamera* chain consumes an RGB-D half4 buffer
+            // (linear radiance + primary-surface distance), exactly like the OptiX rgbd_buffer.
+            m_buffer_rgbd = chrono_types::make_shared<SensorHostRGBDHalf4Buffer>();
+            m_buffer_rgbd->Width = width; m_buffer_rgbd->Height = height;
+            m_buffer_rgbd->Buffer = std::shared_ptr<PixelRGBDHalf4[]>(new PixelRGBDHalf4[count]);
+            bufferInOut = m_buffer_rgbd; break;
         case MetalPipelineType::RADAR:
             m_buffer_radar = chrono_types::make_shared<SensorHostRadarBuffer>();
             m_buffer_radar->Width = width; m_buffer_radar->Height = height;
@@ -110,6 +118,7 @@ void ChFilterMetalRTRender::Apply() {
         case MetalPipelineType::LIDAR_SINGLE:
         case MetalPipelineType::LIDAR_MULTI:   mode = 4; break;
         case MetalPipelineType::RADAR:         mode = 5; break;
+        case MetalPipelineType::PHYS_CAMERA:   mode = 6; break;
         default:                               mode = 0; break;
     }
 
@@ -139,6 +148,8 @@ void ChFilterMetalRTRender::Apply() {
 
         float hfov = 1.408f;
         if (auto c = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) hfov = c->GetHFOV();
+        auto phys = std::dynamic_pointer_cast<ChPhysCameraSensor>(sensor);
+        if (phys) hfov = phys->GetHFOV();  // derived from sensor_width / focal_length
         const float aspect = (float)width / (float)height;
 
         MetalCameraParams cam{};
@@ -170,18 +181,34 @@ void ChFilterMetalRTRender::Apply() {
             cam.useDenoiser = cc->GetUseDenoiser();
             cam.gamma = cc->GetGamma();                  // OptiX-configurable output gamma
         }
+        if (phys) {
+            // The physics-based camera models fog/GI/denoiser/gamma itself; exposure, vignetting, aperture and
+            // sensor noise are handled by the downstream ChFilterPhysCamera* stages, so the scene-level knobs
+            // stay neutral here (mode 6 ignores them in the shader as well).
+            if (phys->GetUseFog()) cam.fogScatter = m_scene->GetFogScattering();
+            cam.useGi = phys->GetUseGI() ? 1 : 0;
+            cam.useDenoiser = phys->GetUseDenoiser();
+            cam.gamma = phys->GetGamma();
+        }
         cam.exposure = m_scene->GetExposure(); cam.vignette = m_scene->GetVignette();
         cam.noiseSigma = m_scene->GetSensorNoise(); cam.apertureR = m_scene->GetApertureRadius(); cam.focalDist = m_scene->GetFocalDist();
         cam.tanHalfV = std::tan(0.5f * hfov) / aspect;
         int ss = 1;
         if (auto c = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) ss = (int)c->GetSampleFactor();
-        cam.aa = (mode == 0) ? (ss < 1 ? 1 : (ss > 4 ? 4 : ss)) : 1;  // AA only for color (can't average ids/depth)
+        if (phys) ss = (int)phys->GetSampleFactor();
+        cam.aa = (mode == 0 || mode == 6) ? (ss < 1 ? 1 : (ss > 4 ? 4 : ss)) : 1;  // AA only for color (can't average ids/depth)
         cam.mode = mode;
         if (auto c = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) {  // lens model (pinhole/FOV/radial)
             cam.lensModel = (int)c->GetLensModelType();
             ChVector3f dd = c->GetCameraDistortionCoefficients();
             cam.dk1 = dd.x(); cam.dk2 = dd.y(); cam.dk3 = dd.z();
             cam.lidarHFov = hfov;  // FOV lens uses this
+        }
+        if (phys) {
+            cam.lensModel = (int)phys->GetLensModelType();
+            ChVector3f dd = phys->GetCameraDistortionCoefficients();
+            cam.dk1 = dd.x(); cam.dk2 = dd.y(); cam.dk3 = dd.z();
+            cam.lidarHFov = hfov;
         }
         if (mode == 4) {
             if (auto ld = std::dynamic_pointer_cast<ChLidarSensor>(sensor)) {
@@ -229,6 +256,15 @@ void ChFilterMetalRTRender::Apply() {
                 px[i].G = (uint8_t)(clampf(scratch[i*4+1]) * 255.f);
                 px[i].B = (uint8_t)(clampf(scratch[i*4+2]) * 255.f);
                 px[i].A = 255;
+            }
+        } else if (mode == 6 && m_buffer_rgbd && m_buffer_rgbd->Buffer) {
+            // linear radiance (gamma-corrected in the shader, exactly like phys_cam_raygen.cu) + distance
+            PixelRGBDHalf4* px = m_buffer_rgbd->Buffer.get();
+            for (size_t i = 0; i < count; ++i) {
+                px[i].R = scratch[i*4+0];
+                px[i].G = scratch[i*4+1];
+                px[i].B = scratch[i*4+2];
+                px[i].D = scratch[i*4+3];
             }
         } else if (mode == 1 && m_buffer_depth && m_buffer_depth->Buffer) {
             PixelDepth* px = m_buffer_depth->Buffer.get();
@@ -282,7 +318,7 @@ void ChFilterMetalRTRender::Apply() {
     }
 
     auto stamp = [&](std::shared_ptr<SensorBuffer> b) { if (b) { b->TimeStamp = m_time_stamp; b->LaunchedCount = sensor->GetNumLaunches(); } };
-    stamp(m_buffer_rgba8); stamp(m_buffer_depth); stamp(m_buffer_normal); stamp(m_buffer_semantic); stamp(m_buffer_di); stamp(m_buffer_radar);
+    stamp(m_buffer_rgba8); stamp(m_buffer_depth); stamp(m_buffer_normal); stamp(m_buffer_semantic); stamp(m_buffer_di); stamp(m_buffer_radar); stamp(m_buffer_rgbd);
 }
 
 }  // namespace sensor

@@ -50,6 +50,7 @@ class CH_SENSOR_API ChFilterMetalRTRender : public ChFilter {
     bool m_renderer_built = false;
 
     std::shared_ptr<SensorHostRGBA8Buffer> m_buffer_rgba8;
+    std::shared_ptr<SensorHostRGBDHalf4Buffer> m_buffer_rgbd;  ///< PHYS_CAMERA: linear radiance + primary-hit depth
     std::shared_ptr<SensorHostDepthBuffer> m_buffer_depth;
     std::shared_ptr<SensorHostNormalBuffer> m_buffer_normal;
     std::shared_ptr<SensorHostSemanticBuffer> m_buffer_semantic;
