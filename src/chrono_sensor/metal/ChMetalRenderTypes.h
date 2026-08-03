@@ -27,6 +27,8 @@ struct Geometry {
     std::vector<float>   texScale;   // 2 floats / triangle: texture UV scale (default 1,1)
     std::vector<int>     ksTexId;    // 1 int / triangle: specular map (map_Ks) index, or -1
     std::vector<int>     keTexId;    // 1 int / triangle: emissive map (map_Ke) index, or -1
+    std::vector<int>     blendKdTexId;    // weight-blended materials: 2nd-layer Kd map index, or -1 (no blend)
+    std::vector<int>     blendWeightTexId;// weight-blended materials: blend weight map index, or -1
     bool                 dynamic = false;  // deforming (re-extracted + refit every frame)
     int triCount() const { return (int)(verts.size() / 9); }
 };

@@ -47,7 +47,7 @@ struct ChMetalRTRenderer::Impl {
     id<MTLDevice> dev;
     id<MTLCommandQueue> queue;
     id<MTLComputePipelineState> pso, dpso;
-    id<MTLBuffer> uni, instBuf, instRot, tintBuf, matBuf, nBaseBuf, gNormal, gAlbedo, gUVBuf, gTexId, gOpacity, gRoughness, gMetallicBuf, gRoughTexIdBuf, gMetalTexIdBuf, gOpacityTexIdBuf, gTangentBuf, gNormalTexIdBuf, gSpecularBuf, gEmissiveBuf, gTexScaleBuf, gKsTexIdBuf, gKeTexIdBuf, tlasScratch, lightsBuf, instIdsBuf;
+    id<MTLBuffer> uni, instBuf, instRot, tintBuf, matBuf, nBaseBuf, gNormal, gAlbedo, gUVBuf, gTexId, gOpacity, gRoughness, gMetallicBuf, gRoughTexIdBuf, gMetalTexIdBuf, gOpacityTexIdBuf, gTangentBuf, gNormalTexIdBuf, gSpecularBuf, gEmissiveBuf, gTexScaleBuf, gKsTexIdBuf, gKeTexIdBuf, gBlendKdTexIdBuf, gBlendWeightTexIdBuf, tlasScratch, lightsBuf, instIdsBuf;
     id<MTLTexture> offTex, offTex2, whiteTex, envTex;
     bool envValid=false;
 
@@ -110,9 +110,14 @@ struct ChMetalRTRenderer::Impl {
 
     void build(const RenderScene& scene) { @autoreleasepool {
         geoms.clear(); blas.clear(); retain.clear(); texList.clear();
-        std::vector<float> gn,ga,guv,go,grh,gmet,gtan,gspec,gemis,gts; std::vector<int> gt,grtx,gmtx,gopx,gntx,gktx,getx;
+        std::vector<float> gn,ga,guv,go,grh,gmet,gtan,gspec,gemis,gts; std::vector<int> gt,grtx,gmtx,gopx,gntx,gktx,getx,gbktx,gbwtx;
+        // append a per-geometry int array, padding with -1 to the triangle count so a geometry that never set
+        // it can't shorten the concatenated buffer (which the shader indexes by triangle -> would read OOB)
+        auto appendI=[](std::vector<int>& dst, const std::vector<int>& src, int n){
+            if((int)src.size()==n) dst.insert(dst.end(),src.begin(),src.end()); else dst.insert(dst.end(),(size_t)n,-1); };
         for(auto& g: scene.geometries){
             GeomGPU gg; gg.triBase=(int)(gn.size()/9); gg.triCount=g.triCount(); gg.dynamic=g.dynamic; gg.blasIndex=(int)blas.size();
+            appendI(gbktx,g.blendKdTexId,gg.triCount); appendI(gbwtx,g.blendWeightTexId,gg.triCount);
             gn.insert(gn.end(),g.normals.begin(),g.normals.end()); ga.insert(ga.end(),g.colors.begin(),g.colors.end());
             gtan.insert(gtan.end(),g.tangents.begin(),g.tangents.end()); gntx.insert(gntx.end(),g.normalTexId.begin(),g.normalTexId.end());
             gspec.insert(gspec.end(),g.specular.begin(),g.specular.end()); gemis.insert(gemis.end(),g.emissive.begin(),g.emissive.end());
@@ -131,6 +136,7 @@ struct ChMetalRTRenderer::Impl {
         gRoughTexIdBuf=mkbufI(grtx); gMetalTexIdBuf=mkbufI(gmtx); gOpacityTexIdBuf=mkbufI(gopx);
         gTangentBuf=mkbuf(gtan); gNormalTexIdBuf=mkbufI(gntx);
         gSpecularBuf=mkbuf(gspec); gEmissiveBuf=mkbuf(gemis); gTexScaleBuf=mkbuf(gts); gKsTexIdBuf=mkbufI(gktx); gKeTexIdBuf=mkbufI(getx);
+        gBlendKdTexIdBuf=mkbufI(gbktx); gBlendWeightTexIdBuf=mkbufI(gbwtx);
         for(auto& pth: scene.texturePaths) texList.push_back(loadTex(pth));
         int N=(int)scene.instances.size(); if(N<1)N=1;
         instBuf=[dev newBufferWithLength:N*64 options:MTLResourceStorageModeShared];
@@ -202,6 +208,7 @@ struct ChMetalRTRenderer::Impl {
         [e setBuffer:gRoughTexIdBuf offset:0 atIndex:15]; [e setBuffer:gMetalTexIdBuf offset:0 atIndex:16]; [e setBuffer:gOpacityTexIdBuf offset:0 atIndex:17];
         [e setBuffer:gTangentBuf offset:0 atIndex:18]; [e setBuffer:gNormalTexIdBuf offset:0 atIndex:19];
         [e setBuffer:gSpecularBuf offset:0 atIndex:20]; [e setBuffer:gEmissiveBuf offset:0 atIndex:21]; [e setBuffer:gTexScaleBuf offset:0 atIndex:22]; [e setBuffer:gKsTexIdBuf offset:0 atIndex:23]; [e setBuffer:gKeTexIdBuf offset:0 atIndex:24];
+        [e setBuffer:gBlendKdTexIdBuf offset:0 atIndex:25]; [e setBuffer:gBlendWeightTexIdBuf offset:0 atIndex:26];
         id<MTLTexture> tarr[64]; for(int k=0;k<64;k++) tarr[k]=(k<(int)texList.size())?texList[k]:whiteTex; [e setTextures:tarr withRange:NSMakeRange(0,64)];
         [e setSamplerState:samp atIndex:0];
         for(auto t:texList)[e useResource:t usage:MTLResourceUsageRead]; for(auto a:blas)[e useResource:a usage:MTLResourceUsageRead]; [e setTexture:tex atIndex:64]; [e setTexture:(envValid&&envTex?envTex:whiteTex) atIndex:65];

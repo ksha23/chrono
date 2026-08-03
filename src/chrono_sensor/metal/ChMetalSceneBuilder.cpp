@@ -178,7 +178,16 @@ void ChScene::build(RenderScene& scene){
         g.roughTexId.clear(); g.roughTexId.reserve(fm.size()); g.metalTexId.clear(); g.metalTexId.reserve(fm.size());
         g.opacityTexId.clear(); g.opacityTexId.reserve(fm.size()); g.normalTexId.clear(); g.normalTexId.reserve(fm.size());
         g.specular.clear(); g.emissive.clear(); g.texScale.clear(); g.ksTexId.clear(); g.keTexId.clear();
-        for(int mi:fm){ int t=-1, rtx=-1, mtx=-1, otx=-1, ntx=-1, ktx=-1, etx=-1; float op=1.f, rg=1.f, mt=0.f;
+        g.blendKdTexId.clear(); g.blendWeightTexId.clear();
+        // Weight-blended materials (OptiX): if the material list carries weight textures, all faces blend the
+        // materials per-pixel by those weights. We do the common 2-way blend: base = material 0, blend layer =
+        // material 1 mixed by material 1's weight texture. Trigger matches OptiX (ChOptixPipeline): mats[0]
+        // has a weight texture.
+        bool blend = mats.size()>=2 && !mats[0]->GetWeightTexture().empty();
+        int bkt=-1, bwt=-1;
+        if(blend){ bkt=texturePathIndex(mats[1]->GetKdTexture()); bwt=texturePathIndex(mats[1]->GetWeightTexture()); }
+        for(int mi:fm){ if(blend) mi=0;   // blend mode uses material 0 as the base for every face
+            int t=-1, rtx=-1, mtx=-1, otx=-1, ntx=-1, ktx=-1, etx=-1; float op=1.f, rg=1.f, mt=0.f;
             float ks[3]={0,0,0}, usp=0.f, ke[3]={0,0,0}, ep=0.f, ts[2]={1.f,1.f};
             if(mi>=0&&mi<(int)mats.size()){ auto& M=*mats[mi]; t=texturePathIndex(M.GetKdTexture()); op=M.GetOpacity(); rg=M.GetRoughness(); mt=M.GetMetallic();
                 rtx=texturePathIndex(M.GetRoughnessTexture()); mtx=texturePathIndex(M.GetMetallicTexture()); otx=texturePathIndex(M.GetOpacityTexture());
@@ -189,7 +198,8 @@ void ChScene::build(RenderScene& scene){
             g.texId.push_back(t); g.opacity.push_back(op); g.roughness.push_back(rg); g.metallic.push_back(mt);
             g.roughTexId.push_back(rtx); g.metalTexId.push_back(mtx); g.opacityTexId.push_back(otx); g.normalTexId.push_back(ntx);
             g.specular.insert(g.specular.end(),{ks[0],ks[1],ks[2],usp}); g.emissive.insert(g.emissive.end(),{ke[0],ke[1],ke[2],ep});
-            g.texScale.insert(g.texScale.end(),{ts[0],ts[1]}); g.ksTexId.push_back(ktx); g.keTexId.push_back(etx); }
+            g.texScale.insert(g.texScale.end(),{ts[0],ts[1]}); g.ksTexId.push_back(ktx); g.keTexId.push_back(etx);
+            g.blendKdTexId.push_back(bkt); g.blendWeightTexId.push_back(bwt); }
     };
     auto shapeColor=[&](std::shared_ptr<ChVisualShape> sh,float* out){ auto& m=sh->GetMaterials(); if(!m.empty()){auto kd=m[0]->GetDiffuseColor(); out[0]=kd.R;out[1]=kd.G;out[2]=kd.B;} };
 
