@@ -83,8 +83,8 @@ class ChTTRGuiComponentVSG : public vsg3d::ChGuiComponentVSG {
 void ChTTRGuiComponentVSG::render(vsg::CommandBuffer& cb) {
     auto driver = std::dynamic_pointer_cast<ChTrackTestRigInteractiveDriver>(m_app->m_rig->GetDriver());
 
-    ImGui::SetNextWindowSize(ImVec2(280.0f, 0.0f));
-    ImGui::Begin("Test Rig");
+    ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
+    BeginWindow("Test Rig");
 
     // Only if interactive driver
     if (driver && ImGui::BeginTable("RigTable", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit,
@@ -93,7 +93,7 @@ void ChTTRGuiComponentVSG::render(vsg::CommandBuffer& cb) {
         ImGui::TableNextColumn();
         ImGui::TextUnformatted("Throttle:");
         ImGui::TableNextColumn();
-        ImGui::PushItemWidth(150.0f);
+        ImGui::PushItemWidth(ScaledSize(150.0f));
         ImGui::PushStyleColor(ImGuiCol_SliderGrab, (ImVec4)ImColor(200, 100, 20));
         DrawGauge(-driver->GetThrottle(), -1, 1);
         ImGui::PopStyleColor();
@@ -185,7 +185,7 @@ void ChTTRGuiComponentVSG::render(vsg::CommandBuffer& cb) {
         ImGui::EndTable();
     }
 
-    ImGui::End();
+    EndWindow();
 }
 
 // -----------------------------------------------------------------------------

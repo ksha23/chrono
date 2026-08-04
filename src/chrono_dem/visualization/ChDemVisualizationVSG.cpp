@@ -36,7 +36,7 @@ class DEMStatsVSG : public vsg3d::ChGuiComponentVSG {
         vsg3d::ChVisualSystemVSG& vsys = m_visDEM->GetVisualSystemVSG();
 
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
-        ImGui::Begin("DEM DEM");
+        BeginWindow("DEM DEM");
 
         if (ImGui::BeginTable("DEM", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit,
                               ImVec2(0.0f, 0.0f))) {
@@ -73,7 +73,7 @@ class DEMStatsVSG : public vsg3d::ChGuiComponentVSG {
             ImGui::EndTable();
         }
 
-        ImGui::End();
+        EndWindow();
     }
 
   private:

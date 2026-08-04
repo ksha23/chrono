@@ -36,7 +36,7 @@ class SCMStatsVSG : public vsg3d::ChGuiComponentVSG {
 
     virtual void render(vsg::CommandBuffer& cb) override {
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
-        ImGui::Begin("SCM");
+        BeginWindow("SCM");
 
         if (ImGui::BeginTable("SCM parameters", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit, ImVec2(0.0f, 0.0f))) {
             ImGui::TableNextRow();
@@ -71,7 +71,7 @@ class SCMStatsVSG : public vsg3d::ChGuiComponentVSG {
             ImGui::EndTable();
         }
 
-        ImGui::End();
+        EndWindow();
     }
 
   private:

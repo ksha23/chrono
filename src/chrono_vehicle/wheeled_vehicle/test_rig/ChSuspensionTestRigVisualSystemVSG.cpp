@@ -90,8 +90,8 @@ class ChSTRGuiComponentVSG : public vsg3d::ChGuiComponentVSG {
 void ChSTRGuiComponentVSG::render(vsg::CommandBuffer& cb) {
     auto driver = std::dynamic_pointer_cast<ChSuspensionTestRigInteractiveDriver>(m_app->m_rig->GetDriver());
 
-    ImGui::SetNextWindowSize(ImVec2(280.0f, 0.0f));
-    ImGui::Begin("Test Rig");
+    ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
+    BeginWindow("Test Rig");
 
     // Only if interactive driver
     if (driver && ImGui::BeginTable("RigTable", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit,
@@ -100,7 +100,7 @@ void ChSTRGuiComponentVSG::render(vsg::CommandBuffer& cb) {
         ImGui::TableNextColumn();
         ImGui::TextUnformatted("Steering:");
         ImGui::TableNextColumn();
-        ImGui::PushItemWidth(150.0f);
+        ImGui::PushItemWidth(ScaledSize(150.0f));
         ImGui::PushStyleColor(ImGuiCol_SliderGrab, (ImVec4)ImColor(200, 100, 20));
         ImGui::PushID("steering_gauge");
         DrawGauge(-driver->GetSteering(), -1, 1);
@@ -184,7 +184,7 @@ void ChSTRGuiComponentVSG::render(vsg::CommandBuffer& cb) {
     }
 
 
-    ImGui::End();
+    EndWindow();
 }
 
 // -----------------------------------------------------------------------------

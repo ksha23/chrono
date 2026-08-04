@@ -53,7 +53,7 @@ class ChParserURDFStats : public vsg3d::ChGuiComponentVSG {
 
     virtual void render(vsg::CommandBuffer& cb) override {
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
-        ImGui::Begin("URDF Model");
+        BeginWindow("URDF Model");
 
         ImGui::Text("Model name: %s           ", vsysURDF->m_urdf.GetName().c_str());
 
@@ -122,7 +122,7 @@ class ChParserURDFStats : public vsg3d::ChGuiComponentVSG {
             }
         }
 
-        ImGui::End();
+        EndWindow();
     }
 
   private:

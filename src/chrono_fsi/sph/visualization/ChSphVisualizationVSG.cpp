@@ -49,7 +49,7 @@ class FSISPHStatsVSG : public vsg3d::ChGuiComponentVSG {
         vsg3d::ChVisualSystemVSG& vsys = m_vsysFSI->GetVisualSystemVSG();
 
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
-        ImGui::Begin(m_vsysFSI->m_sysSPH->GetPhysicsProblemString().c_str());
+        BeginWindow(m_vsysFSI->m_sysSPH->GetPhysicsProblemString().c_str());
 
         if (ImGui::BeginTable("SPH", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit, ImVec2(0.0f, 0.0f))) {
             ImGui::TableNextRow();
@@ -164,7 +164,7 @@ class FSISPHStatsVSG : public vsg3d::ChGuiComponentVSG {
             ImGui::EndTable();
         }
 
-        ImGui::End();
+        EndWindow();
     }
 
   private:

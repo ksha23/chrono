@@ -46,7 +46,7 @@ class FSITDPFStatsVSG : public vsg3d::ChGuiComponentVSG {
         ////vsg3d::ChVisualSystemVSG& vsys = m_vsysFSI->GetVisualSystemVSG();
 
         ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
-        ImGui::Begin("TDPF");
+        BeginWindow("TDPF");
 
         if (ImGui::BeginTable("TDPF_STATS", 2, ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit, ImVec2(0.0f, 0.0f))) {
             ImGui::TableNextRow();
@@ -119,7 +119,7 @@ class FSITDPFStatsVSG : public vsg3d::ChGuiComponentVSG {
             ImGui::EndTable();
         }
 
-        ImGui::End();
+        EndWindow();
     }
 
   private:
