@@ -47,6 +47,27 @@ class CH_VEHICLE_API ChInteractiveDriver : public ChDriver {
         JOYSTICK   ///< driver inputs from joystick
     };
 
+    /// Semantics of the keyboard driving controls (used only in InputMode::KEYBOARD).
+    enum class KeyboardMode {
+        /// Each recorded keypress nudges the corresponding input by a fixed increment and the input then stays
+        /// where it was left. This is the historical Chrono::Vehicle behavior.
+        CUMULATIVE,
+        /// Driver inputs follow the keys that are currently held down, as in a driving game: while a key is held
+        /// the corresponding input ramps toward its extreme value, and on release it decays back to zero.
+        /// Steering self-centers when neither steering key is held.
+        /// This mode requires an input backend that reports both key press and key release (see SetKeyState).
+        HELD
+    };
+
+    /// Driving controls tracked in KeyboardMode::HELD.
+    enum class InputKey {
+        THROTTLE,     ///< accelerator pedal (default key 'W')
+        BRAKE,        ///< brake pedal (default key 'S')
+        STEER_LEFT,   ///< steer left (default key 'A')
+        STEER_RIGHT,  ///< steer right (default key 'D')
+        CLUTCH        ///< clutch pedal (default key 'E'; manual transmission only)
+    };
+
     /// Construct an interactive driver.
     ChInteractiveDriver(ChVehicle& vehicle);
 
@@ -60,41 +81,69 @@ class CH_VEHICLE_API ChInteractiveDriver : public ChDriver {
 
     InputMode GetInputMode() const { return m_mode; }
 
+    /// Select the semantics of the keyboard driving controls.
+    /// This is an explicit user request and takes precedence over any default proposed by an input backend
+    /// through SetDefaultKeyboardMode.
+    void SetKeyboardMode(KeyboardMode mode);
+
+    KeyboardMode GetKeyboardMode() const { return m_keyboard_mode; }
+
+    /// Propose a keyboard mode, to be called by an input backend that knows which modes it can support.
+    /// Has no effect if the application already made an explicit call to SetKeyboardMode.
+    void SetDefaultKeyboardMode(KeyboardMode mode);
+
+    /// Report that a driving control key was pressed (true) or released (false).
+    /// This is the input path for KeyboardMode::HELD and is ignored in KeyboardMode::CUMULATIVE. Calls are
+    /// idempotent, so repeated presses (key auto-repeat) and repeated releases are harmless.
+    void SetKeyState(InputKey key, bool pressed);
+
+    /// Report that all driving control keys are released.
+    /// An input backend should call this whenever it can no longer observe the keyboard (for example when the
+    /// render window loses keyboard focus), since the key release event would otherwise be missed and the
+    /// corresponding input would stay pinned at its extreme value.
+    void ReleaseAllKeys();
+
     /// Set the increment in throttle input for each recorded keypress (default 1/50).
+    /// Used only in KeyboardMode::CUMULATIVE.
     void SetThrottleDelta(double delta) { m_throttle_delta = delta; }
 
     /// Set the increment in steering input for each recorded keypress (default 1/50).
+    /// Used only in KeyboardMode::CUMULATIVE.
     void SetSteeringDelta(double delta) { m_steering_delta = delta; }
 
     /// Set the increment in braking input for each recorded keypress (default 1/50).
+    /// Used only in KeyboardMode::CUMULATIVE.
     void SetBrakingDelta(double delta) { m_braking_delta = delta; }
 
     /// Set the increment in clutch input for each recorded keypress (default 1/50).
+    /// Used only in KeyboardMode::CUMULATIVE.
     void SetClutchDelta(double delta) { m_clutch_delta = delta; }
 
     /// Set the step size for integration of the internal driver dynamics.
     void SetStepsize(double val) { m_stepsize = val; }
 
     /// Set gains for internal dynamics.
-    /// Default values are 4.0.
+    /// Default values are 4.0. Each input approaches its target exponentially with time constant 1/gain, so in
+    /// KeyboardMode::HELD these gains set how fast a held key ramps an input up and how fast it falls back (and
+    /// how fast steering self-centers) once the key is released.
     void SetGains(double steering_gain = 1, double throttle_gain = 1, double braking_gain = 1, double clutch_gain = 1);
 
-    /// Increase Throttle
+    /// Increase Throttle (KeyboardMode::CUMULATIVE)
     void IncreaseThrottle();
 
-    /// Decrease Throttle
+    /// Decrease Throttle (KeyboardMode::CUMULATIVE)
     void DecreaseThrottle();
 
-    /// Steering Left
+    /// Steering Left (KeyboardMode::CUMULATIVE)
     void SteeringLeft();
 
-    /// Steering Right
+    /// Steering Right (KeyboardMode::CUMULATIVE)
     void SteeringRight();
 
-    /// Increase Clutch
+    /// Increase Clutch (KeyboardMode::CUMULATIVE)
     void IncreaseClutch();
 
-    /// Decrease Clutch
+    /// Decrease Clutch (KeyboardMode::CUMULATIVE)
     void DecreaseClutch();
 
     /// Center Steering
@@ -110,9 +159,20 @@ class CH_VEHICLE_API ChInteractiveDriver : public ChDriver {
     virtual void Advance(double step) override;
 
   protected:
+    /// Recompute the input targets from the set of keys currently held down (KeyboardMode::HELD).
+    void UpdateTargetsFromHeldKeys();
+
     InputMode m_mode;  ///< current mode of the driver
 
     // Variables for mode=KEYBOARD
+    KeyboardMode m_keyboard_mode;    ///< semantics of the keyboard driving controls
+    bool m_keyboard_mode_user_set;   ///< application explicitly selected a keyboard mode
+    bool m_key_throttle;             ///< throttle key currently held down
+    bool m_key_brake;                ///< brake key currently held down
+    bool m_key_steer_left;           ///< steer-left key currently held down
+    bool m_key_steer_right;          ///< steer-right key currently held down
+    bool m_key_clutch;               ///< clutch key currently held down
+
     double m_steering_target;  ///< current target value for steering input
     double m_throttle_target;  ///< current target value for throttle input
     double m_braking_target;   ///< current target value for braking input
