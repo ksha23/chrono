@@ -26,6 +26,7 @@
 #include "chrono_vehicle/ChApiVehicle.h"
 #include "chrono_vehicle/ChConfigVehicle.h"
 #include "chrono_vehicle/ChVehicleVisualSystem.h"
+#include "chrono_vehicle/driver/ChInteractiveDriver.h"
 
 #include "chrono_vsg/ChVisualSystemVSG.h"
 
@@ -46,6 +47,16 @@ class CH_VEHICLE_API ChVehicleVisualSystemVSG : public ChVehicleVisualSystem, pu
     /// Initialize the visualization system.
     virtual void Initialize() override;
 
+    /// Select the semantics of the keyboard driving controls (default: ChInteractiveDriver::KeyboardMode::HELD).
+    /// The VSG windowing layer reports both key press and key release, so an attached ChInteractiveDriver defaults
+    /// to held-key (game-style) controls: throttle, braking and steering follow the keys currently held down. Use
+    /// this method (or ChInteractiveDriver::SetKeyboardMode) to fall back to the historical behavior in which each
+    /// keypress accumulates a fixed increment.
+    void SetKeyboardMode(ChInteractiveDriver::KeyboardMode mode);
+
+    /// Attach a driver to this VSG vehicle visualization system.
+    virtual void AttachDriver(ChDriver* driver) override;
+
     /// Advance the dynamics of the chase camera.
     /// The integration of the underlying ODEs is performed using as many steps as needed to advance
     /// by the specified duration.
@@ -53,6 +64,8 @@ class CH_VEHICLE_API ChVehicleVisualSystemVSG : public ChVehicleVisualSystem, pu
 
   protected:
     virtual void AppendGUIStats() {}
+
+    ChInteractiveDriver::KeyboardMode m_keyboard_mode;  ///< semantics of the keyboard driving controls
 
     friend class ChVehicleGuiComponentVSG;
     friend class ChVehicleKeyboardHandlerVSG;
