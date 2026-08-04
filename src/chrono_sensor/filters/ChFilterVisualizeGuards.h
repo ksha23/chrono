@@ -36,6 +36,8 @@
     #include <dlfcn.h>
     #include <objc/message.h>
     #include <objc/runtime.h>
+
+    #include <cstring>
 #endif
 
 namespace chrono {
@@ -60,6 +62,21 @@ inline id GetNSAppDelegate(id app) {
 inline void SetNSAppDelegate(id app, id delegate) {
     using MsgSend = void (*)(id, SEL, id);
     reinterpret_cast<MsgSend>(objc_msgSend)(app, sel_registerName("setDelegate:"), delegate);
+}
+
+/// True if this Cocoa window belongs to GLFW.
+///
+/// GLFW installs a content view of its own class in every window it creates, so the class name of the content view
+/// identifies the owner without needing GLFW's native-access header or a registry of our own windows.
+inline bool IsGlfwWindow(id window) {
+    if (!window)
+        return false;
+    using MsgSend = id (*)(id, SEL);
+    id content = reinterpret_cast<MsgSend>(objc_msgSend)(window, sel_registerName("contentView"));
+    if (!content)
+        return false;
+    const char* name = class_getName(object_getClass(content));
+    return name && std::strncmp(name, "GLFW", 4) == 0;
 }
 
 }  // namespace detail
@@ -119,7 +136,83 @@ class GLContextGuard {
     CGLContextObj m_prev;
 };
 
-#else
+/// Pump the Cocoa event queue for the GLFW debug windows without consuming another toolkit's events.
+///
+/// glfwPollEvents() drains the whole shared NSApplication queue and dispatches every event through -[NSApp sendEvent:],
+/// including events that belong to windows GLFW does not own. That breaks a host toolkit which polls the same queue
+/// itself. Irrlicht does exactly that: CIrrDeviceMacOSX::run() reads events with its own nextEventMatchingMask, so
+/// whichever of the two runs first in a given frame wins. Roughly half of all keystrokes were therefore swallowed by
+/// GLFW instead of reaching Irrlicht, and because a bare NSWindow has no responder implementing keyDown:, AppKit
+/// answered each stolen key with -[NSResponder noResponderFor:] and the system alert sound. The symptom was a demo
+/// that beeped on every keypress and responded to only some of them.
+///
+/// Dispatch only the events belonging to GLFW's own windows, and put everything else back on the queue for the host
+/// toolkit to collect. Deferring the re-post until after the drain loop is what keeps this terminating; re-posting
+/// inside the loop would immediately hand the event back to us.
+///
+/// With no foreign window present -- the standalone Chrono::Sensor case -- every event is dispatched exactly as
+/// glfwPollEvents() would have done.
+inline void PollGlfwEventsPreservingHostEvents() {
+    id app = detail::GetRunningNSApp();
+    if (!app) {
+        glfwPollEvents();
+        return;
+    }
+
+    static id* default_mode = reinterpret_cast<id*>(dlsym(RTLD_DEFAULT, "NSDefaultRunLoopMode"));
+    if (!default_mode) {
+        glfwPollEvents();
+        return;
+    }
+
+    using NextEvent = id (*)(id, SEL, unsigned long, id, id, bool);
+    using MsgSend = id (*)(id, SEL);
+    using SendEvent = void (*)(id, SEL, id);
+    using PostEvent = void (*)(id, SEL, id, bool);
+
+    id distant_past = reinterpret_cast<MsgSend>(objc_msgSend)(reinterpret_cast<id>(objc_getClass("NSDate")),
+                                                              sel_registerName("distantPast"));
+
+    // Events belonging to the host toolkit, held until the drain loop has finished.
+    const int kMaxDeferred = 256;
+    id deferred[kMaxDeferred];
+    int num_deferred = 0;
+
+    for (;;) {
+        id event = reinterpret_cast<NextEvent>(objc_msgSend)(
+            app, sel_registerName("nextEventMatchingMask:untilDate:inMode:dequeue:"), ~0UL, distant_past,
+            *default_mode, true);
+        if (!event)
+            break;
+
+        id window = reinterpret_cast<MsgSend>(objc_msgSend)(event, sel_registerName("window"));
+
+        // No window (application-level events) or one of ours: dispatch now, exactly as GLFW would.
+        if (!window || detail::IsGlfwWindow(window) || num_deferred == kMaxDeferred) {
+            reinterpret_cast<SendEvent>(objc_msgSend)(app, sel_registerName("sendEvent:"), event);
+            continue;
+        }
+
+        // Someone else's window: retain it across the loop and hand it back afterwards.
+        deferred[num_deferred++] = reinterpret_cast<MsgSend>(objc_msgSend)(event, sel_registerName("retain"));
+    }
+
+    for (int i = 0; i < num_deferred; i++) {
+        reinterpret_cast<PostEvent>(objc_msgSend)(app, sel_registerName("postEvent:atStart:"), deferred[i], false);
+        reinterpret_cast<MsgSend>(objc_msgSend)(deferred[i], sel_registerName("release"));
+    }
+}
+
+#elif defined(USE_SENSOR_GLFW)
+
+/// Elsewhere no other toolkit shares the GLFW event queue, so plain polling is correct.
+inline void PollGlfwEventsPreservingHostEvents() {
+    glfwPollEvents();
+}
+
+#endif
+
+#if !(defined(USE_SENSOR_GLFW) && defined(__APPLE__))
 
 /// No-op outside macOS: no other platform has a process-wide application delegate to protect.
 /// The user-provided destructor keeps -Wunused-variable quiet at the use sites.

@@ -146,7 +146,7 @@ CH_SENSOR_API void ChFilterVisualizePointCloud::Apply() {
         glFlush();
 
         glfwSwapBuffers(m_window.get());
-        glfwPollEvents();
+        PollGlfwEventsPreservingHostEvents();  // not glfwPollEvents: see ChFilterVisualizeGuards.h
     }
 #endif
 }
