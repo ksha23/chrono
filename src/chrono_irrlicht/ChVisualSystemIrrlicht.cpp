@@ -64,7 +64,16 @@ ChVisualSystemIrrlicht::ChVisualSystemIrrlicht()
     m_device_params.AntiAlias = true;
     m_device_params.Bits = 32;
     m_device_params.Fullscreen = false;
+    // Direct3D9 exists only on Windows. Requesting it elsewhere guarantees the first
+    // createDeviceEx below fails, printing "Cannot use default video driver" on every launch
+    // before retrying with OpenGL. On macOS that failed attempt is not merely noisy: it builds
+    // and tears down a whole CIrrDeviceMacOSX (NSApplication, delegate, window) first.
+    // Windows behaviour is unchanged; other platforms now ask for OpenGL directly.
+#ifdef _WIN32
     m_device_params.DriverType = video::EDT_DIRECT3D9;
+#else
+    m_device_params.DriverType = video::EDT_OPENGL;
+#endif
     m_device_params.WindowSize = core::dimension2d<irr::u32>(640, 480);
     m_device_params.Stencilbuffer = false;
     m_device_params.LoggingLevel = irr::ELL_INFORMATION;
