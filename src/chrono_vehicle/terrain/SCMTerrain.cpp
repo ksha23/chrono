@@ -224,15 +224,23 @@ void SCMTerrain::SetBoundary(const ChAABB& aabb) {
 
 // Add a user-provided active domains
 void SCMTerrain::AddActiveDomain(std::shared_ptr<ChBody> body, const ChVector3d& OOBB_center, const ChVector3d& OOBB_dims) {
+    // Enable user-provided active domains.
+    // On the transition from default to user-provided domains, discard the body-less default active domain that
+    // SetupInitial may have already created (this happens whenever the terrain is initialized before the first call
+    // to AddActiveDomain). Once m_user_domains is set, all entries in m_active_domains are assumed to have an
+    // associated body: both the SCM ray-casting (UpdateActiveDomain, RayOBBtest) and the run-time visualization
+    // dereference ActiveDomainInfo::m_body unconditionally.
+    if (!m_loader->m_user_domains) {
+        m_loader->m_active_domains.clear();
+        m_loader->m_user_domains = true;
+    }
+
     SCMLoader::ActiveDomainInfo ad;
     ad.m_body = body;
     ad.m_center = OOBB_center;
     ad.m_hdims = OOBB_dims / 2;
 
     m_loader->m_active_domains.push_back(ad);
-
-    // Enable user-provided active domains
-    m_loader->m_user_domains = true;
 }
 
 // Set user-supplied callback for evaluating location-dependent soil parameters.
@@ -709,8 +717,10 @@ void SCMLoader::CreateVisualizationMesh(double sizeX, double sizeY) {
 }
 
 void SCMLoader::SetupInitial() {
-    // If no user-specified active domains, create one that will encompass all collision shapes in the system
-    if (!m_user_domains) {
+    // If no user-specified active domains, create one that will encompass all collision shapes in the system.
+    // Note: this function is invoked twice, once at the end of terrain initialization and once by the containing
+    // ChSystem; create the default active domain only once (ComputeInternalForces expects exactly one).
+    if (!m_user_domains && m_active_domains.empty()) {
         SCMLoader::ActiveDomainInfo ad;
         ad.m_body = nullptr;
         ad.m_center = {0, 0, 0};
