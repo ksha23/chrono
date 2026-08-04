@@ -81,26 +81,26 @@ class CH_SENSOR_API ChMetalRTScene {
 
     /// Add a point light. Returns the light's ID (its index), as ChScene does.
     unsigned int AddPointLight(ChVector3f pos, ChColor color, float max_range, bool const_color = true) {
-        MetalSceneLight L{pos, max_range, color, 0};
-        L.const_color = const_color;
-        m_lights.push_back(L);
-        lights_changed = true;
-        return static_cast<unsigned int>(m_lights.size() - 1);
+        return Append(MakePointLight(pos, color, max_range, const_color));
+    }
+
+    /// Redefine an existing point light, matching ChScene::ModifyPointLight's neutral overload.
+    /// Same parameters as AddPointLight plus the light ID returned by it.
+    void ModifyPointLight(unsigned int light_ID, ChVector3f pos, ChColor color, float max_range,
+                          bool const_color = true) {
+        Replace(light_ID, MakePointLight(pos, color, max_range, const_color));
     }
 
     /// Add a directional light from spherical angles, matching ChScene::AddDirectionalLight.
     /// elevation/azimuth are radians and define the direction TO the light:
     ///   light_dir = (cos(el)cos(az), cos(el)sin(az), sin(el))
     unsigned int AddDirectionalLight(ChColor color, float elevation, float azimuth) {
-        ChVector3f light_dir(std::cos(elevation) * std::cos(azimuth),
-                             std::cos(elevation) * std::sin(azimuth),
-                             std::sin(elevation));
-        // The shader negates `pos` to recover the direction to the light, so store the
-        // travel direction here. Net result matches the OptiX light_dir above.
-        MetalSceneLight L{-light_dir, 0.f, color, 1};
-        m_lights.push_back(L);
-        lights_changed = true;
-        return static_cast<unsigned int>(m_lights.size() - 1);
+        return Append(MakeDirectionalLight(color, elevation, azimuth));
+    }
+
+    /// Redefine an existing directional light, matching ChScene::ModifyDirectionalLight's neutral overload.
+    void ModifyDirectionalLight(unsigned int light_ID, ChColor color, float elevation, float azimuth) {
+        Replace(light_ID, MakeDirectionalLight(color, elevation, azimuth));
     }
 
     /// Add a spot light, matching ChScene::AddSpotLight. Angles are radians and are
@@ -108,43 +108,39 @@ class CH_SENSOR_API ChMetalRTScene {
     /// soft edge begins. Attenuation rate is 1/(angle_range - angle_falloff_start).
     unsigned int AddSpotLight(ChVector3f pos, ChColor color, float max_range, ChVector3f light_dir,
                               float angle_falloff_start, float angle_range, bool const_color = true) {
-        MetalSceneLight L{pos, max_range, color, 2};
-        L.dir = light_dir.GetNormalized();
-        L.cosOuter = angle_range;
-        L.cosInner = (angle_falloff_start < angle_range - 1e-6f)
-                         ? (1.f / (angle_range - angle_falloff_start))
-                         : -1.f;  // no angular falloff -> hard cutoff
-        L.const_color = const_color;
-        m_lights.push_back(L);
-        lights_changed = true;
-        return static_cast<unsigned int>(m_lights.size() - 1);
+        return Append(MakeSpotLight(pos, color, max_range, light_dir, angle_falloff_start, angle_range, const_color));
+    }
+
+    /// Redefine an existing spot light, matching ChScene::ModifySpotLight's neutral overload.
+    void ModifySpotLight(unsigned int light_ID, ChVector3f pos, ChColor color, float max_range, ChVector3f light_dir,
+                         float angle_falloff_start, float angle_range, bool const_color = true) {
+        Replace(light_ID,
+                MakeSpotLight(pos, color, max_range, light_dir, angle_falloff_start, angle_range, const_color));
     }
 
     /// Add a rectangle area light (soft-shadowed), matching ChScene::AddRectangleLight.
     /// length_vec / width_vec are the FULL edge vectors, not half-extents.
     unsigned int AddRectangleLight(ChVector3f pos, ChColor color, float max_range,
                                    ChVector3f length_vec, ChVector3f width_vec, bool const_color = true) {
-        MetalSceneLight L{pos, max_range, color, 4};
-        L.dir = length_vec;  // edge-1
-        L.cosOuter = width_vec.x();
-        L.cosInner = width_vec.y();
-        L.p0 = width_vec.z();  // edge-2
-        L.const_color = const_color;
-        m_lights.push_back(L);
-        lights_changed = true;
-        return static_cast<unsigned int>(m_lights.size() - 1);
+        return Append(MakeRectangleLight(pos, color, max_range, length_vec, width_vec, const_color));
+    }
+
+    /// Redefine an existing rectangle light, matching ChScene::ModifyRectangleLight's neutral overload.
+    void ModifyRectangleLight(unsigned int light_ID, ChVector3f pos, ChColor color, float max_range,
+                              ChVector3f length_vec, ChVector3f width_vec, bool const_color = true) {
+        Replace(light_ID, MakeRectangleLight(pos, color, max_range, length_vec, width_vec, const_color));
     }
 
     /// Add a disk area light (soft-shadowed), matching ChScene::AddDiskLight.
     unsigned int AddDiskLight(ChVector3f pos, ChColor color, float max_range, ChVector3f light_dir,
                               float radius, bool const_color = true) {
-        MetalSceneLight L{pos, max_range, color, 3};
-        L.dir = light_dir.GetNormalized();
-        L.p0 = radius;
-        L.const_color = const_color;
-        m_lights.push_back(L);
-        lights_changed = true;
-        return static_cast<unsigned int>(m_lights.size() - 1);
+        return Append(MakeDiskLight(pos, color, max_range, light_dir, radius, const_color));
+    }
+
+    /// Redefine an existing disk light, matching ChScene::ModifyDiskLight's neutral overload.
+    void ModifyDiskLight(unsigned int light_ID, ChVector3f pos, ChColor color, float max_range, ChVector3f light_dir,
+                         float radius, bool const_color = true) {
+        Replace(light_ID, MakeDiskLight(pos, color, max_range, light_dir, radius, const_color));
     }
 
     /// Use an HDR equirectangular map as an image-based light, matching
@@ -241,6 +237,73 @@ class CH_SENSOR_API ChMetalRTScene {
     ChSystem* GetSystem() const { return m_system; }
 
   private:
+    // ---- Light construction -------------------------------------------------
+    // Each Make*Light packs the public (backend-neutral) parameters into a MetalSceneLight.
+    // Add*Light appends the result, Modify*Light overwrites an existing slot with it, so the
+    // two paths cannot drift apart.
+
+    static MetalSceneLight MakePointLight(ChVector3f pos, ChColor color, float max_range, bool const_color) {
+        MetalSceneLight L{pos, max_range, color, 0};
+        L.const_color = const_color;
+        return L;
+    }
+
+    static MetalSceneLight MakeDirectionalLight(ChColor color, float elevation, float azimuth) {
+        ChVector3f light_dir(std::cos(elevation) * std::cos(azimuth),
+                             std::cos(elevation) * std::sin(azimuth),
+                             std::sin(elevation));
+        // The shader negates `pos` to recover the direction to the light, so store the
+        // travel direction here. Net result matches the OptiX light_dir.
+        return MetalSceneLight{-light_dir, 0.f, color, 1};
+    }
+
+    static MetalSceneLight MakeSpotLight(ChVector3f pos, ChColor color, float max_range, ChVector3f light_dir,
+                                         float angle_falloff_start, float angle_range, bool const_color) {
+        MetalSceneLight L{pos, max_range, color, 2};
+        L.dir = light_dir.GetNormalized();
+        L.cosOuter = angle_range;
+        L.cosInner = (angle_falloff_start < angle_range - 1e-6f)
+                         ? (1.f / (angle_range - angle_falloff_start))
+                         : -1.f;  // no angular falloff -> hard cutoff
+        L.const_color = const_color;
+        return L;
+    }
+
+    static MetalSceneLight MakeRectangleLight(ChVector3f pos, ChColor color, float max_range,
+                                              ChVector3f length_vec, ChVector3f width_vec, bool const_color) {
+        MetalSceneLight L{pos, max_range, color, 4};
+        L.dir = length_vec;  // edge-1
+        L.cosOuter = width_vec.x();
+        L.cosInner = width_vec.y();
+        L.p0 = width_vec.z();  // edge-2
+        L.const_color = const_color;
+        return L;
+    }
+
+    static MetalSceneLight MakeDiskLight(ChVector3f pos, ChColor color, float max_range, ChVector3f light_dir,
+                                         float radius, bool const_color) {
+        MetalSceneLight L{pos, max_range, color, 3};
+        L.dir = light_dir.GetNormalized();
+        L.p0 = radius;
+        L.const_color = const_color;
+        return L;
+    }
+
+    /// Append a light and return its ID (its index), as ChScene's Add*Light do.
+    unsigned int Append(const MetalSceneLight& L) {
+        m_lights.push_back(L);
+        lights_changed = true;
+        return static_cast<unsigned int>(m_lights.size() - 1);
+    }
+
+    /// Overwrite the light at `id`. Out-of-range IDs are ignored, as ChScene's Modify*Light do.
+    void Replace(unsigned int id, const MetalSceneLight& L) {
+        if (id < m_lights.size()) {
+            m_lights[id] = L;
+            lights_changed = true;
+        }
+    }
+
     ChSystem* m_system = nullptr;
     std::unique_ptr<cr::ChScene> m_builder;
     cr::RenderScene m_render_scene;
