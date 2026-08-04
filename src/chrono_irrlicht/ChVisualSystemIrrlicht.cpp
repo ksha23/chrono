@@ -241,6 +241,12 @@ void ChVisualSystemIrrlicht::Initialize() {
                       << ")" << std::endl;
         }
     }
+
+    // A Chrono demo is normally an unbundled command-line executable, which macOS registers as a background-only
+    // application. Its windows can then never become key, and a window that is not key gets no keyboard events, so
+    // every key binding (WASD driving, camera keys, pause) is silently dead. Promote the process to a regular
+    // foreground application so that the window can take focus.
+    ChIrrMacOSActivateApplication();
 #endif
 
     // m_device->grab();

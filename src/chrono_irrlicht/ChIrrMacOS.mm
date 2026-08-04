@@ -67,5 +67,26 @@ double ChIrrMacOSMatchGLSurfaceToWindowSize() {
     return scale;
 }
 
+bool ChIrrMacOSActivateApplication() {
+    @autoreleasepool {
+        // Irrlicht has already created the shared application; this just retrieves it.
+        NSApplication* app = [NSApplication sharedApplication];
+
+        if ([app activationPolicy] != NSApplicationActivationPolicyRegular)
+            [app setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+        [app activateIgnoringOtherApps:YES];
+
+        // Being the active application is not enough on its own: the window has to be the key window before AppKit
+        // will route key events to it.
+        NSView* view = FindIrrlichtGLView();
+        NSWindow* window = view ? [view window] : nil;
+        if (window)
+            [window makeKeyAndOrderFront:nil];
+
+        return [app activationPolicy] == NSApplicationActivationPolicyRegular;
+    }
+}
+
 }  // namespace irrlicht
 }  // namespace chrono

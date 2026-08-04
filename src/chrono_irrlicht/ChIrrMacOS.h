@@ -39,6 +39,21 @@ namespace irrlicht {
 /// be located, in which case nothing was changed.
 double ChIrrMacOSMatchGLSurfaceToWindowSize();
 
+/// Promote this process to a regular foreground application and give Irrlicht's window keyboard focus.
+///
+/// A Chrono demo is usually a plain command-line executable with no bundle and no Info.plist, which LaunchServices
+/// registers as a background-only application ("type=BackgroundOnly" in lsappinfo). Such a process can never become
+/// the active application, so its windows never become key - and a window that is not key receives no keyboard events
+/// at all. That silently disables every keyboard binding Chrono installs (WASD driving, camera keys, spacebar
+/// pause, ...) and makes mouse interaction erratic, because the window is never focused.
+///
+/// Switching the activation policy to NSApplicationActivationPolicyRegular at run time makes the process a normal GUI
+/// application, after which its window can take focus like any other. Must be called after the Irrlicht device has
+/// been created.
+///
+/// Returns true if the process is a regular foreground application when the call returns.
+bool ChIrrMacOSActivateApplication();
+
 }  // namespace irrlicht
 }  // namespace chrono
 
