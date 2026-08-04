@@ -34,6 +34,12 @@ class ChVisualSystemVSG;
 /// Base class for a GUI component for the VSG run-time visualization system.
 class CH_VSG_API ChGuiComponentVSG {
   public:
+    /// Placement policy for the ImGui window of a GUI component.
+    enum class Placement {
+        AUTO,   ///< the visual system arranges the window (flow layout in the viewport work area)
+        CUSTOM  ///< the component positions its own window
+    };
+
     ChGuiComponentVSG();
     virtual ~ChGuiComponentVSG() {}
 
@@ -53,6 +59,28 @@ class CH_VSG_API ChGuiComponentVSG {
     /// Return boolean indicating whether or not this GUI component visible.
     bool IsVisible() const { return m_visible; }
 
+    /// Set the placement policy for the window of this GUI component (default: AUTO).
+    /// A component that issues its own ImGui::SetNextWindowPos must use CUSTOM, so that the automatic layout
+    /// neither positions it nor reserves screen space for it.
+    void SetPlacement(Placement placement) { m_placement = placement; }
+
+    /// Return the placement policy for the window of this GUI component.
+    Placement GetPlacement() const { return m_placement; }
+
+    /// Set the screen position at which the automatic layout places the window of this GUI component.
+    /// Used by the visual system's layout pass; has no effect for a component with CUSTOM placement.
+    void SetLayoutPosition(const ImVec2& pos) { m_layout_pos = pos; }
+
+    /// Return the size of the window of this GUI component, as measured in the last frame it was rendered.
+    /// Zero until the component is rendered for the first time.
+    const ImVec2& GetLayoutSize() const { return m_layout_size; }
+
+    /// Convert a length expressed for the reference GUI font (the 13 pixel Dear ImGui default, for which the
+    /// ImGui style metrics are tuned) into pixels at the font size currently in use.
+    /// Use this for widget dimensions instead of literal pixel counts, so that they follow the GUI font size and
+    /// the display scale rather than assuming a particular DPI.
+    static float ScaledSize(float size);
+
     /// Utility function to draw a gauge.
     static void DrawGauge(float val, float v_min, float v_max);
 
@@ -67,8 +95,21 @@ class CH_VSG_API ChGuiComponentVSG {
     static void HelpMarker(const char* desc);
 
   protected:
+    /// Open the ImGui window of this GUI component.
+    /// For a component with AUTO placement, the window is positioned where the visual system's layout pass put
+    /// it. Must be paired with a call to EndWindow (which measures the window for the next layout pass).
+    bool BeginWindow(const char* name, bool* p_open = nullptr, ImGuiWindowFlags flags = 0);
+
+    /// Close the ImGui window of this GUI component, recording its current size for the next layout pass.
+    void EndWindow();
+
     bool m_visible;
     ChVisualSystemVSG* m_vsys;
+
+  private:
+    Placement m_placement;  ///< placement policy for the window of this component
+    ImVec2 m_layout_pos;    ///< position assigned by the automatic layout
+    ImVec2 m_layout_size;   ///< window size measured in the last rendered frame
 
     friend class ChVisualSystemVSG;
 };

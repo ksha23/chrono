@@ -20,10 +20,34 @@
 namespace chrono {
 namespace vsg3d {
 
-ChGuiComponentVSG::ChGuiComponentVSG() : m_visible(true) {}
+ChGuiComponentVSG::ChGuiComponentVSG()
+    : m_visible(true),
+      m_vsys(nullptr),
+      m_placement(Placement::AUTO),
+      m_layout_pos(0.0f, 0.0f),
+      m_layout_size(0.0f, 0.0f) {}
+
+bool ChGuiComponentVSG::BeginWindow(const char* name, bool* p_open, ImGuiWindowFlags flags) {
+    if (m_placement == Placement::AUTO)
+        ImGui::SetNextWindowPos(m_layout_pos, ImGuiCond_Always);
+    return ImGui::Begin(name, p_open, flags);
+}
+
+void ChGuiComponentVSG::EndWindow() {
+    // Record the size ImGui gave this window in the current frame. The automatic layout arranges the GUI from
+    // these measured sizes, so that it never depends on an assumed panel size (which varies with the font size,
+    // the display scale, and the content of the panel itself).
+    m_layout_size = ImGui::GetWindowSize();
+    ImGui::End();
+}
+
+float ChGuiComponentVSG::ScaledSize(float size) {
+    static constexpr float reference_font_size = 13.0f;  // size of the default Dear ImGui font
+    return size * ImGui::GetFontSize() / reference_font_size;
+}
 
 void ChGuiComponentVSG::DrawGauge(float val, float v_min, float v_max) {
-    ImGui::PushItemWidth(150.0f);
+    ImGui::PushItemWidth(ScaledSize(150.0f));
     ImGui::PushStyleColor(ImGuiCol_SliderGrab, (ImVec4)ImColor(200, 100, 20));
     ImGui::SliderFloat("", &val, v_min, v_max, "%.2f");
     ImGui::PopStyleColor();

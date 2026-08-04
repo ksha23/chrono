@@ -98,10 +98,55 @@ class ChMainGuiVSG : public vsg::Inherit<vsg::Command, ChMainGuiVSG> {
 
         // Render GUI
         if (m_app->m_show_gui) {
+            layout();
             for (auto& gui : m_app->m_gui) {
                 if (gui->IsVisible())
                     gui->render(cb);
             }
+        }
+    }
+
+    // Assign screen positions to the GUI components that are placed automatically.
+    //
+    // The panels are flowed left to right starting at the top-left corner of the viewport work area, wrapping to
+    // a new row when the current row is full. Each panel advances the layout cursor by the size its window
+    // actually had in the previous frame (recorded by ChGuiComponentVSG::EndWindow), never by an assumed panel
+    // size, so the arrangement adapts to the window size, to the display scale, to the GUI font size, and to
+    // panels growing or shrinking as sections are expanded at run time.
+    void layout() const {
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        const float pad = ImGui::GetStyle().ItemSpacing.x;  // gap between panels, in the units of the GUI style
+
+        const float x_min = viewport->WorkPos.x + pad;
+        const float y_min = viewport->WorkPos.y + pad;
+        const float x_max = viewport->WorkPos.x + viewport->WorkSize.x;
+
+        float x = x_min;           // left edge of the next panel
+        float y = y_min;           // top edge of the current row
+        float row_height = 0.0f;   // height of the tallest panel in the current row
+
+        auto place = [&](const std::shared_ptr<ChGuiComponentVSG>& gui) {
+            if (!gui->IsVisible() || gui->GetPlacement() != ChGuiComponentVSG::Placement::AUTO)
+                return;
+            const ImVec2& size = gui->GetLayoutSize();
+            // Start a new row if this panel would extend past the work area (never for the first one in a row)
+            if (x > x_min && x + size.x > x_max) {
+                x = x_min;
+                y += row_height + pad;
+                row_height = 0.0f;
+            }
+            gui->SetLayoutPosition(ImVec2(x, y));
+            x += size.x + pad;
+            row_height = std::max(row_height, size.y);
+        };
+
+        // Place the base panel first, so that it keeps the top-left corner regardless of the order in which
+        // derived visual systems added their own GUI components
+        if (m_app->m_base_gui)
+            place(m_app->m_base_gui);
+        for (auto& gui : m_app->m_gui) {
+            if (gui != m_app->m_base_gui)
+                place(gui);
         }
     }
 

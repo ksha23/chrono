@@ -296,9 +296,8 @@ void ShowHelp(ChInteractiveDriver::KeyboardMode keyboard_mode) {
 }
 
 void ChVehicleGuiComponentVSG::render(vsg::CommandBuffer& cb) {
-    ImGui::SetNextWindowSize(ImVec2(280.0f, 0.0f));
-    ImGui::SetNextWindowPos(ImVec2(250.0f, 5.0f));
-    ImGui::Begin("Vehicle");
+    ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
+    BeginWindow("Vehicle");
 
     std::string vehicle_name = "Vehicle: \"" + m_vsys->GetVehicle().GetName() + "\"";
     ImGui::TextUnformatted(vehicle_name.c_str());
@@ -336,7 +335,7 @@ void ChVehicleGuiComponentVSG::render(vsg::CommandBuffer& cb) {
         ImGui::TableNextColumn();
         ImGui::TextUnformatted("Steering:");
         ImGui::TableNextColumn();
-        ImGui::PushItemWidth(150.0f);
+        ImGui::PushItemWidth(ScaledSize(150.0f));
         ImGui::PushStyleColor(ImGuiCol_SliderGrab, (ImVec4)ImColor(200, 100, 20));
         ImGui::PushID("Steering"); // avoids ID conflicts (as per DearImgui message popup)
         DrawGauge(-m_vsys->GetSteering(), -1, 1);
@@ -518,17 +517,20 @@ void ChVehicleGuiComponentVSG::render(vsg::CommandBuffer& cb) {
     ImGui::Checkbox("Vehicle controls help", &show_help);
 
     if (show_help) {
-        ImGuiIO& io = ImGui::GetIO();
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f), ImGuiCond_Always,
-                                ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x * 0.75f, io.DisplaySize.y * 0.75f), ImGuiCond_Always);
+        // The help text is a transient overlay, deliberately drawn on top of the stats panels: center it in the
+        // viewport work area and let it size itself to its content (ImGui clamps that to the work area and adds
+        // scrollbars if needed), rather than claiming a fixed fraction of the display.
+        const ImGuiViewport* viewport = ImGui::GetMainViewport();
+        ImVec2 center(viewport->WorkPos.x + viewport->WorkSize.x / 2, viewport->WorkPos.y + viewport->WorkSize.y / 2);
+        ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f), ImGuiCond_Always);
         ImGui::Begin("Help", &show_help, ImGuiWindowFlags_NoCollapse);
         auto driver = dynamic_cast<ChInteractiveDriver*>(m_vsys->GetDriver());
         ShowHelp(driver ? driver->GetKeyboardMode() : ChInteractiveDriver::KeyboardMode::CUMULATIVE);
         ImGui::End();
     }
 
-    ImGui::End();
+    EndWindow();
 }
 
 // -----------------------------------------------------------------------------

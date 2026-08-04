@@ -34,12 +34,11 @@ ChBaseGuiComponentVSG::ChBaseGuiComponentVSG(ChVisualSystemVSG* app) : m_app(app
 
 void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
     ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
-    ImGui::SetNextWindowPos(ImVec2(5.0f, 5.0f));
 
     ImGuiTableFlags table_flags = ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit;
     ImGuiColorEditFlags color_edit_flags = ImGuiColorEditFlags_Float | ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_NoDragDrop;
 
-    ImGui::Begin("Simulation");
+    BeginWindow("Simulation");
 
     if (ImGui::BeginTable("SimTable", 2, table_flags, ImVec2(0.0f, 0.0f))) {
         ImGui::TableNextColumn();
@@ -183,7 +182,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
                 m_app->SetBodyLabelsColor(ChColor(body_labels_color.x, body_labels_color.y, body_labels_color.z));
             ImGui::TableNextColumn();
             float body_labels_scale = m_app->m_body_labels_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##body_labels", &body_labels_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             m_app->m_body_labels_scale = body_labels_scale;
@@ -200,7 +199,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
                 m_app->SetLinkLabelsColor(ChColor(link_labels_color.x, link_labels_color.y, link_labels_color.z));
             ImGui::TableNextColumn();
             float link_labels_scale = m_app->m_link_labels_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##link_labels", &link_labels_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             m_app->m_link_labels_scale = link_labels_scale;
@@ -217,7 +216,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
                 m_app->ToggleAbsFrameVisibility();
             ImGui::TableNextColumn();
             float abs_frame_scale = m_app->m_abs_frame_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##abs", &abs_frame_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             m_app->m_abs_frame_scale = abs_frame_scale;
@@ -232,7 +231,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
             }
             ImGui::TableNextColumn();
             float ref_frame_scale = m_app->m_ref_frame_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##ref", &ref_frame_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             m_app->m_ref_frame_scale = ref_frame_scale;
@@ -254,7 +253,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
 
             ImGui::TableNextColumn();
             float com_frame_scale = m_app->m_com_frame_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##com_frame", &com_frame_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             if (com_frame_scale != m_app->m_com_frame_scale) {
@@ -272,7 +271,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
             }
             ImGui::TableNextColumn();
             float link_frame_scale = m_app->m_link_frame_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##link", &link_frame_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             m_app->m_link_frame_scale = link_frame_scale;
@@ -311,7 +310,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
             }
             ImGui::TableNextColumn();
             float contact_normals_scale = m_app->m_contact_normals_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##contact_normals", &contact_normals_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             m_app->m_contact_normals_scale = contact_normals_scale;
@@ -331,7 +330,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
             }
             ImGui::TableNextColumn();
             float contact_forces_scale = m_app->m_contact_forces_scale;
-            ImGui::PushItemWidth(120.0f);
+            ImGui::PushItemWidth(ScaledSize(120.0f));
             ImGui::SliderFloat("scale##contact_forces", &contact_forces_scale, 0.1f, 10.0f);
             ImGui::PopItemWidth();
             m_app->m_contact_forces_scale = contact_forces_scale;
@@ -345,7 +344,7 @@ void ChBaseGuiComponentVSG::render(vsg::CommandBuffer& cb) {
     if (ImGui::Button("Quit"))
         m_app->Quit();
 
-    ImGui::End();
+    EndWindow();
 }
 
 ChCameraGuiComponentVSG::ChCameraGuiComponentVSG(ChVisualSystemVSG* app) : m_app(app) {
@@ -360,7 +359,7 @@ void ChCameraGuiComponentVSG::render(vsg::CommandBuffer& cb) {
 
     ImGuiTableFlags table_flags = ImGuiTableFlags_BordersOuter | ImGuiTableFlags_SizingFixedFit;
 
-    ImGui::Begin("Camera");
+    BeginWindow("Camera");
 
     if (ImGui::BeginTable("Location", 4, table_flags, ImVec2(0.0f, 0.0f))) {
         ImGui::TableNextColumn();
@@ -380,9 +379,9 @@ void ChCameraGuiComponentVSG::render(vsg::CommandBuffer& cb) {
         }
 
         ImGui::EndTable();
-
-        ImGui::End();
     }
+
+    EndWindow();
 }
 
 ChColorbarGuiComponentVSG::ChColorbarGuiComponentVSG(const std::string& title, const ChVector2d& range, ChColormap::Type type, bool bimodal, float width)
@@ -394,11 +393,11 @@ void ChColorbarGuiComponentVSG::Initialize() {
 
 void ChColorbarGuiComponentVSG::render(vsg::CommandBuffer& cb) {
     ImGui::SetNextWindowSize(ImVec2(0.0f, 0.0f));
-    ImGui::Begin(m_title.c_str());
+    BeginWindow(m_title.c_str());
 
     Colorbar(m_texture, m_range, m_bimodal, m_width, cb.deviceID);
 
-    ImGui::End();
+    EndWindow();
 }
 
 }  // namespace vsg3d
