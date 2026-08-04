@@ -97,6 +97,12 @@ void ChFilterVisualize::CreateGlfwWindow(std::string window_name) {
     }
 
     GLFWmonitor* monitor = m_fullscreen ? glfwGetPrimaryMonitor() : nullptr;
+    // Chrono::Sensor's windows are secondary debug views, so they must not take keyboard focus away from the window
+    // that owns the host run loop (typically Irrlicht's). These windows are created after it, and by default a new
+    // GLFW window is focused on creation, which leaves the main window unfocused: on macOS a window that is not key
+    // receives no key events at all, silently disabling every Chrono key binding (WASD driving, camera keys, pause).
+    glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+    glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
     m_window.reset(glfwCreateWindow(static_cast<GLsizei>(m_w), static_cast<GLsizei>(m_h), window_name.c_str(), monitor,
                                     nullptr));
     if (!m_window) {
@@ -618,6 +624,11 @@ CH_SENSOR_API void ChFilterVisualize::CreateGlfwWindow(std::string window_name) 
     OnNewWindow();  // OnNewWindow will need to lock inside itself
 
     std::lock_guard<std::mutex> lck(s_glfwMutex);
+
+    // Do not take keyboard focus from the window that owns the host run loop -- see the note in the other
+    // CreateGlfwWindow above.
+    glfwWindowHint(GLFW_FOCUSED, GLFW_FALSE);
+    glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_FALSE);
 
     if (m_fullscreen)
         m_window.reset(glfwCreateWindow(static_cast<GLsizei>(m_w), static_cast<GLsizei>(m_h), window_name.c_str(),
