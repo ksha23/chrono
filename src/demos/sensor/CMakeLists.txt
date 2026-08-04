@@ -7,6 +7,7 @@ set(DEMOS
 
 if(CH_USE_SENSOR_VULKAN_RT)
     set(DEMOS ${DEMOS}
+        demo_SEN_buildtest
         demo_SEN_JSON
         demo_SEN_camera
         demo_SEN_cornell_box
@@ -58,6 +59,7 @@ endif()
 
 if(CH_USE_SENSOR_METAL_RT)
     set(DEMOS ${DEMOS}
+        demo_SEN_buildtest
         demo_SEN_JSON
         demo_SEN_camera
         demo_SEN_lidar
@@ -67,9 +69,6 @@ if(CH_USE_SENSOR_METAL_RT)
         demo_SEN_cornell_box
         demo_SEN_radar1
     )
-    # demo_SEN_buildtest is intentionally absent: it drives ChScene::ModifyPointLight, whose
-    # signature takes a ChOptixLight (built from CUDA vector types), so it cannot be mirrored
-    # without pulling the CUDA toolchain into a Metal-only build.
 
     if(CH_ENABLE_MODULE_VEHICLE AND CH_ENABLE_MODULE_VEHICLE_MODELS)
         set(DEMOS ${DEMOS}
