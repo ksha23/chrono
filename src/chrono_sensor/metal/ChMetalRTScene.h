@@ -164,7 +164,9 @@ class CH_SENSOR_API ChMetalRTScene {
     /// All lights currently in the scene.
     /// NOTE: element type is MetalSceneLight rather than ChOptixLight -- see the struct
     /// comment. Simulation code configures lights through the setters above, so this
-    /// difference does not affect portability.
+    /// difference does not affect portability. ChScene additionally overloads each
+    /// Modify*Light on ChOptixLight; only its backend-neutral overloads are mirrored here,
+    /// since a ChOptixLight cannot be named in a Metal-only build.
     const std::vector<MetalSceneLight>& GetLights() const { return m_lights; }
 
     void SetAmbientLight(ChVector3f color) { m_ambient = color; }
