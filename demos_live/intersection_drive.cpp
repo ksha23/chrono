@@ -15,6 +15,8 @@
 // Usage:  ./intersection_drive [max_seconds]
 // Env:    ESMINI_ROOT       esmini resource root
 //         HEADLESS=1        skip the interactive window, just write frames
+//         KEEP_OPEN=1       ignore the scenario's stop trigger and max_seconds, and
+//                           keep simulating until the window is closed
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -90,6 +92,7 @@ int main(int argc, char** argv) {
     std::string esmini_root = esmini_root_env ? esmini_root_env : kEsminiRootDefault;
     double max_time = (argc > 1) ? std::atof(argv[1]) : 20.0;
     bool headless = std::getenv("HEADLESS") != nullptr;
+    bool keep_open = std::getenv("KEEP_OPEN") != nullptr && !headless;
 
     std::string xosc_file = esmini_root + "/resources/xosc/ltap-od.xosc";
     std::string out_dir = std::string(kChronoRoot) + "demos_live/intersection_out/";
@@ -253,8 +256,11 @@ int main(int argc, char** argv) {
     // Co-simulation loop
     // ---------------------------------------------------------------------------------------
 
-    printf("\nRunning %.0f s%s. Frames -> %s\n\n", max_time, headless ? " (headless)" : "",
-           out_dir.c_str());
+    if (keep_open)
+        printf("\nRunning until the window is closed. Frames -> %s\n\n", out_dir.c_str());
+    else
+        printf("\nRunning %.0f s%s. Frames -> %s\n\n", max_time,
+               headless ? " (headless)" : "", out_dir.c_str());
 
     std::map<int, std::shared_ptr<ChBody>> actor_proxies;
     const double step = 1e-3;
@@ -262,7 +268,7 @@ int main(int argc, char** argv) {
     double next_report = 0;
     auto t_start = std::chrono::steady_clock::now();
 
-    while (time < max_time && !player.IsComplete()) {
+    while (keep_open || (time < max_time && !player.IsComplete())) {
         if (!headless && chase_vis && !chase_vis->WindowOpen())
             break;
 

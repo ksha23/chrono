@@ -80,6 +80,14 @@ enum : int {
     /// Any lane belonging to the roadway, drivable or not.
     ANY_ROAD = ANY_DRIVING | RESTRICTED | STOP | SHOULDER | PARKING,
 
+    /// Any lane that has a physical surface, including the ones alongside the roadway.
+    ///
+    /// This matters more than it looks. A divided road carries its central reservation as MEDIAN
+    /// or BORDER lanes, and its verges as BORDER; leaving them out splits the carriageways into
+    /// detached ribbons with a gap where the median should be, and strips the road of its
+    /// shoulders. On esmini's e6mini that is the difference between 27.8 m and 48.0 m of surface.
+    ANY_SURFACE = ANY_ROAD | BORDER | SIDEWALK | MEDIAN | CURB | BIKING | ROADWORKS,
+
     ANY = -1
 };
 }  // namespace ChLaneType
@@ -305,6 +313,11 @@ class ChApiScenario ChOpenDriveNetwork {
     /// Restrict which lane types world-to-lane snapping will consider.
     /// The mask follows esmini's roadmanager::Lane::LaneType. Defaults to any drivable lane.
     void SetSnapLaneTypes(int lane_type_mask);
+
+    /// Restrict which lane types count as ground for elevation queries (default: ANY_SURFACE).
+    /// Keep this in step with whatever surface is being rendered, or a vehicle straying onto a
+    /// shoulder will drop through road it can plainly see.
+    void SetElevationLaneTypes(int lane_type_mask);
 
   private:
     /// Populate the internal scratch handle from a world location and heading.

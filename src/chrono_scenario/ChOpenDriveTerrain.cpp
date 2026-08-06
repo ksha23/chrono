@@ -41,6 +41,7 @@ ChOpenDriveTerrain::ChOpenDriveTerrain(ChSystem* system, std::shared_ptr<ChOpenD
       m_off_network_height(0),
       m_mesh_ds(1.0),
       m_mesh_lateral_divs(4),
+      m_surface_lane_types(ChLaneType::ANY_SURFACE),
       m_texture_scale_u(1),
       m_texture_scale_v(1),
       m_marking_ds(0.5),
@@ -62,6 +63,15 @@ ChOpenDriveTerrain::ChOpenDriveTerrain(ChSystem* system, std::shared_ptr<ChOpenD
 void ChOpenDriveTerrain::SetMeshResolution(double ds, int lateral_divisions) {
     m_mesh_ds = std::max(ds, 0.01);
     m_mesh_lateral_divs = std::max(lateral_divisions, 1);
+}
+
+void ChOpenDriveTerrain::SetSurfaceLaneTypes(int lane_type_mask) {
+    m_surface_lane_types = lane_type_mask;
+
+    // Keep contact in step with what gets drawn, or a vehicle leaving the travel lanes drops
+    // through surface it can see.
+    if (m_network)
+        m_network->SetElevationLaneTypes(lane_type_mask);
 }
 
 void ChOpenDriveTerrain::SetRoadDiffuseTextureFile(const std::string& tex_file, float scale_u, float scale_v) {
@@ -168,10 +178,10 @@ void ChOpenDriveTerrain::CreateVisualizationMesh() {
         int num_steps = static_cast<int>(std::ceil(length / m_mesh_ds));
 
         // Lane sets can change along a road, so collect the union over all stations.
-        std::vector<int> lane_ids = m_network->GetLaneIds(road_id, 0.0, ChLaneType::ANY_ROAD);
+        std::vector<int> lane_ids = m_network->GetLaneIds(road_id, 0.0, m_surface_lane_types);
         for (int i = 1; i <= num_steps; i++) {
             double s = std::min(i * m_mesh_ds, length);
-            for (int lane_id : m_network->GetLaneIds(road_id, s, ChLaneType::ANY_ROAD)) {
+            for (int lane_id : m_network->GetLaneIds(road_id, s, m_surface_lane_types)) {
                 if (std::find(lane_ids.begin(), lane_ids.end(), lane_id) == lane_ids.end())
                     lane_ids.push_back(lane_id);
             }

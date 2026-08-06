@@ -8,6 +8,9 @@
 // the Audi actually accelerates decides when the cut-in happens.
 //
 // Usage:  ./scenario_drive [path/to/scenario.xosc] [max_seconds] [ego_speed_mps]
+// Env:    KEEP_OPEN=1  ignore the scenario's stop trigger and max_seconds, and keep
+//                      simulating until the window is closed
+//         SAVE_FRAMES  write frames to demos_live/scenario_out/
 //
 // Defaults to esmini's cut-in_external.xosc, which declares an externalController on the ego
 // precisely so that an outside simulator can drive it. Override the esmini resource root with
@@ -93,6 +96,7 @@ int main(int argc, char** argv) {
                                 : esmini_root + "/resources/xosc/cut-in_external.xosc";
     double max_time = (argc > 2) ? std::atof(argv[2]) : 30.0;
     double requested_speed = (argc > 3) ? std::atof(argv[3]) : 30.0;
+    bool keep_open = std::getenv("KEEP_OPEN") != nullptr;
 
     // ---------------------------------------------------------------------------------------
     // Scenario
@@ -268,7 +272,7 @@ int main(int argc, char** argv) {
     int last_ego_lane = ego0.lane_id;
     auto t_start = std::chrono::steady_clock::now();
 
-    while (vis->WindowOpen() && !player.IsComplete() && time < max_time) {
+    while (vis->WindowOpen() && (keep_open || (!player.IsComplete() && time < max_time))) {
         double ego_speed = audi.GetSpeed();
         ChCoordsys<> ego_ref = GetScenarioRefPose(audi);
 

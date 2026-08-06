@@ -73,6 +73,13 @@ class ChApiScenario ChOpenDriveTerrain : public vehicle::ChTerrain {
     /// Defaults: 1 m along the road, 4 samples across each lane.
     void SetMeshResolution(double ds, int lateral_divisions);
 
+    /// Set which lane types are rendered as road surface (default: ChLaneType::ANY_SURFACE).
+    ///
+    /// Narrowing this to the travel lanes leaves visible holes where a divided road's central
+    /// reservation and verges should be. It also updates the network's elevation query mask, so
+    /// that what the tires can rest on stays in step with what is drawn.
+    void SetSurfaceLaneTypes(int lane_type_mask);
+
     /// Set a texture applied to the generated road mesh.
     void SetRoadDiffuseTextureFile(const std::string& tex_file, float scale_u = 1, float scale_v = 1);
 
@@ -143,6 +150,7 @@ class ChApiScenario ChOpenDriveTerrain : public vehicle::ChTerrain {
 
     double m_mesh_ds;           ///< longitudinal mesh resolution
     int m_mesh_lateral_divs;    ///< lateral mesh samples per lane
+    int m_surface_lane_types;   ///< lane types rendered as road surface
 
     std::string m_texture_file;  ///< optional road texture
     float m_texture_scale_u;

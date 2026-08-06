@@ -144,8 +144,9 @@ bool ChOpenDriveNetwork::Initialize(const std::string& xodr_file) {
     // Snap world positions to drivable lanes by default; callers can widen this.
     RM_SetSnapLaneTypes(m_scratch, ChLaneType::ANY_DRIVING);
 
-    // Elevation queries want the whole paved surface, shoulders and all, not just travel lanes.
-    RM_SetSnapLaneTypes(m_scratch_elev, ChLaneType::ANY_ROAD);
+    // Elevation queries want every surface a wheel could rest on -- shoulders, verges and the
+    // central reservation included -- not just the travel lanes.
+    RM_SetSnapLaneTypes(m_scratch_elev, ChLaneType::ANY_SURFACE);
 
     ParseLaneMarkings(xodr_file);
 
@@ -542,6 +543,13 @@ void ChOpenDriveNetwork::SetSnapLaneTypes(int lane_type_mask) {
         return;
 
     RM_SetSnapLaneTypes(m_scratch, lane_type_mask);
+}
+
+void ChOpenDriveNetwork::SetElevationLaneTypes(int lane_type_mask) {
+    if (!m_initialized)
+        return;
+
+    RM_SetSnapLaneTypes(m_scratch_elev, lane_type_mask);
 }
 
 }  // end namespace scenario
