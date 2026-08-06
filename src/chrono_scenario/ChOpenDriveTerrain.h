@@ -80,8 +80,34 @@ class ChApiScenario ChOpenDriveTerrain : public vehicle::ChTerrain {
     /// Optional: skip this for headless runs that need only the contact surface.
     void CreateVisualizationMesh();
 
+    /// Generate painted lane marking geometry for the network and attach it to the ground body.
+    ///
+    /// Markings are read from the OpenDRIVE <roadMark> elements, so solid, broken, doubled and
+    /// colored lines all follow the file rather than a guessed convention. Each marking is laid
+    /// along its lane's outer border, lifted slightly clear of the road surface.
+    ///
+    /// Call after CreateVisualizationMesh.
+    void CreateLaneMarkings();
+
+    /// Set the longitudinal sampling resolution of the marking geometry (default: 0.5 m).
+    /// Finer than the road mesh, because a marking on a curve reads as faceted much sooner than
+    /// the road surface under it does.
+    void SetLaneMarkingResolution(double ds);
+
+    /// Set the dash pattern used for broken markings whose OpenDRIVE entry omits one.
+    /// Defaults to 3 m painted, 9 m clear.
+    void SetDefaultDashPattern(double dash_length, double dash_space);
+
+    /// Set how far above the road surface markings are drawn (default: 0.02 m).
+    /// Only used when the OpenDRIVE entry declares no height of its own. Markings must sit clear
+    /// of the road or they z-fight with it.
+    void SetLaneMarkingLift(double lift) { m_marking_lift = lift; }
+
     /// Get the generated road mesh (null until CreateVisualizationMesh is called).
     std::shared_ptr<ChTriangleMeshConnected> GetMesh() const { return m_mesh; }
+
+    /// Get the generated lane marking mesh (null until CreateLaneMarkings is called).
+    std::shared_ptr<ChTriangleMeshConnected> GetLaneMarkingMesh() const { return m_marking_mesh; }
 
     /// Get the ground body carrying the visualization assets.
     std::shared_ptr<ChBody> GetGround() const { return m_ground; }
@@ -121,6 +147,20 @@ class ChApiScenario ChOpenDriveTerrain : public vehicle::ChTerrain {
     std::string m_texture_file;  ///< optional road texture
     float m_texture_scale_u;
     float m_texture_scale_v;
+
+    std::shared_ptr<ChTriangleMeshConnected> m_marking_mesh;  ///< generated lane marking mesh
+    double m_marking_ds;           ///< longitudinal marking resolution
+    double m_marking_lift;         ///< default height above the road surface
+    double m_default_dash_length;  ///< dash length when OpenDRIVE omits one
+    double m_default_dash_space;   ///< dash gap when OpenDRIVE omits one
+
+    /// Append a ribbon of the given width along `centers` into the marking mesh, dashing it if
+    /// `dash_length` is positive. Returns the number of quads emitted.
+    int AppendMarkingRibbon(const std::vector<ChVector3d>& centers,
+                            double width,
+                            double lift,
+                            double dash_length,
+                            double dash_space);
 };
 
 /// @} scenario_module

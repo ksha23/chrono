@@ -133,7 +133,12 @@ int main(int argc, char** argv) {
     // UVs are emitted in meters, so the scale here is tiles-per-meter.
     terrain.SetRoadDiffuseTextureFile(GetVehicleDataFile("terrain/textures/concrete.jpg"), 0.35f, 0.35f);
     terrain.CreateVisualizationMesh();
-    printf("  road mesh: %zu vertices\n", terrain.GetMesh()->GetCoordsVertices().size());
+    terrain.CreateLaneMarkings();
+    printf("  road mesh: %zu vertices", terrain.GetMesh()->GetCoordsVertices().size());
+    if (auto mm = terrain.GetLaneMarkingMesh())
+        printf(" | lane markings: %zu vertices from %zu marked borders",
+               mm->GetCoordsVertices().size(), network->GetMarkedLanes().size());
+    printf("\n");
 
     // ---------------------------------------------------------------------------------------
     // Ego on a route that crosses the junction

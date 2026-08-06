@@ -35,6 +35,7 @@
 #include "chrono_scenario/ChOpenDriveTerrain.h"
 
 #include "chrono_sensor/ChSensorManager.h"
+#include "chrono_sensor/filters/ChFilterSave.h"
 #include "chrono_sensor/metal/ChFilterMetalVisualize.h"
 #include "chrono_sensor/sensors/ChCameraSensor.h"
 
@@ -114,8 +115,11 @@ int main(int argc, char** argv) {
     ChOpenDriveTerrain terrain(&sys, network);
     terrain.SetContactFrictionCoefficient(0.9f);
     terrain.SetMeshResolution(1.0, 4);
-    terrain.SetRoadDiffuseTextureFile(GetVehicleDataFile("terrain/textures/tile4.jpg"), 0.2f, 0.2f);
+    terrain.SetRoadDiffuseTextureFile(GetVehicleDataFile("terrain/textures/concrete.jpg"), 0.35f, 0.35f);
     terrain.CreateVisualizationMesh();
+    // Painted lane lines, read from the file's OpenDRIVE <roadMark> entries. These are what a
+    // lane-detection model actually keys on, so a road without them is not a fair test of one.
+    terrain.CreateLaneMarkings();
 
     // Spawn in lane coordinates rather than world coordinates.
     double spawn_s = (argc > 2) ? std::atof(argv[2]) : 480.0;
@@ -216,6 +220,9 @@ int main(int argc, char** argv) {
     // ---------------------------------------------------------------------------------------
 
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
+    // OpenDRIVE supplies no surroundings at all, so without an environment light the road sits in
+    // the dark against pure black.
+    manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
     manager->scene->SetAmbientLight(ChVector3f(0.25f, 0.25f, 0.28f));
     manager->scene->AddPointLight(ChVector3f(20, 10, 25), ChColor(1.0f, 0.98f, 0.92f), 200.f);
     manager->scene->AddPointLight(ChVector3f(-20, -15, 20), ChColor(0.35f, 0.4f, 0.55f), 150.f);
@@ -228,6 +235,10 @@ int main(int argc, char** argv) {
     auto cam = chrono_types::make_shared<ChCameraSensor>(audi.GetChassisBody(), 60.0f, cam_pose, 1280, 720,
                                                          (float)(CH_PI / 3), 2);
     cam->SetName("opendrive_chase");
+    // Opt-in frame capture: set SAVE_FRAMES to leave a visual record of a run.
+    if (std::getenv("SAVE_FRAMES"))
+        cam->PushFilter(chrono_types::make_shared<ChFilterSave>(std::string(kChronoRoot) +
+                                                                "demos_live/opendrive_out/"));
     auto vis = chrono_types::make_shared<ChFilterMetalVisualize>(1280, 720, "OpenDRIVE - chase (Metal RT)");
     cam->PushFilter(vis);
     manager->AddSensor(cam);

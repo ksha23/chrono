@@ -42,7 +42,11 @@ ChOpenDriveTerrain::ChOpenDriveTerrain(ChSystem* system, std::shared_ptr<ChOpenD
       m_mesh_ds(1.0),
       m_mesh_lateral_divs(4),
       m_texture_scale_u(1),
-      m_texture_scale_v(1) {
+      m_texture_scale_v(1),
+      m_marking_ds(0.5),
+      m_marking_lift(0.02),
+      m_default_dash_length(3.0),
+      m_default_dash_space(9.0) {
     if (!m_network || !m_network->IsInitialized()) {
         std::cerr << "ChOpenDriveTerrain: the supplied road network is not initialized" << std::endl;
     }
@@ -247,6 +251,188 @@ void ChOpenDriveTerrain::CreateVisualizationMesh() {
         material->SetKdTexture(m_texture_file);
         material->SetTextureScale(m_texture_scale_u, m_texture_scale_v);
     }
+    vmesh->SetMaterial(0, material);
+
+    m_ground->AddVisualShape(vmesh);
+}
+
+// -----------------------------------------------------------------------------------------------
+// Lane markings
+//
+// One ribbon per marked lane border, laid along the border line and lifted clear of the road.
+// The border a marking belongs to is set by OpenDRIVE: a lane's <roadMark> describes its border
+// away from the reference line, and the center lane (id 0) describes the road center line.
+// -----------------------------------------------------------------------------------------------
+
+void ChOpenDriveTerrain::SetLaneMarkingResolution(double ds) {
+    m_marking_ds = std::max(ds, 0.05);
+}
+
+void ChOpenDriveTerrain::SetDefaultDashPattern(double dash_length, double dash_space) {
+    m_default_dash_length = std::max(dash_length, 0.0);
+    m_default_dash_space = std::max(dash_space, 0.0);
+}
+
+int ChOpenDriveTerrain::AppendMarkingRibbon(const std::vector<ChVector3d>& centers,
+                                            double width,
+                                            double lift,
+                                            double dash_length,
+                                            double dash_space) {
+    if (centers.size() < 2)
+        return 0;
+
+    auto& coords = m_marking_mesh->GetCoordsVertices();
+    auto& indices = m_marking_mesh->GetIndicesVertices();
+
+    const ChVector3d up = ChWorldFrame::Vertical();
+    const double half = 0.5 * width;
+    const double period = dash_length + dash_space;
+    const bool dashed = dash_length > 0 && dash_space > 0;
+
+    double arc = 0;
+    int quads = 0;
+
+    for (size_t i = 0; i + 1 < centers.size(); i++) {
+        const ChVector3d& p0 = centers[i];
+        const ChVector3d& p1 = centers[i + 1];
+
+        ChVector3d seg = p1 - p0;
+        double len = seg.Length();
+        if (len < 1e-9)
+            continue;
+
+        // Keep whole segments: a dash boundary falling mid-segment is rounded to the segment,
+        // which at the marking sampling resolution is a sub-decimetre effect.
+        if (dashed && std::fmod(arc, period) >= dash_length) {
+            arc += len;
+            continue;
+        }
+        arc += len;
+
+        ChVector3d tangent = seg / len;
+        ChVector3d lateral = Vcross(up, tangent);
+        double lat_len = lateral.Length();
+        if (lat_len < 1e-9)
+            continue;  // segment is vertical; nothing sensible to lay a ribbon on
+        lateral /= lat_len;
+
+        ChVector3d offset = lateral * half;
+        ChVector3d rise = up * lift;
+
+        int base = static_cast<int>(coords.size());
+        coords.push_back(p0 - offset + rise);
+        coords.push_back(p0 + offset + rise);
+        coords.push_back(p1 - offset + rise);
+        coords.push_back(p1 + offset + rise);
+
+        indices.push_back(ChVector3i(base + 0, base + 2, base + 1));
+        indices.push_back(ChVector3i(base + 1, base + 2, base + 3));
+        quads++;
+    }
+
+    return quads;
+}
+
+void ChOpenDriveTerrain::CreateLaneMarkings() {
+    if (!m_network || !m_network->IsInitialized()) {
+        std::cerr << "ChOpenDriveTerrain::CreateLaneMarkings(): no road network" << std::endl;
+        return;
+    }
+
+    auto marked = m_network->GetMarkedLanes();
+    if (marked.empty()) {
+        std::cerr << "ChOpenDriveTerrain::CreateLaneMarkings(): the OpenDRIVE file declares no "
+                     "road marks"
+                  << std::endl;
+        return;
+    }
+
+    m_marking_mesh = chrono_types::make_shared<ChTriangleMeshConnected>();
+
+    // Grouped by color so that a single mesh can still carry yellow center lines alongside white
+    // lane lines: one mesh per color would be tidier, but Chrono visual shapes take one material
+    // per mesh and the overwhelming majority of markings are white.
+    ChColor dominant(1.0f, 1.0f, 1.0f);
+    int painted = 0;
+
+    for (const auto& key : marked) {
+        unsigned int road_id = key.first;
+        int lane_id = key.second;
+
+        ChLaneMarkingStyle style = m_network->GetLaneMarkingStyle(road_id, lane_id);
+        if (!style.IsPainted())
+            continue;
+
+        double length = m_network->GetRoadLength(road_id);
+        if (length <= 0)
+            continue;
+
+        double lift = style.height > 0 ? style.height : m_marking_lift;
+        double dash_length = style.dash_length;
+        double dash_space = style.dash_space;
+        if (style.IsBroken() && dash_length <= 0) {
+            dash_length = m_default_dash_length;
+            dash_space = m_default_dash_space;
+        }
+
+        // A double marking is drawn as two ribbons straddling the border, one marking width apart.
+        std::vector<double> lateral_shifts = style.IsDouble()
+                                                 ? std::vector<double>{-style.width, style.width}
+                                                 : std::vector<double>{0.0};
+
+        for (double shift : lateral_shifts) {
+            std::vector<ChVector3d> centers;
+            int num_steps = static_cast<int>(std::ceil(length / m_marking_ds));
+            centers.reserve(num_steps + 1);
+
+            for (int i = 0; i <= num_steps; i++) {
+                double s = std::min(i * m_marking_ds, length);
+                ChCoordsys<> pose;
+
+                if (lane_id == 0) {
+                    // The center lane carries no width; its marking sits on the reference line.
+                    if (!m_network->RoadToWorld(road_id, s, shift, pose))
+                        continue;
+                } else {
+                    double width = m_network->GetLaneWidth(road_id, lane_id, s);
+                    if (width <= 1e-6)
+                        continue;
+
+                    // The border away from the reference line: to the right for negative lane
+                    // ids, to the left for positive ones. Offsets are measured from lane center
+                    // with positive to the left.
+                    double border = (lane_id < 0) ? -0.5 * width : 0.5 * width;
+                    double sign = (lane_id < 0) ? -1.0 : 1.0;
+
+                    if (!m_network->LaneToWorld({road_id, lane_id, s, border + sign * shift}, pose, false))
+                        continue;
+                }
+
+                centers.push_back(pose.pos);
+            }
+
+            if (AppendMarkingRibbon(centers, style.width, lift, dash_length, dash_space) > 0) {
+                painted++;
+                dominant = style.color;
+            }
+        }
+    }
+
+    if (m_marking_mesh->GetCoordsVertices().empty()) {
+        std::cerr << "ChOpenDriveTerrain::CreateLaneMarkings(): no marking geometry generated"
+                  << std::endl;
+        m_marking_mesh = nullptr;
+        return;
+    }
+
+    auto vmesh = chrono_types::make_shared<ChVisualShapeTriangleMesh>();
+    vmesh->SetMesh(m_marking_mesh);
+    vmesh->SetName("opendrive_lane_markings");
+
+    auto material = chrono_types::make_shared<ChVisualMaterial>();
+    material->SetDiffuseColor(dominant);
+    // Road paint is retroreflective, which matters for how it reads under headlights at night.
+    material->SetSpecularColor(ChColor(0.25f, 0.25f, 0.25f));
     vmesh->SetMaterial(0, material);
 
     m_ground->AddVisualShape(vmesh);

@@ -25,10 +25,13 @@
 #ifndef CH_OPENDRIVE_NETWORK_H
 #define CH_OPENDRIVE_NETWORK_H
 
+#include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "chrono/assets/ChColor.h"
 #include "chrono/core/ChBezierCurve.h"
 #include "chrono/core/ChCoordsys.h"
 #include "chrono/core/ChVector3.h"
@@ -110,6 +113,48 @@ struct ChLaneCoord {
     double offset = 0;         ///< lateral offset from the lane center (positive = left)
 };
 
+/// Style of the painted marking along a lane border, from the OpenDRIVE <roadMark> element.
+///
+/// In OpenDRIVE a lane's <roadMark> describes the marking on that lane's border *away* from the
+/// road reference line -- so lane -1's roadMark is the line between lanes -1 and -2 -- while the
+/// center lane (id 0) carries the road's center line.
+///
+/// This is read from the .xodr directly. esmini parses road marks internally but exposes nothing
+/// about them through either of its C APIs, so the file is opened a second time for this.
+struct ChLaneMarkingStyle {
+    enum class Type {
+        NONE,          ///< no marking on this border
+        SOLID,         ///< a single continuous line
+        BROKEN,        ///< a single dashed line
+        SOLID_SOLID,   ///< double continuous
+        SOLID_BROKEN,  ///< continuous on the inner side, dashed on the outer
+        BROKEN_SOLID,  ///< dashed on the inner side, continuous on the outer
+        OTHER          ///< curb, grass, botts dots and anything else not painted as a line
+    };
+
+    Type type = Type::NONE;
+    double width = 0.12;         ///< marking width [m]
+    double height = 0.0;         ///< height above the road surface [m]
+    double dash_length = 0;      ///< painted length of one dash [m]; 0 if the file does not say
+    double dash_space = 0;       ///< gap between dashes [m]; 0 if the file does not say
+    ChColor color = ChColor(1.0f, 1.0f, 1.0f);
+
+    /// True if this border carries a painted line.
+    bool IsPainted() const {
+        return type != Type::NONE && type != Type::OTHER;
+    }
+
+    /// True if the line is interrupted rather than continuous.
+    bool IsBroken() const {
+        return type == Type::BROKEN || type == Type::SOLID_BROKEN || type == Type::BROKEN_SOLID;
+    }
+
+    /// True if the marking is drawn as two parallel lines.
+    bool IsDouble() const {
+        return type == Type::SOLID_SOLID || type == Type::SOLID_BROKEN || type == Type::BROKEN_SOLID;
+    }
+};
+
 /// Road and lane properties at a queried location.
 struct ChLaneInfo {
     bool valid = false;         ///< false if the query location could not be snapped to the network
@@ -185,6 +230,14 @@ class ChApiScenario ChOpenDriveNetwork {
     /// Get the width of the specified lane at the given longitudinal position.
     double GetLaneWidth(unsigned int road_id, int lane_id, double s) const;
 
+    /// Get the marking style on the outer border of the specified lane.
+    /// Pass lane_id 0 for the road's center line. Returns a Type::NONE style if the file declares
+    /// no marking there.
+    ChLaneMarkingStyle GetLaneMarkingStyle(unsigned int road_id, int lane_id) const;
+
+    /// Get every lane that declares a marking, as (road id, lane id) pairs.
+    std::vector<std::pair<unsigned int, int>> GetMarkedLanes() const;
+
     // --- Coordinate conversion ------------------------------------------------------------
 
     /// Convert a lane-relative position to a world pose.
@@ -195,6 +248,11 @@ class ChApiScenario ChOpenDriveNetwork {
 
     /// Convert a lane-relative position to a world pose, reporting whether the lane position exists.
     bool LaneToWorld(const ChLaneCoord& lane_pos, ChCoordsys<>& pose, bool align_to_road = true) const;
+
+    /// Convert a road s/t position to a world pose.
+    /// Unlike the lane forms, this addresses the road reference line directly, so t = 0 is the
+    /// reference line itself -- which is where the center line marking lives.
+    bool RoadToWorld(unsigned int road_id, double s, double t, ChCoordsys<>& pose) const;
 
     /// Convert a world location to the nearest lane-relative position.
     /// `heading` disambiguates travel direction; pass the vehicle yaw. Returns false if the
@@ -252,6 +310,12 @@ class ChApiScenario ChOpenDriveNetwork {
     /// Populate the internal scratch handle from a world location and heading.
     /// Returns false if the location could not be snapped to the network.
     bool SetScratchFromWorld(const ChVector3d& loc, double heading) const;
+
+    /// Read the <roadMark> elements out of the .xodr. esmini gives no access to them.
+    void ParseLaneMarkings(const std::string& xodr_file);
+
+    /// Marking styles keyed by (road id, lane id).
+    std::map<std::pair<unsigned int, int>, ChLaneMarkingStyle> m_markings;
 
     bool m_initialized;    ///< a network is currently loaded
     std::string m_filename;  ///< path of the loaded .xodr file

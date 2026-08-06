@@ -118,3 +118,4 @@ src/demos/python/DEMO_OUTPUT
 
 # rendered frames from demos_live/intersection_drive
 demos_live/intersection_out/
+demos_live/opendrive_out/

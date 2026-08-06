@@ -16,11 +16,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 
 #include "chrono_scenario/ChOpenDriveNetwork.h"
 
 #include "chrono_vehicle/ChWorldFrame.h"
+
+#include "chrono_thirdparty/rapidxml/rapidxml_utils.hpp"
 
 #include "esminiRMLib.hpp"
 
@@ -43,6 +46,51 @@ constexpr int kLookAheadAtLaneCenter = 0;
 
 bool RmFailed(int ret) {
     return ret < 0;
+}
+
+/// Read an XML attribute, or return a default if it is absent.
+const char* Attr(rapidxml::xml_node<>* node, const char* name, const char* fallback = "") {
+    auto* a = node->first_attribute(name);
+    return a ? a->value() : fallback;
+}
+
+double AttrDouble(rapidxml::xml_node<>* node, const char* name, double fallback) {
+    auto* a = node->first_attribute(name);
+    return a ? std::atof(a->value()) : fallback;
+}
+
+ChLaneMarkingStyle::Type ParseMarkingType(const std::string& s) {
+    if (s == "solid")
+        return ChLaneMarkingStyle::Type::SOLID;
+    if (s == "broken")
+        return ChLaneMarkingStyle::Type::BROKEN;
+    if (s == "solid solid")
+        return ChLaneMarkingStyle::Type::SOLID_SOLID;
+    if (s == "solid broken")
+        return ChLaneMarkingStyle::Type::SOLID_BROKEN;
+    if (s == "broken solid")
+        return ChLaneMarkingStyle::Type::BROKEN_SOLID;
+    if (s == "none" || s.empty())
+        return ChLaneMarkingStyle::Type::NONE;
+
+    // curb, grass, botts dots, edge, custom -- present in the standard but not painted lines.
+    return ChLaneMarkingStyle::Type::OTHER;
+}
+
+/// OpenDRIVE marking colors. "standard" means white.
+ChColor ParseMarkingColor(const std::string& s) {
+    if (s == "yellow")
+        return ChColor(0.95f, 0.78f, 0.15f);
+    if (s == "blue")
+        return ChColor(0.20f, 0.40f, 0.90f);
+    if (s == "green")
+        return ChColor(0.20f, 0.70f, 0.35f);
+    if (s == "red")
+        return ChColor(0.85f, 0.15f, 0.15f);
+    if (s == "orange")
+        return ChColor(0.95f, 0.55f, 0.10f);
+
+    return ChColor(1.0f, 1.0f, 1.0f);  // "standard" and "white"
 }
 }  // namespace
 
@@ -99,10 +147,100 @@ bool ChOpenDriveNetwork::Initialize(const std::string& xodr_file) {
     // Elevation queries want the whole paved surface, shoulders and all, not just travel lanes.
     RM_SetSnapLaneTypes(m_scratch_elev, ChLaneType::ANY_ROAD);
 
+    ParseLaneMarkings(xodr_file);
+
     m_filename = xodr_file;
     m_initialized = true;
     m_instance_live = true;
     return true;
+}
+
+// -----------------------------------------------------------------------------------------------
+// Lane markings
+//
+// esmini parses <roadMark> into its road manager but exposes none of it through either C API, so
+// the .xodr is read a second time here. The XML is small next to the road geometry esmini already
+// built from it, so the duplicated parse is not worth avoiding.
+// -----------------------------------------------------------------------------------------------
+
+void ChOpenDriveNetwork::ParseLaneMarkings(const std::string& xodr_file) {
+    m_markings.clear();
+
+    rapidxml::xml_document<> doc;
+    std::unique_ptr<rapidxml::file<>> raw;
+    try {
+        raw = std::make_unique<rapidxml::file<>>(xodr_file.c_str());
+        doc.parse<0>(raw->data());
+    } catch (const std::exception& e) {
+        std::cerr << "ChOpenDriveNetwork: could not read lane markings from " << xodr_file << " ("
+                  << e.what() << "); the network will render without them" << std::endl;
+        return;
+    }
+
+    auto* root = doc.first_node("OpenDRIVE");
+    if (!root)
+        return;
+
+    for (auto* road = root->first_node("road"); road; road = road->next_sibling("road")) {
+        unsigned int road_id = static_cast<unsigned int>(std::atoi(Attr(road, "id", "-1")));
+
+        auto* lanes = road->first_node("lanes");
+        if (!lanes)
+            continue;
+
+        // Only the first lane section is read. A road may redefine its lanes at several s
+        // stations; carrying that through would require the marking geometry to be built per
+        // section as well, which the generator does not do yet.
+        auto* section = lanes->first_node("laneSection");
+        if (!section)
+            continue;
+
+        for (const char* side : {"left", "center", "right"}) {
+            auto* group = section->first_node(side);
+            if (!group)
+                continue;
+
+            for (auto* lane = group->first_node("lane"); lane; lane = lane->next_sibling("lane")) {
+                auto* mark = lane->first_node("roadMark");
+                if (!mark)
+                    continue;
+
+                int lane_id = std::atoi(Attr(lane, "id", "0"));
+
+                ChLaneMarkingStyle style;
+                style.type = ParseMarkingType(Attr(mark, "type", "none"));
+                style.width = AttrDouble(mark, "width", 0.12);
+                style.height = AttrDouble(mark, "height", 0.0);
+                style.color = ParseMarkingColor(Attr(mark, "color", "standard"));
+
+                // A <type><line> child carries the dash pattern for broken marks. Solid marks
+                // report length 0, which is how they are distinguished here.
+                if (auto* mtype = mark->first_node("type")) {
+                    if (auto* line = mtype->first_node("line")) {
+                        style.dash_length = AttrDouble(line, "length", 0.0);
+                        style.dash_space = AttrDouble(line, "space", 0.0);
+                        style.width = AttrDouble(line, "width", style.width);
+                    }
+                }
+
+                m_markings[{road_id, lane_id}] = style;
+            }
+        }
+    }
+}
+
+ChLaneMarkingStyle ChOpenDriveNetwork::GetLaneMarkingStyle(unsigned int road_id, int lane_id) const {
+    auto it = m_markings.find({road_id, lane_id});
+    return it == m_markings.end() ? ChLaneMarkingStyle() : it->second;
+}
+
+std::vector<std::pair<unsigned int, int>> ChOpenDriveNetwork::GetMarkedLanes() const {
+    std::vector<std::pair<unsigned int, int>> out;
+    out.reserve(m_markings.size());
+    for (const auto& kv : m_markings)
+        out.push_back(kv.first);
+
+    return out;
 }
 
 // -----------------------------------------------------------------------------------------------
@@ -202,6 +340,23 @@ ChCoordsys<> ChOpenDriveNetwork::LaneToWorld(const ChLaneCoord& lane_pos, bool a
     }
 
     return pose;
+}
+
+bool ChOpenDriveNetwork::RoadToWorld(unsigned int road_id, double s, double t, ChCoordsys<>& pose) const {
+    pose = CSYSNORM;
+
+    if (!m_initialized)
+        return false;
+
+    if (RmFailed(RM_SetRoadPosition(m_scratch, road_id, s, t, true)))
+        return false;
+
+    RM_PositionData data;
+    if (RmFailed(RM_GetPositionData(m_scratch, &data)))
+        return false;
+
+    pose = ChCoordsys<>(ChWorldFrame::FromISO(ChVector3d(data.x, data.y, data.z)), QuatFromAngleZ(data.h));
+    return true;
 }
 
 bool ChOpenDriveNetwork::SetScratchFromWorld(const ChVector3d& loc, double heading) const {
