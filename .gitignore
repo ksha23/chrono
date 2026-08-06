@@ -115,3 +115,6 @@ src/chrono_granular/DoxyGenDocs/
 ##---------------------------------------------------
 
 src/demos/python/DEMO_OUTPUT
+
+# rendered frames from demos_live/intersection_drive
+demos_live/intersection_out/

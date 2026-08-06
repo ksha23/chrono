@@ -314,6 +314,59 @@ std::vector<ChVector3d> ChOpenDriveNetwork::SampleLaneCenter(unsigned int road_i
     return points;
 }
 
+std::vector<ChVector3d> ChOpenDriveNetwork::SampleRoute(const ChLaneCoord& start,
+                                                        double distance,
+                                                        double junction_choice,
+                                                        double ds) const {
+    std::vector<ChVector3d> points;
+    if (!m_initialized || ds <= 0 || distance <= 0)
+        return points;
+
+    // align=true orients the position along the lane's driving direction, which is what makes
+    // "forward" well defined for lanes on either side of the reference line.
+    if (RmFailed(RM_SetLanePosition(m_scratch, start.road_id, start.lane_id, start.offset, start.s, true))) {
+        std::cerr << "ChOpenDriveNetwork::SampleRoute(): no such start position (road "
+                  << start.road_id << ", lane " << start.lane_id << ", s " << start.s << ")"
+                  << std::endl;
+        return points;
+    }
+
+    RM_PositionData data;
+    if (!RmFailed(RM_GetPositionData(m_scratch, &data)))
+        points.push_back(ChWorldFrame::FromISO(ChVector3d(data.x, data.y, data.z)));
+
+    int num_steps = static_cast<int>(std::ceil(distance / ds));
+    points.reserve(num_steps + 1);
+
+    for (int i = 0; i < num_steps; i++) {
+        // Stops reporting success once the route leaves the network, which is the natural end
+        // of the route rather than an error.
+        if (RmFailed(RM_PositionMoveForward(m_scratch, ds, junction_choice)))
+            break;
+        if (RmFailed(RM_GetPositionData(m_scratch, &data)))
+            break;
+
+        points.push_back(ChWorldFrame::FromISO(ChVector3d(data.x, data.y, data.z)));
+    }
+
+    return points;
+}
+
+std::shared_ptr<ChBezierCurve> ChOpenDriveNetwork::CreateRoutePath(const ChLaneCoord& start,
+                                                                   double distance,
+                                                                   double junction_choice,
+                                                                   double ds) const {
+    auto points = SampleRoute(start, distance, junction_choice, ds);
+
+    if (points.size() < 2) {
+        std::cerr << "ChOpenDriveNetwork::CreateRoutePath(): could not sample a route from road "
+                  << start.road_id << " lane " << start.lane_id << std::endl;
+        return nullptr;
+    }
+
+    return std::make_shared<ChBezierCurve>(points);
+}
+
 std::shared_ptr<ChBezierCurve> ChOpenDriveNetwork::CreateLaneCenterPath(unsigned int road_id,
                                                                        int lane_id,
                                                                        double ds) const {

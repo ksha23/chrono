@@ -32,6 +32,7 @@
 #include "chrono/core/ChBezierCurve.h"
 #include "chrono/core/ChCoordsys.h"
 #include "chrono/core/ChVector3.h"
+#include "chrono/utils/ChConstants.h"
 
 #include "chrono_scenario/ChApiScenario.h"
 
@@ -79,6 +80,25 @@ enum : int {
     ANY = -1
 };
 }  // namespace ChLaneType
+
+/// Branch selection when a route reaches a junction.
+///
+/// These are esmini's junctionSelectorAngle values: an angle measured counter-clockwise from the
+/// direction of travel, with the nearest available branch chosen.
+///
+/// \warning esminiRMLib.hpp documents this as "pi/2=right pi=straight 3pi/2=left", which is wrong
+/// on all three. Measured on fabriksgatan.xodr by taking each branch out of road 0 lane +1 and
+/// computing the net heading change over the route: angle 0 turns -1.5 deg (straight, into road 2,
+/// which the scenario route catalog independently names HostStraightRoute), pi/2 turns +86.4 deg
+/// (left, road 3), and 3pi/2 turns -90.9 deg (right, road 1). An angle of pi is a U-turn and
+/// falls through to whichever branch is nearest.
+namespace ChJunctionChoice {
+constexpr double STRAIGHT = 0.0;          ///< continue ahead
+constexpr double LEFT = CH_PI_2;          ///< quarter turn left
+constexpr double RIGHT = 3 * CH_PI_2;     ///< quarter turn right
+constexpr double U_TURN = CH_PI;          ///< reverse direction, if the junction offers it
+constexpr double RANDOM = -1.0;           ///< let esmini pick
+}  // namespace ChJunctionChoice
 
 /// Lane-relative position in an OpenDRIVE network.
 /// This is the coordinate system scenarios are naturally written in: "lane -1 of road 3, 40 m
@@ -206,6 +226,23 @@ class ChApiScenario ChOpenDriveNetwork {
 
     /// Sample points along the center line of the specified lane.
     std::vector<ChVector3d> SampleLaneCenter(unsigned int road_id, int lane_id, double ds = 1.0) const;
+
+    /// Sample a route running forward through the network from a starting lane position,
+    /// following the lane graph across junctions rather than stopping at the end of a road.
+    ///
+    /// `junction_choice` picks the branch at each junction; see ChJunctionChoice. Sampling stops
+    /// early if the route runs off the network. Unlike SampleLaneCenter, this crosses roads, so
+    /// it is what a vehicle driving through an intersection needs.
+    std::vector<ChVector3d> SampleRoute(const ChLaneCoord& start,
+                                        double distance,
+                                        double junction_choice = ChJunctionChoice::STRAIGHT,
+                                        double ds = 1.0) const;
+
+    /// Extract a route through the network as a Bezier curve, ready for ChPathFollowerDriver.
+    std::shared_ptr<ChBezierCurve> CreateRoutePath(const ChLaneCoord& start,
+                                                   double distance,
+                                                   double junction_choice = ChJunctionChoice::STRAIGHT,
+                                                   double ds = 1.0) const;
 
     /// Restrict which lane types world-to-lane snapping will consider.
     /// The mask follows esmini's roadmanager::Lane::LaneType. Defaults to any drivable lane.
