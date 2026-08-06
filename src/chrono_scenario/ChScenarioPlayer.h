@@ -26,6 +26,8 @@
 #include "chrono/core/ChCoordsys.h"
 #include "chrono/core/ChVector3.h"
 
+#include "chrono_vehicle/wheeled_vehicle/ChWheeledVehicle.h"
+
 #include "chrono_scenario/ChApiScenario.h"
 
 namespace chrono {
@@ -33,6 +35,40 @@ namespace scenario {
 
 /// @addtogroup scenario_module
 /// @{
+
+// -------------------------------------------------------------------------------------------
+// Reference point conversion
+//
+// OpenSCENARIO and Chrono do not place a vehicle by the same point, and the difference is large
+// enough to matter for any distance-based metric or trigger.
+//
+// An OpenSCENARIO vehicle's coordinate system originates at the center of the rear axle. This is
+// explicit in the standard vehicle catalogs, where the rear axle is declared at positionX="0"
+// and the bounding box center sits forward of it -- for esmini's car_white, RearAxle positionX=0,
+// FrontAxle positionX=2.98, BoundingBox Center x=1.4.
+//
+// Chrono places a vehicle by its chassis reference frame, and its chassis body is a ChBodyAuxRef
+// whose GetPos() reports the center of mass, a third distinct point. For the Audi the three sit
+// at, relative to the chassis reference frame: COM (0, 0, +0.550), rear axle center
+// (-1.480, 0, +0.130).
+//
+// Reporting the wrong one shifts every gap, time-headway and minimum-distance figure by up to a
+// wheelbase. The helpers below convert properly.
+// -------------------------------------------------------------------------------------------
+
+/// Get the offset, in chassis reference frame coordinates, from a wheeled vehicle's chassis
+/// reference frame to its OpenSCENARIO reference point (the rear axle center).
+///
+/// Purely geometric, so it can be measured once on a throwaway instance and reused to place a
+/// vehicle such that its *reference point* lands where a scenario says, rather than its chassis.
+ChApiScenario ChVector3d GetScenarioRefPointOffset(const vehicle::ChWheeledVehicle& vehicle);
+
+/// Get the world pose of a wheeled vehicle's OpenSCENARIO reference point.
+///
+/// This is the pose to hand to ChScenarioPlayer::ReportEgoState. It tracks suspension motion,
+/// since it is derived from the live rear spindle positions; that movement is centimetre-scale
+/// and is the genuine axle location rather than a rigid approximation of it.
+ChApiScenario ChCoordsys<> GetScenarioRefPose(const vehicle::ChWheeledVehicle& vehicle);
 
 /// State of one scenario actor, as reported by the scenario engine.
 struct ChScenarioActor {
@@ -114,7 +150,14 @@ class ChApiScenario ChScenarioPlayer {
     /// Report the Chrono-computed ego state to the scenario engine.
     /// Call once per control step, before Advance, so that scenario triggers relative to the ego
     /// (time-to-collision, relative distance) evaluate against the true dynamics.
+    ///
+    /// `pose` must be the ego's OpenSCENARIO reference point, not its chassis frame. For a
+    /// Chrono wheeled vehicle, prefer the overload below, which converts for you.
     bool ReportEgoState(const ChCoordsys<>& pose, double speed);
+
+    /// Report the state of a Chrono wheeled vehicle as the ego.
+    /// Converts the vehicle to its OpenSCENARIO reference point and reports its speed.
+    bool ReportEgoState(const vehicle::ChWheeledVehicle& vehicle);
 
     /// Advance the scenario by the given step.
     void Advance(double step);

@@ -146,13 +146,25 @@ int main(int argc, char** argv) {
 
     // Spawn the Audi where and how fast the scenario says the ego starts.
     //
-    // Caveat: OpenSCENARIO places a vehicle by its reference point (conventionally the rear axle
-    // center) while Chrono initializes by the chassis reference frame. Those differ by roughly a
-    // wheelbase-dependent offset, so trigger distances are off by that much. Reconciling the two
-    // is exactly the "sensor-convention contract" problem and is not done here.
+    // The scenario places the ego by its OpenSCENARIO reference point (rear axle center), so the
+    // chassis reference frame has to be offset backwards out of it. The offset is purely
+    // geometric, so measure it on a throwaway vehicle in a scratch system -- cheap, and it avoids
+    // the chicken-and-egg of needing the offset before the real vehicle exists.
+    std::string audi_json = GetVehicleDataFile("audi/json/audi_Vehicle.json");
+    ChVector3d ref_offset;
+    {
+        ChSystemNSC probe_sys;
+        WheeledVehicle probe(&probe_sys, audi_json);
+        probe.Initialize(ChCoordsys<>(VNULL, QUNIT));  // powertrain and tires are not needed
+        ref_offset = GetScenarioRefPointOffset(probe);
+    }
+
     ChScenarioActor ego0 = player.GetObject(player.GetEgoId());
+
+    // Place the chassis so that the rear axle center lands on the scenario's reference point.
     ChCoordsys<> spawn = ego0.pose;
-    spawn.pos.z() += 0.65;
+    spawn.pos -= spawn.rot.Rotate(ref_offset);
+    spawn.pos.z() = ego0.pose.pos.z() + 0.65;  // start above the road; settles to ride height
 
     // An externally-controlled ego reports back 0 until we tell it otherwise (see the note at the
     // top), so fall back to the requested speed in that case.
@@ -161,11 +173,13 @@ int main(int argc, char** argv) {
     if (!speed_from_scenario)
         initial_speed = requested_speed;
 
-    printf("Ego starts at road %u lane %d s=%.1f m, %.1f m/s (%s)\n\n", ego0.road_id, ego0.lane_id,
+    printf("Ego starts at road %u lane %d s=%.1f m, %.1f m/s (%s)\n", ego0.road_id, ego0.lane_id,
            ego0.s, initial_speed,
            speed_from_scenario ? "from the scenario" : "supplied here; ego is externally controlled");
+    printf("  OpenSCENARIO ref point is %+.3f m from the chassis frame; spawn offset applied\n\n",
+           ref_offset.x());
 
-    WheeledVehicle audi(&sys, GetVehicleDataFile("audi/json/audi_Vehicle.json"));
+    WheeledVehicle audi(&sys, audi_json);
     audi.Initialize(spawn, initial_speed);
     audi.SetChassisVisualizationType(VisualizationType::MESH);
     audi.SetSuspensionVisualizationType(VisualizationType::PRIMITIVES);
@@ -182,6 +196,18 @@ int main(int argc, char** argv) {
                 tire->SetStepsize(1e-3);
                 audi.InitializeTire(tire, wheel, VisualizationType::MESH);
             }
+    }
+
+    // One-time check that the reference point conversion put the ego where the scenario asked.
+    // Reporting the chassis frame instead would place it a wheelbase-dependent distance further
+    // along the road, and every trigger distance would inherit that error.
+    {
+        ChCoordsys<> ref = GetScenarioRefPose(audi);
+        double yaw0 = ref.rot.GetCardanAnglesZYX().z();
+        ChLaneInfo at_ref = network->GetLaneInfo(ref.pos, yaw0);
+        ChLaneInfo at_chassis = network->GetLaneInfo(audi.GetPos(), yaw0);
+        printf("  ego s: scenario asked %.2f | ref point %.2f | chassis frame %.2f (error %+.2f m)\n\n",
+               ego0.s, at_ref.s, at_chassis.s, at_chassis.s - ego0.s);
     }
 
     // Hold the ego's starting lane at its starting speed. The scenario does the rest.
@@ -233,12 +259,12 @@ int main(int argc, char** argv) {
     auto t_start = std::chrono::steady_clock::now();
 
     while (vis->WindowOpen() && !player.IsComplete() && time < max_time) {
-        const auto& chassis = audi.GetChassisBody();
-        ChCoordsys<> ego_pose(chassis->GetPos(), chassis->GetRot());
         double ego_speed = audi.GetSpeed();
+        ChCoordsys<> ego_ref = GetScenarioRefPose(audi);
 
-        // Hand Chrono's ego state to the scenario, then let the story advance against it.
-        player.ReportEgoState(ego_pose, ego_speed);
+        // Hand Chrono's ego state to the scenario, then let the story advance against it. The
+        // overload reports the OpenSCENARIO reference point rather than the chassis frame.
+        player.ReportEgoState(audi);
         player.Advance(step);
 
         // Pull the ambient traffic back into Chrono.
@@ -264,8 +290,8 @@ int main(int argc, char** argv) {
 
         // Report lane-referenced state for the ego and each actor, plus the gap the scenario's
         // cut-in trigger is watching.
-        double yaw = chassis->GetRot().GetCardanAnglesZYX().z();
-        ChLaneInfo ego_info = network->GetLaneInfo(chassis->GetPos(), yaw);
+        double yaw = ego_ref.rot.GetCardanAnglesZYX().z();
+        ChLaneInfo ego_info = network->GetLaneInfo(ego_ref.pos, yaw);
 
         if (ego_info.valid && ego_info.lane_id != last_ego_lane) {
             printf("t=%5.2f s  *** ego changed lane %+d -> %+d ***\n", time, last_ego_lane,
@@ -277,10 +303,17 @@ int main(int argc, char** argv) {
             printf("t=%5.1f s  ego: lane %+d s=%7.1f v=%5.1f m/s", time, ego_info.lane_id, ego_info.s,
                    ego_speed);
             for (const auto& actor : player.GetActors()) {
-                double gap = (actor.pose.pos - chassis->GetPos()).Length();
+                // Measure the gap the way the scenario's TimeHeadwayCondition does: along the
+                // road between reference points, signed positive when the actor is ahead. A 3D
+                // straight-line distance would fold in lateral and vertical separation, which
+                // that condition does not consider.
+                bool same_road = ego_info.valid && actor.road_id == ego_info.road_id;
+                double gap = same_road ? actor.s - ego_info.s
+                                       : (actor.pose.pos - ego_ref.pos).Length();
                 double headway = ego_speed > 0.1 ? gap / ego_speed : 0.0;
-                printf(" | %s: lane %+d s=%7.1f v=%5.1f gap=%5.1f m thw=%4.2f s", actor.name.c_str(),
-                       actor.lane_id, actor.s, actor.speed, gap, headway);
+                printf(" | %s: lane %+d s=%7.1f v=%5.1f gap=%+6.1f m thw=%+5.2f s%s",
+                       actor.name.c_str(), actor.lane_id, actor.s, actor.speed, gap, headway,
+                       same_road ? "" : " (3D)");
             }
             printf("\n");
             next_report += 0.5;

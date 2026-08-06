@@ -83,6 +83,30 @@ ChScenarioActor StateToActor(const SE_ScenarioObjectState& state) {
 }
 }  // namespace
 
+// -----------------------------------------------------------------------------------------------
+// Reference point conversion
+// -----------------------------------------------------------------------------------------------
+
+namespace {
+/// World position of the center of a wheeled vehicle's rearmost axle.
+ChVector3d RearAxleCenter(const vehicle::ChWheeledVehicle& vehicle) {
+    int rear = static_cast<int>(vehicle.GetAxles().size()) - 1;
+    return 0.5 * (vehicle.GetSpindlePos(rear, vehicle::VehicleSide::LEFT) +
+                  vehicle.GetSpindlePos(rear, vehicle::VehicleSide::RIGHT));
+}
+}  // namespace
+
+ChVector3d GetScenarioRefPointOffset(const vehicle::ChWheeledVehicle& vehicle) {
+    // Express the rear axle center in the chassis reference frame. Note this uses the chassis
+    // *reference frame* (ChVehicle::GetPos/GetRot), not the chassis body's center of mass.
+    ChCoordsys<> chassis(vehicle.GetPos(), vehicle.GetRot());
+    return chassis.TransformPointParentToLocal(RearAxleCenter(vehicle));
+}
+
+ChCoordsys<> GetScenarioRefPose(const vehicle::ChWheeledVehicle& vehicle) {
+    return ChCoordsys<>(RearAxleCenter(vehicle), vehicle.GetRot());
+}
+
 bool ChScenarioPlayer::m_instance_live = false;
 
 ChScenarioPlayer::ChScenarioPlayer()
@@ -171,6 +195,10 @@ bool ChScenarioPlayer::ReportEgoState(const ChCoordsys<>& pose, double speed) {
     // Reported separately: the scenario's own triggers and controllers reason about speed, and
     // esmini does not differentiate it from the reported positions.
     return SE_ReportObjectSpeed(m_ego_id, speed) == kSeOk;
+}
+
+bool ChScenarioPlayer::ReportEgoState(const vehicle::ChWheeledVehicle& vehicle) {
+    return ReportEgoState(GetScenarioRefPose(vehicle), vehicle.GetSpeed());
 }
 
 void ChScenarioPlayer::Advance(double step) {

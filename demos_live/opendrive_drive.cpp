@@ -259,9 +259,11 @@ int main(int argc, char** argv) {
         // Lane-referenced telemetry: where the vehicle is in terms the road defines, which is
         // what a scenario metric or a lane-referenced label would be written against.
         if (time >= next_report) {
-            const auto& chassis = audi.GetChassisBody();
-            double yaw = chassis->GetRot().GetCardanAnglesZYX().z();
-            ChLaneInfo info = network->GetLaneInfo(chassis->GetPos(), yaw);
+            // The chassis reference frame, not GetChassisBody()->GetPos(), which is the center of
+            // mass. They differ only vertically for this vehicle, but the reference frame is the
+            // frame Chrono placed and the one worth being consistent about.
+            double yaw = audi.GetRot().GetCardanAnglesZYX().z();
+            ChLaneInfo info = network->GetLaneInfo(audi.GetPos(), yaw);
 
             if (info.valid) {
                 printf("t=%5.1f s  lane %+d  s=%6.1f m  offset=%+5.2f m  width=%.2f m  "
