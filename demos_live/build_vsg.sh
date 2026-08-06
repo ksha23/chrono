@@ -13,7 +13,10 @@ cd "$ROOT"
 VSGIMGUI="${VSGIMGUI_ROOT:-$HOME/opt/vsgImGui}"
 INC="-I src -I build -isystem $CONDA_PREFIX/include/eigen3 -isystem $CONDA_PREFIX/include -isystem $VSGIMGUI/include -I src/chrono/collision/bullet -I src/chrono_thirdparty/HACDv2 -I src/chrono_thirdparty/yaml-cpp/include"
 LIBS="-L build/lib -lChrono_core -lChrono_vehicle -lChronoModels_vehicle -lChrono_vsg -lChrono_vehicle_vsg -lChrono_scenario -Wl,-rpath,build/lib"
-echo "building scenario_vsg"
-c++ -std=c++17 -O2 "$DIR/scenario_vsg.cpp" $INC $LIBS -o "$DIR/scenario_vsg"
+for demo in scenario_vsg intersection_vsg; do
+  echo "building $demo"
+  c++ -std=c++17 -O2 "$DIR/$demo.cpp" $INC $LIBS -o "$DIR/$demo"
+done
 echo "done.  run:  ./demos_live/scenario_vsg [scenario.xosc] [max_seconds] [ego_speed_mps]"
-echo "        KEEP_OPEN=1 ./demos_live/scenario_vsg   # run until the window is closed"
+echo "        ./demos_live/intersection_vsg [max_seconds] [ego_speed_mps]"
+echo "        KEEP_OPEN=1 ...                        # run until the window is closed"
