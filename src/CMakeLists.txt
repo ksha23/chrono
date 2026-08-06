@@ -708,6 +708,7 @@ add_subdirectory(chrono_models)
 add_subdirectory(chrono_sensor)
 add_subdirectory(chrono_synchrono)
 add_subdirectory(chrono_ros)
+add_subdirectory(chrono_scenario)
 add_subdirectory(chrono_swig)
 add_subdirectory(chrono_precice)
 

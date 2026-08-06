@@ -1,0 +1,131 @@
+// =============================================================================
+// PROJECT CHRONO - http://projectchrono.org
+//
+// Copyright (c) 2026 projectchrono.org
+// All rights reserved.
+//
+// Use of this source code is governed by a BSD-style license that can be found
+// in the LICENSE file at the top level of the distribution and at
+// http://projectchrono.org/license-chrono.txt.
+//
+// =============================================================================
+//
+// Terrain defined by the road surface of an ASAM OpenDRIVE network.
+//
+// This mirrors the architecture of CRGTerrain: analytic queries answer tire
+// contact, while a separately generated triangle mesh carries visualization and
+// sensor rendering. Like CRGTerrain, it is meant for tire models that perform
+// their own collision detection (ChTMeasy, ChPac89, ChPac02, ChFiala).
+//
+// Note on fidelity: OpenDRIVE describes road *geometry*, not road *surface*. It
+// carries elevation, superelevation and crossfall, but no roughness. For measured
+// surface detail use CRGTerrain, or an OpenDRIVE network whose roads reference
+// OpenCRG surfaces (ASAM OpenDRIVE section 10.6) -- that pairing is not yet
+// implemented here.
+//
+// =============================================================================
+
+#ifndef CH_OPENDRIVE_TERRAIN_H
+#define CH_OPENDRIVE_TERRAIN_H
+
+#include <memory>
+#include <string>
+
+#include "chrono/assets/ChVisualShapeTriangleMesh.h"
+#include "chrono/geometry/ChTriangleMeshConnected.h"
+#include "chrono/physics/ChBody.h"
+#include "chrono/physics/ChSystem.h"
+
+#include "chrono_vehicle/ChTerrain.h"
+
+#include "chrono_scenario/ChApiScenario.h"
+#include "chrono_scenario/ChOpenDriveNetwork.h"
+
+namespace chrono {
+namespace scenario {
+
+/// @addtogroup scenario_module
+/// @{
+
+/// Rigid terrain whose surface is the road surface of an OpenDRIVE network.
+///
+/// Height, normal and friction queries are answered analytically from the road manager, so the
+/// surface the tires feel is the road geometry itself rather than a tessellation of it. A
+/// visualization mesh is generated separately and is free to be coarser.
+class ChApiScenario ChOpenDriveTerrain : public vehicle::ChTerrain {
+  public:
+    /// Construct an OpenDRIVE terrain in the specified system, over the given network.
+    /// The network must outlive this terrain and must already be initialized.
+    ChOpenDriveTerrain(ChSystem* system, std::shared_ptr<ChOpenDriveNetwork> network);
+
+    ~ChOpenDriveTerrain() {}
+
+    /// Set the coefficient of friction of the road surface (default: 0.8).
+    /// OpenDRIVE can specify per-lane friction, but esmini's road manager does not currently
+    /// expose it, so this is a single constant unless a FrictionFunctor is installed.
+    void SetContactFrictionCoefficient(float friction_coefficient) { m_friction = friction_coefficient; }
+
+    /// Set the elevation returned for locations off the road network (default: 0).
+    /// Queries outside the network cannot be answered from OpenDRIVE geometry.
+    void SetOffNetworkHeight(double height) { m_off_network_height = height; }
+
+    /// Set the longitudinal and lateral resolution of the generated visualization mesh.
+    /// Defaults: 1 m along the road, 4 samples across each lane.
+    void SetMeshResolution(double ds, int lateral_divisions);
+
+    /// Set a texture applied to the generated road mesh.
+    void SetRoadDiffuseTextureFile(const std::string& tex_file, float scale_u = 1, float scale_v = 1);
+
+    /// Generate the visualization mesh for the road network and attach it to the ground body.
+    /// Optional: skip this for headless runs that need only the contact surface.
+    void CreateVisualizationMesh();
+
+    /// Get the generated road mesh (null until CreateVisualizationMesh is called).
+    std::shared_ptr<ChTriangleMeshConnected> GetMesh() const { return m_mesh; }
+
+    /// Get the ground body carrying the visualization assets.
+    std::shared_ptr<ChBody> GetGround() const { return m_ground; }
+
+    /// Get the underlying road network.
+    std::shared_ptr<ChOpenDriveNetwork> GetNetwork() const { return m_network; }
+
+    /// Export the road mesh to a Wavefront .obj file.
+    void ExportMeshWavefront(const std::string& out_dir);
+
+    // --- ChTerrain interface ---------------------------------------------------------------
+
+    /// Get the road surface elevation below the specified location.
+    virtual double GetHeight(const ChVector3d& loc) const override;
+
+    /// Get the road surface point below the specified location.
+    virtual ChVector3d GetPoint(const ChVector3d& loc) const override;
+
+    /// Get the road surface normal at the point below the specified location.
+    virtual ChVector3d GetNormal(const ChVector3d& loc) const override;
+
+    /// Get the coefficient of friction at the point below the specified location.
+    /// Defers to the user-provided ChTerrain::FrictionFunctor if one was set.
+    virtual float GetCoefficientFriction(const ChVector3d& loc) const override;
+
+  private:
+    std::shared_ptr<ChOpenDriveNetwork> m_network;  ///< road network backing all queries
+    std::shared_ptr<ChBody> m_ground;               ///< ground body carrying visualization assets
+    std::shared_ptr<ChTriangleMeshConnected> m_mesh;  ///< generated visualization mesh
+
+    float m_friction;            ///< constant contact coefficient of friction
+    double m_off_network_height;  ///< elevation reported off the network
+
+    double m_mesh_ds;           ///< longitudinal mesh resolution
+    int m_mesh_lateral_divs;    ///< lateral mesh samples per lane
+
+    std::string m_texture_file;  ///< optional road texture
+    float m_texture_scale_u;
+    float m_texture_scale_v;
+};
+
+/// @} scenario_module
+
+}  // end namespace scenario
+}  // end namespace chrono
+
+#endif
