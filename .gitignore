@@ -121,3 +121,6 @@ demos_live/intersection_out/
 demos_live/opendrive_out/
 demos_live/scenario_out/
 demos_live/vsg_out/
+
+# converted from esmini; regenerate with demos_live/convert_esmini_models.sh
+data/vehicle/pedestrian/

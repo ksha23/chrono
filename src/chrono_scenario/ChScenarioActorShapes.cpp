@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <iostream>
 #include <map>
 #include <vector>
@@ -163,6 +164,37 @@ const VehicleVisualTemplate& CachedVehicleTemplate(const std::string& vehicle_js
     return it->second;
 }
 
+/// Attach a mesh if it exists, and report whether it did.
+///
+/// Used for the pedestrian and cyclist models, which are converted from esmini rather than
+/// shipped, so they may legitimately be absent. Absence falls back to primitives rather than
+/// failing: a placeholder figure beats nothing.
+bool TryAddMesh(std::shared_ptr<ChBody> body,
+                const std::string& mesh_file,
+                const ChVector3d& pos,
+                double scale,
+                const ChColor& color) {
+    std::ifstream probe(mesh_file);
+    if (!probe.good()) {
+        std::cerr << "ChScenarioActorShapes: no mesh at " << mesh_file
+                  << "; falling back to primitives (run demos_live/convert_esmini_models.sh)"
+                  << std::endl;
+        return false;
+    }
+
+    auto shape = chrono_types::make_shared<ChVisualShapeModelFile>();
+    shape->SetFilename(mesh_file);
+    shape->SetScale(scale);
+    shape->SetColor(color);
+    body->AddVisualShape(shape, ChFrame<double>(pos, QUNIT));
+    return true;
+}
+
+/// Height of esmini's walkman and cyclist meshes, measured after conversion. Used to scale them
+/// to whatever height the scenario declares for an actor.
+constexpr double kWalkmanHeight = 1.78;
+constexpr double kCyclistHeight = 1.58;
+
 /// Attach a two-wheeler built from primitives.
 ///
 /// Chrono ships no bicycle or motorbike model, and the category mapping would otherwise hand a
@@ -170,6 +202,13 @@ const VehicleVisualTemplate& CachedVehicleTemplate(const std::string& vehicle_js
 /// Two wheels, a frame and a rider at least give the right silhouette and footprint, which is
 /// what matters for a vulnerable-road-user scenario.
 void AddTwoWheeler(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, const ChColor& color) {
+    // esmini's cyclist model is authored against the OpenSCENARIO reference point -- its release
+    // notes record it as the rear axle projected on the ground -- so it needs no extra offset.
+    double target_h = actor.height > 0 ? actor.height : kCyclistHeight;
+    if (TryAddMesh(body, vehicle::GetVehicleDataFile("pedestrian/cyclist.obj"), VNULL,
+                   target_h / kCyclistHeight, ChColor(0.85f, 0.85f, 0.88f)))
+        return;
+
     double l = actor.length > 0 ? actor.length : 1.8;
     double w = actor.width > 0 ? actor.width : 0.5;
     double h = actor.height > 0 ? actor.height : 1.7;
@@ -260,6 +299,11 @@ bool AddVehicle(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, cons
 /// build cannot read. Primitives at least give a perception model a upright, limbed silhouette
 /// with a head rather than a rectangular slab.
 void AddPedestrian(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, const ChColor& color) {
+    double target_h = actor.height > 0 ? actor.height : kWalkmanHeight;
+    if (TryAddMesh(body, vehicle::GetVehicleDataFile("pedestrian/walkman.obj"), VNULL,
+                   target_h / kWalkmanHeight, ChColor(0.85f, 0.85f, 0.88f)))
+        return;
+
     double h = actor.height > 0 ? actor.height : 1.8;
     double w = actor.width > 0 ? actor.width : 0.5;
 
