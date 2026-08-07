@@ -43,6 +43,21 @@ constexpr double kSedanMeshHeight = 1.47;
 /// Radius of Chrono's sedan tire mesh, likewise measured from the .obj.
 constexpr double kSedanTireRadius = 0.34;
 
+/// The sedan's real axle geometry, from data/vehicle/sedan: suspension locations at x = +/-1.388
+/// and a spindle 0.798 out laterally. Using the actual numbers rather than fractions of the
+/// bounding box is what puts the wheels in the mesh's own wheel arches instead of inside the body.
+constexpr double kSedanHalfWheelbase = 1.388;
+constexpr double kSedanHalfTrack = 0.798;
+
+/// Height of the chassis reference frame above the ground.
+///
+/// The mesh's coordinates are chassis-reference-frame coordinates, and the spindle sits 0.13
+/// above that frame (suspension location z 0.25, spindle COM z -0.1199). With the wheel centre a
+/// tire radius off the ground, the frame itself is that much lower. Placing the mesh origin at
+/// ground level instead -- which is where the OpenSCENARIO reference point is -- drops the body
+/// onto the wheels and hides them.
+constexpr double kSedanRefHeight = kSedanTireRadius - 0.13;
+
 std::shared_ptr<ChVisualMaterial> MakeMaterial(const ChColor& color) {
     auto mat = chrono_types::make_shared<ChVisualMaterial>();
     mat->SetDiffuseColor(color);
@@ -72,9 +87,11 @@ void AddVehicle(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, cons
 
     ChVector3d scale(l / kSedanMeshLength, w / kSedanMeshWidth, h / kSedanMeshHeight);
 
-    // The mesh is centered longitudinally and sits on the ground, so it is placed at the box
-    // center in x and y but at ground level in z -- not at the box center height.
-    ChVector3d chassis_pos(actor.center_offset.x(), actor.center_offset.y(), 0);
+    // Positioned at the bounding box center laterally and longitudinally, and at the chassis
+    // reference height vertically -- not at ground, which would bury the wheels, and not at the
+    // box center height, which would float the car.
+    ChVector3d chassis_pos(actor.center_offset.x(), actor.center_offset.y(),
+                           kSedanRefHeight * scale.z());
 
     auto chassis = chrono_types::make_shared<ChVisualShapeModelFile>();
     chassis->SetFilename(chassis_mesh);
@@ -89,27 +106,23 @@ void AddVehicle(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, cons
                                  ? vehicle::GetVehicleDataFile("sedan/sedan_tire.obj")
                                  : style.car_wheel_mesh;
 
-    // The scenario reports a bounding box but no axle positions -- esmini does not expose the
-    // catalog's FrontAxle/RearAxle entries -- so the wheelbase and track are proportions of the
-    // box. They are close enough that the vehicle reads as wheeled, which is the point.
-    double wheelbase = 0.58 * l;
-    double half_track = 0.5 * (w - 0.22 * w);
-    double radius = std::min(kSedanTireRadius * (h / kSedanMeshHeight), 0.45 * h);
-    double wheel_scale = radius / kSedanTireRadius;
+    // The sedan's own axle geometry, carried along by the same scale as the body, so the wheels
+    // land where the mesh's arches are. esmini does not expose the scenario catalog's axle
+    // entries, so scaling Chrono's is the closest available match.
+    double half_wheelbase = kSedanHalfWheelbase * scale.x();
+    double half_track = kSedanHalfTrack * scale.y();
+    double radius = kSedanTireRadius * scale.z();
+    double wheel_scale = std::min({scale.x(), scale.y(), scale.z()});
 
-    // Wheel longitudinal positions straddle the box center; the reference point is the rear axle,
-    // so the rear pair lands near it and the front pair a wheelbase ahead.
-    double x_rear = actor.center_offset.x() - 0.5 * wheelbase;
-    double x_front = actor.center_offset.x() + 0.5 * wheelbase;
-
-    for (double x : {x_rear, x_front}) {
-        for (double side : {-1.0, 1.0}) {
+    for (double side_x : {-1.0, 1.0}) {
+        for (double side_y : {-1.0, 1.0}) {
             auto wheel = chrono_types::make_shared<ChVisualShapeModelFile>();
             wheel->SetFilename(wheel_mesh);
             wheel->SetScale(ChVector3d(wheel_scale, wheel_scale, wheel_scale));
-            wheel->SetColor(ChColor(0.06f, 0.06f, 0.07f));
+            wheel->SetColor(ChColor(0.05f, 0.05f, 0.06f));
             body->AddVisualShape(
-                wheel, ChFrame<double>(ChVector3d(x, side * half_track + actor.center_offset.y(), radius),
+                wheel, ChFrame<double>(ChVector3d(actor.center_offset.x() + side_x * half_wheelbase,
+                                                  actor.center_offset.y() + side_y * half_track, radius),
                                        QUNIT));
         }
     }
