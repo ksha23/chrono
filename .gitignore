@@ -120,3 +120,4 @@ src/demos/python/DEMO_OUTPUT
 demos_live/intersection_out/
 demos_live/opendrive_out/
 demos_live/scenario_out/
+demos_live/vsg_out/

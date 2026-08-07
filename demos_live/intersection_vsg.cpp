@@ -43,6 +43,7 @@
 
 #include "chrono_scenario/ChOpenDriveNetwork.h"
 #include "chrono_scenario/ChOpenDriveTerrain.h"
+#include "chrono_scenario/ChScenarioActorShapes.h"
 #include "chrono_scenario/ChScenarioPlayer.h"
 
 using namespace chrono;
@@ -61,26 +62,6 @@ constexpr double kEgoStartS = 63.0;
 // still open; road 2 continues well past the junction.
 constexpr double kRouteLength = 280.0;
 
-std::shared_ptr<ChBody> MakeActorProxy(ChSystem& sys, const ChScenarioActor& actor) {
-    auto body = chrono_types::make_shared<ChBody>();
-    body->SetName(actor.name.c_str());
-    body->SetFixed(true);
-    body->EnableCollision(false);
-
-    double l = actor.length > 0 ? actor.length : 4.5;
-    double w = actor.width > 0 ? actor.width : 1.8;
-    double h = actor.height > 0 ? actor.height : 1.5;
-
-    auto box = chrono_types::make_shared<ChVisualShapeBox>(l, w, h);
-    auto mat = chrono_types::make_shared<ChVisualMaterial>();
-    mat->SetDiffuseColor(ChColor(0.85f, 0.10f, 0.08f));
-    box->SetMaterial(0, mat);
-
-    // The OpenSCENARIO reference point is the rear axle center, not the box center.
-    body->AddVisualShape(box, ChFrame<double>(actor.center_offset, QUNIT));
-    sys.Add(body);
-    return body;
-}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -195,6 +176,16 @@ int main(int argc, char** argv) {
     // VSG run-time visualization
     // ---------------------------------------------------------------------------------------
 
+    // Visual proxies for the scenario's actors.
+    //
+    // These must exist *before* any visualization system is created. VSG binds the bodies it
+    // finds when its scene graph is built and a later addition is simply never drawn, and
+    // Chrono::Sensor likewise will not pick up a mesh attached after its scene is built. The
+    // scenario's entity list is known as soon as it loads, so there is no reason to defer.
+    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
+    for (const auto& actor : player.GetActors())
+        actor_proxies[actor.id] = CreateScenarioActorBody(sys, actor);
+
     auto vis = chrono_types::make_shared<ChWheeledVehicleVisualSystemVSG>();
     vis->AttachVehicle(&audi);
     vis->AttachDriver(&driver);
@@ -212,7 +203,6 @@ int main(int argc, char** argv) {
     // Co-simulation loop
     // ---------------------------------------------------------------------------------------
 
-    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
     const double step = 1e-3;
     // Physics needs 1 kHz; the display does not. Rendering every physics step draws a thousand
     // frames per simulated second, which costs far more than the geometry does.
@@ -242,13 +232,10 @@ int main(int argc, char** argv) {
 
         for (const auto& actor : player.GetActors()) {
             auto it = actor_proxies.find(actor.id);
-            if (it == actor_proxies.end()) {
-                it = actor_proxies.emplace(actor.id, MakeActorProxy(sys, actor)).first;
-                // The scene graph is already built, so a body added mid-run has to be bound.
-                vis->BindItem(it->second);
+            if (it != actor_proxies.end()) {
+                it->second->SetPos(actor.pose.pos);
+                it->second->SetRot(actor.pose.rot);
             }
-            it->second->SetPos(actor.pose.pos);
-            it->second->SetRot(actor.pose.rot);
             closest_approach = std::min(closest_approach, (actor.pose.pos - ego_ref.pos).Length());
         }
 

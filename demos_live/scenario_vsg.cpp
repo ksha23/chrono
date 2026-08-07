@@ -34,6 +34,7 @@
 
 #include "chrono_scenario/ChOpenDriveNetwork.h"
 #include "chrono_scenario/ChOpenDriveTerrain.h"
+#include "chrono_scenario/ChScenarioActorShapes.h"
 #include "chrono_scenario/ChScenarioPlayer.h"
 
 using namespace chrono;
@@ -44,26 +45,6 @@ namespace {
 const char* kChronoRoot = "/Users/kylesha/Documents/sbel/chrono-sensor-metal/";
 const char* kEsminiRootDefault = "/Users/kylesha/Documents/sbel/esmini";
 
-std::shared_ptr<ChBody> MakeActorProxy(ChSystem& sys, const ChScenarioActor& actor) {
-    auto body = chrono_types::make_shared<ChBody>();
-    body->SetName(actor.name.c_str());
-    body->SetFixed(true);
-    body->EnableCollision(false);
-
-    double l = actor.length > 0 ? actor.length : 4.5;
-    double w = actor.width > 0 ? actor.width : 1.8;
-    double h = actor.height > 0 ? actor.height : 1.5;
-
-    auto box = chrono_types::make_shared<ChVisualShapeBox>(l, w, h);
-    auto mat = chrono_types::make_shared<ChVisualMaterial>();
-    mat->SetDiffuseColor(ChColor(0.85f, 0.10f, 0.08f));
-    box->SetMaterial(0, mat);
-
-    // The OpenSCENARIO reference point is the rear axle center, not the box center.
-    body->AddVisualShape(box, ChFrame<double>(actor.center_offset, QUNIT));
-    sys.Add(body);
-    return body;
-}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -174,6 +155,16 @@ int main(int argc, char** argv) {
     // VSG run-time visualization
     // ---------------------------------------------------------------------------------------
 
+    // Visual proxies for the scenario's actors.
+    //
+    // These must exist *before* any visualization system is created. VSG binds the bodies it
+    // finds when its scene graph is built and a later addition is simply never drawn, and
+    // Chrono::Sensor likewise will not pick up a mesh attached after its scene is built. The
+    // scenario's entity list is known as soon as it loads, so there is no reason to defer.
+    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
+    for (const auto& actor : player.GetActors())
+        actor_proxies[actor.id] = CreateScenarioActorBody(sys, actor);
+
     auto vis = chrono_types::make_shared<ChWheeledVehicleVisualSystemVSG>();
     vis->AttachVehicle(&audi);
     vis->AttachDriver(&driver);
@@ -192,13 +183,13 @@ int main(int argc, char** argv) {
     // Co-simulation loop
     // ---------------------------------------------------------------------------------------
 
-    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
     const double step = 1e-3;
     // Physics runs at 1 kHz because the tires need it; the display does not. Rendering every
     // physics step would draw a thousand frames per simulated second and is what makes these
     // loops miss real time -- the cost is in the frame count, not the triangle count.
     const double render_step = 1.0 / 50;
     double next_render = 0;
+    int frame_idx = 0;
     double next_report = 0;
 
     audi.EnableRealtime(true);
@@ -213,6 +204,13 @@ int main(int argc, char** argv) {
             vis->Render();
             vis->EndScene();
             next_render += render_step;
+            // Opt-in frame capture, so a run can be checked without watching it.
+            if (std::getenv("SAVE_FRAMES")) {
+                char fn[512];
+                snprintf(fn, sizeof(fn), "%sdemos_live/vsg_out/frame_%04d.png", kChronoRoot, frame_idx);
+                vis->WriteImageToFile(fn);
+            }
+            frame_idx++;
         }
 
         ChCoordsys<> ego_ref = GetScenarioRefPose(audi);
@@ -223,13 +221,10 @@ int main(int argc, char** argv) {
 
         for (const auto& actor : player.GetActors()) {
             auto it = actor_proxies.find(actor.id);
-            if (it == actor_proxies.end()) {
-                it = actor_proxies.emplace(actor.id, MakeActorProxy(sys, actor)).first;
-                // The scene graph is already built, so a body added mid-run has to be bound.
-                vis->BindItem(it->second);
+            if (it != actor_proxies.end()) {
+                it->second->SetPos(actor.pose.pos);
+                it->second->SetRot(actor.pose.rot);
             }
-            it->second->SetPos(actor.pose.pos);
-            it->second->SetRot(actor.pose.rot);
         }
 
         DriverInputs in = driver.GetInputs();

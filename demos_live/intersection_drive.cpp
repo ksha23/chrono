@@ -37,6 +37,7 @@
 
 #include "chrono_scenario/ChOpenDriveNetwork.h"
 #include "chrono_scenario/ChOpenDriveTerrain.h"
+#include "chrono_scenario/ChScenarioActorShapes.h"
 #include "chrono_scenario/ChScenarioPlayer.h"
 
 #include "chrono_sensor/ChSensorManager.h"
@@ -60,26 +61,6 @@ constexpr int kEgoLane = 1;
 constexpr double kEgoStartS = 63.0;
 constexpr double kRouteLength = 130.0;
 
-std::shared_ptr<ChBody> MakeActorProxy(ChSystem& sys, const ChScenarioActor& actor) {
-    auto body = chrono_types::make_shared<ChBody>();
-    body->SetName(actor.name.c_str());
-    body->SetFixed(true);
-    body->EnableCollision(false);
-
-    double l = actor.length > 0 ? actor.length : 4.5;
-    double w = actor.width > 0 ? actor.width : 1.8;
-    double h = actor.height > 0 ? actor.height : 1.5;
-
-    auto box = chrono_types::make_shared<ChVisualShapeBox>(l, w, h);
-    auto mat = chrono_types::make_shared<ChVisualMaterial>();
-    mat->SetDiffuseColor(ChColor(0.85f, 0.10f, 0.08f));
-    box->SetMaterial(0, mat);
-
-    // The OpenSCENARIO reference point is the rear axle center, not the box center.
-    body->AddVisualShape(box, ChFrame<double>(actor.center_offset, QUNIT));
-    sys.Add(body);
-    return body;
-}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -208,6 +189,16 @@ int main(int argc, char** argv) {
     auto route_pts = network->SampleRoute(ego_start, kRouteLength, ChJunctionChoice::STRAIGHT, 1.0);
     ChVector3d junction = route_pts[route_pts.size() / 2];
 
+    // Visual proxies for the scenario's actors.
+    //
+    // These must exist *before* any visualization system is created. VSG binds the bodies it
+    // finds when its scene graph is built and a later addition is simply never drawn, and
+    // Chrono::Sensor likewise will not pick up a mesh attached after its scene is built. The
+    // scenario's entity list is known as soon as it loads, so there is no reason to defer.
+    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
+    for (const auto& actor : player.GetActors())
+        actor_proxies[actor.id] = CreateScenarioActorBody(sys, actor);
+
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
     // Without an environment light the road sits against pure black, since OpenDRIVE supplies no
     // surroundings of any kind -- no sky, no ground plane, no buildings.
@@ -262,7 +253,6 @@ int main(int argc, char** argv) {
         printf("\nRunning %.0f s%s. Frames -> %s\n\n", max_time,
                headless ? " (headless)" : "", out_dir.c_str());
 
-    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
     const double step = 1e-3;
     double time = 0;
     double next_report = 0;
@@ -278,10 +268,10 @@ int main(int argc, char** argv) {
 
         for (const auto& actor : player.GetActors()) {
             auto it = actor_proxies.find(actor.id);
-            if (it == actor_proxies.end())
-                it = actor_proxies.emplace(actor.id, MakeActorProxy(sys, actor)).first;
-            it->second->SetPos(actor.pose.pos);
-            it->second->SetRot(actor.pose.rot);
+            if (it != actor_proxies.end()) {
+                it->second->SetPos(actor.pose.pos);
+                it->second->SetRot(actor.pose.rot);
+            }
         }
 
         DriverInputs in = driver.GetInputs();

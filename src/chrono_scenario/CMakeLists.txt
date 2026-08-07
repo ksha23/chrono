@@ -74,6 +74,8 @@ if(Esmini_SE_FOUND)
   set(Chrono_SCENARIO_FILES ${Chrono_SCENARIO_FILES}
       ChScenarioPlayer.h
       ChScenarioPlayer.cpp
+      ChScenarioActorShapes.h
+      ChScenarioActorShapes.cpp
   )
 endif()
 

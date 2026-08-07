@@ -42,6 +42,7 @@
 
 #include "chrono_scenario/ChOpenDriveNetwork.h"
 #include "chrono_scenario/ChOpenDriveTerrain.h"
+#include "chrono_scenario/ChScenarioActorShapes.h"
 #include "chrono_scenario/ChScenarioPlayer.h"
 
 #include "chrono_sensor/ChSensorManager.h"
@@ -58,29 +59,6 @@ namespace {
 const char* kChronoRoot = "/Users/kylesha/Documents/sbel/chrono-sensor-metal/";
 const char* kEsminiRootDefault = "/Users/kylesha/Documents/sbel/esmini";
 
-/// Visual proxy for one scenario actor. esmini drives these kinematically; they carry no
-/// collision geometry, so they are moved by SetPos/SetRot rather than simulated.
-std::shared_ptr<ChBody> MakeActorProxy(ChSystem& sys, const ChScenarioActor& actor) {
-    auto body = chrono_types::make_shared<ChBody>();
-    body->SetName(actor.name.c_str());
-    body->SetFixed(true);
-    body->EnableCollision(false);
-
-    // The OpenSCENARIO reference point is not the bounding box center, so the box is offset by
-    // the center offset the scenario reports rather than centered on the body origin.
-    double l = actor.length > 0 ? actor.length : 4.5;
-    double w = actor.width > 0 ? actor.width : 1.8;
-    double h = actor.height > 0 ? actor.height : 1.5;
-
-    auto box = chrono_types::make_shared<ChVisualShapeBox>(l, w, h);
-    auto mat = chrono_types::make_shared<ChVisualMaterial>();
-    mat->SetDiffuseColor(ChColor(0.80f, 0.12f, 0.10f));
-    box->SetMaterial(0, mat);
-
-    body->AddVisualShape(box, ChFrame<double>(actor.center_offset, QUNIT));
-    sys.Add(body);
-    return body;
-}
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -235,6 +213,16 @@ int main(int argc, char** argv) {
     // Sensors
     // ---------------------------------------------------------------------------------------
 
+    // Visual proxies for the scenario's actors.
+    //
+    // These must exist *before* any visualization system is created. VSG binds the bodies it
+    // finds when its scene graph is built and a later addition is simply never drawn, and
+    // Chrono::Sensor likewise will not pick up a mesh attached after its scene is built. The
+    // scenario's entity list is known as soon as it loads, so there is no reason to defer.
+    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
+    for (const auto& actor : player.GetActors())
+        actor_proxies[actor.id] = CreateScenarioActorBody(sys, actor);
+
     auto manager = chrono_types::make_shared<ChSensorManager>(&sys);
     // OpenDRIVE supplies no surroundings at all; without this the road is unlit against black.
     manager->scene->AddEnvironmentLight(GetChronoDataFile("sensor/textures/sky_2_4k.hdr"));
@@ -264,7 +252,6 @@ int main(int argc, char** argv) {
 
     printf("Running - close the window or wait %.0f s.\n\n", max_time);
 
-    std::map<int, std::shared_ptr<ChBody>> actor_proxies;
 
     const double step = 1e-3;
     double time = 0;
@@ -284,11 +271,10 @@ int main(int argc, char** argv) {
         // Pull the ambient traffic back into Chrono.
         for (const auto& actor : player.GetActors()) {
             auto it = actor_proxies.find(actor.id);
-            if (it == actor_proxies.end())
-                it = actor_proxies.emplace(actor.id, MakeActorProxy(sys, actor)).first;
-
-            it->second->SetPos(actor.pose.pos);
-            it->second->SetRot(actor.pose.rot);
+            if (it != actor_proxies.end()) {
+                it->second->SetPos(actor.pose.pos);
+                it->second->SetRot(actor.pose.rot);
+            }
         }
 
         DriverInputs in = driver.GetInputs();
