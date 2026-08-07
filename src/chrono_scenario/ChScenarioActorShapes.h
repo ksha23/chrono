@@ -77,23 +77,25 @@ enum : int {
 }  // namespace ChScenarioVehicleCategory
 
 /// How scenario actors are drawn.
+///
+/// Vehicles are drawn by importing a whole Chrono vehicle rather than by assembling meshes.
+/// Chrono::Vehicle already knows how a given model goes together -- chassis, suspension,
+/// steering, wheels, rims and tires, each at its own place -- and reproducing that by hand means
+/// duplicating geometry that is already written down, which is how a hand-built version ends up
+/// with tires but no rims and a ride height off by the chassis reference offset.
 struct ChActorVisualStyle {
-    /// Wavefront mesh used for vehicle bodies. Empty selects Chrono's sedan.
-    /// The mesh is scaled to each actor's reported bounding box, so one mesh serves a fleet.
-    std::string car_chassis_mesh;
+    /// Vehicle JSON used for cars and vans. Empty selects Chrono's sedan.
+    std::string car_vehicle_json;
+    std::string car_tire_json;
 
-    /// Wavefront mesh used for one wheel. Empty selects Chrono's sedan tire.
-    std::string car_wheel_mesh;
-
-    /// Draw wheels on vehicles (default: true).
-    /// Worth leaving on: a wheel-less chassis is precisely the case that read as noise.
-    bool draw_wheels = true;
+    /// Vehicle JSON used for buses, trucks and other large vehicles. Empty selects the city bus.
+    std::string bus_vehicle_json;
+    std::string bus_tire_json;
 
     /// Fall back to plain bounding boxes for everything. Cheap, and useful when the point of a
     /// run is throughput rather than perception.
     bool boxes_only = false;
 
-    ChColor vehicle_color = ChColor(0.75f, 0.12f, 0.10f);
     ChColor pedestrian_color = ChColor(0.15f, 0.25f, 0.65f);
     ChColor misc_color = ChColor(0.55f, 0.55f, 0.58f);
 };
@@ -105,8 +107,13 @@ struct ChActorVisualStyle {
 /// relative to the actor's OpenSCENARIO reference point (the rear axle center for a vehicle),
 /// using the bounding box center offset the scenario reports.
 ///
-/// Vehicles get a scaled chassis mesh plus four wheels; pedestrians a jointed figure built from
-/// primitives, since no pedestrian mesh ships with Chrono; anything else a bounding box.
+/// Vehicles get the complete geometry of a Chrono vehicle -- built once in a throwaway system,
+/// harvested, and replayed onto this single body. Pedestrians get a jointed figure built from
+/// primitives, since no pedestrian mesh ships with Chrono; anything else gets a bounding box.
+///
+/// The imported vehicle is picked by the actor's category, not scaled to its bounding box, so it
+/// will not match a scenario's declared dimensions exactly. A real vehicle at approximately the
+/// right size reads far better to a perception model than a correctly-sized distortion of one.
 ChApiScenario std::shared_ptr<ChBody> CreateScenarioActorBody(ChSystem& sys,
                                                               const ChScenarioActor& actor,
                                                               const ChActorVisualStyle& style = {});

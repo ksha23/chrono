@@ -16,6 +16,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iostream>
+#include <map>
+#include <vector>
 
 #include "chrono/assets/ChVisualMaterial.h"
 #include "chrono/assets/ChVisualShapeBox.h"
@@ -24,7 +27,11 @@
 #include "chrono/assets/ChVisualShapeSphere.h"
 #include "chrono/core/ChTypes.h"
 
+#include "chrono/physics/ChSystemNSC.h"
+
 #include "chrono_vehicle/ChVehicleDataPath.h"
+#include "chrono_vehicle/utils/ChVehicleUtilsJSON.h"
+#include "chrono_vehicle/wheeled_vehicle/vehicle/WheeledVehicle.h"
 
 #include "chrono_scenario/ChScenarioActorShapes.h"
 
@@ -32,31 +39,6 @@ namespace chrono {
 namespace scenario {
 
 namespace {
-
-/// Bounding box of Chrono's sedan chassis mesh, measured from the .obj. Scaling an actor's
-/// reported dimensions against these lets one mesh stand in for a range of vehicle sizes.
-/// The mesh sits on the ground plane (z from ~0 up) and is centered longitudinally.
-constexpr double kSedanMeshLength = 4.89;
-constexpr double kSedanMeshWidth = 1.85;
-constexpr double kSedanMeshHeight = 1.47;
-
-/// Radius of Chrono's sedan tire mesh, likewise measured from the .obj.
-constexpr double kSedanTireRadius = 0.34;
-
-/// The sedan's real axle geometry, from data/vehicle/sedan: suspension locations at x = +/-1.388
-/// and a spindle 0.798 out laterally. Using the actual numbers rather than fractions of the
-/// bounding box is what puts the wheels in the mesh's own wheel arches instead of inside the body.
-constexpr double kSedanHalfWheelbase = 1.388;
-constexpr double kSedanHalfTrack = 0.798;
-
-/// Height of the chassis reference frame above the ground.
-///
-/// The mesh's coordinates are chassis-reference-frame coordinates, and the spindle sits 0.13
-/// above that frame (suspension location z 0.25, spindle COM z -0.1199). With the wheel centre a
-/// tire radius off the ground, the frame itself is that much lower. Placing the mesh origin at
-/// ground level instead -- which is where the OpenSCENARIO reference point is -- drops the body
-/// onto the wheels and hides them.
-constexpr double kSedanRefHeight = kSedanTireRadius - 0.13;
 
 std::shared_ptr<ChVisualMaterial> MakeMaterial(const ChColor& color) {
     auto mat = chrono_types::make_shared<ChVisualMaterial>();
@@ -75,57 +57,148 @@ void AddBoundingBox(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, 
     body->AddVisualShape(box, ChFrame<double>(actor.center_offset, QUNIT));
 }
 
-/// Attach a scaled chassis mesh plus four wheels.
-void AddVehicle(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, const ChActorVisualStyle& style) {
-    double l = actor.length > 0 ? actor.length : 4.5;
-    double w = actor.width > 0 ? actor.width : 1.8;
-    double h = actor.height > 0 ? actor.height : 1.5;
+/// A complete Chrono vehicle's visual geometry, flattened into one rigid set of shapes.
+///
+/// Every shape is recorded with its pose relative to the vehicle's chassis reference frame, so
+/// the whole assembly can be replayed onto a single body. Shapes are shared, not copied.
+struct VehicleVisualTemplate {
+    std::vector<ChVisualShapeInstance> shapes;
 
-    std::string chassis_mesh = style.car_chassis_mesh.empty()
-                                   ? vehicle::GetVehicleDataFile("sedan/sedan_chassis_vis.obj")
-                                   : style.car_chassis_mesh;
+    /// Height of the chassis reference frame above the ground, derived from the vehicle itself:
+    /// with the wheel centres a tire radius off the ground, the frame sits that far above them
+    /// less the spindle's own offset. Needed because OpenSCENARIO places an actor at ground
+    /// level, so the assembly has to be lifted or the tires sink into the road.
+    double ref_height = 0;
 
-    ChVector3d scale(l / kSedanMeshLength, w / kSedanMeshWidth, h / kSedanMeshHeight);
+    double wheelbase = 0;
+    bool valid = false;
+};
 
-    // Positioned at the bounding box center laterally and longitudinally, and at the chassis
-    // reference height vertically -- not at ground, which would bury the wheels, and not at the
-    // box center height, which would float the car.
-    ChVector3d chassis_pos(actor.center_offset.x(), actor.center_offset.y(),
-                           kSedanRefHeight * scale.z());
+/// Build a Chrono vehicle in a throwaway system and harvest everything it draws.
+///
+/// This is the point of the exercise: Chrono::Vehicle already knows how a model goes together,
+/// so the geometry is taken from the assembled vehicle rather than reconstructed from measured
+/// constants. The scratch system is discarded; the visual shapes are shared_ptr and outlive it.
+VehicleVisualTemplate BuildVehicleTemplate(const std::string& vehicle_json, const std::string& tire_json) {
+    VehicleVisualTemplate tpl;
 
-    auto chassis = chrono_types::make_shared<ChVisualShapeModelFile>();
-    chassis->SetFilename(chassis_mesh);
-    chassis->SetScale(scale);
-    chassis->SetColor(style.vehicle_color);
-    body->AddVisualShape(chassis, ChFrame<double>(chassis_pos, QUNIT));
+    try {
+        ChSystemNSC scratch;
+        vehicle::WheeledVehicle veh(&scratch, vehicle_json);
+        veh.Initialize(ChCoordsys<>(VNULL, QUNIT));
+        // Body and wheels only. Suspension and steering are internal parts; drawn as primitives
+        // they poke through the bodywork, and a traffic actor gains nothing from them.
+        veh.SetChassisVisualizationType(VisualizationType::MESH);
+        veh.SetSuspensionVisualizationType(VisualizationType::NONE);
+        veh.SetSteeringVisualizationType(VisualizationType::NONE);
+        veh.SetWheelVisualizationType(VisualizationType::MESH);
 
-    if (!style.draw_wheels)
-        return;
-
-    std::string wheel_mesh = style.car_wheel_mesh.empty()
-                                 ? vehicle::GetVehicleDataFile("sedan/sedan_tire.obj")
-                                 : style.car_wheel_mesh;
-
-    // The sedan's own axle geometry, carried along by the same scale as the body, so the wheels
-    // land where the mesh's arches are. esmini does not expose the scenario catalog's axle
-    // entries, so scaling Chrono's is the closest available match.
-    double half_wheelbase = kSedanHalfWheelbase * scale.x();
-    double half_track = kSedanHalfTrack * scale.y();
-    double radius = kSedanTireRadius * scale.z();
-    double wheel_scale = std::min({scale.x(), scale.y(), scale.z()});
-
-    for (double side_x : {-1.0, 1.0}) {
-        for (double side_y : {-1.0, 1.0}) {
-            auto wheel = chrono_types::make_shared<ChVisualShapeModelFile>();
-            wheel->SetFilename(wheel_mesh);
-            wheel->SetScale(ChVector3d(wheel_scale, wheel_scale, wheel_scale));
-            wheel->SetColor(ChColor(0.05f, 0.05f, 0.06f));
-            body->AddVisualShape(
-                wheel, ChFrame<double>(ChVector3d(actor.center_offset.x() + side_x * half_wheelbase,
-                                                  actor.center_offset.y() + side_y * half_track, radius),
-                                       QUNIT));
+        // Tires are initialized purely for their visual meshes; no powertrain is needed, since
+        // this vehicle is never stepped.
+        for (auto& axle : veh.GetAxles()) {
+            for (auto& wheel : axle->GetWheels()) {
+                auto tire = vehicle::ReadTireJSON(tire_json);
+                veh.InitializeTire(tire, wheel, VisualizationType::MESH);
+            }
         }
+
+        // The chassis reference frame is the origin the assembly is expressed against, and is
+        // also what OpenSCENARIO's reference point has to be reconciled with later.
+        ChFrame<double> chassis_frame(veh.GetPos(), veh.GetRot());
+        ChFrame<double> to_chassis = chassis_frame.GetInverse();
+
+        // Ride height, from the spindles and the tire radius rather than a measured constant.
+        int num_axles = static_cast<int>(veh.GetAxles().size());
+        double spindle_z = 0;
+        for (int a = 0; a < num_axles; a++) {
+            spindle_z += 0.5 * (veh.GetSpindlePos(a, vehicle::VehicleSide::LEFT).z() +
+                                veh.GetSpindlePos(a, vehicle::VehicleSide::RIGHT).z());
+        }
+        spindle_z /= std::max(num_axles, 1);
+
+        double tire_radius = 0;
+        if (num_axles > 0) {
+            auto tire = veh.GetAxle(0)->GetWheel(vehicle::VehicleSide::LEFT)->GetTire();
+            if (tire)
+                tire_radius = tire->GetRadius();
+        }
+        tpl.ref_height = tire_radius - (spindle_z - chassis_frame.GetPos().z());
+        tpl.wheelbase = veh.GetWheelbase();
+
+        for (const auto& body : scratch.GetBodies()) {
+            const auto& model = body->GetVisualModel();
+            if (!model)
+                continue;
+
+            ChFrame<double> body_frame = to_chassis * body->GetVisualModelFrame();
+            for (const auto& si : model->GetShapeInstances()) {
+                ChVisualShapeInstance out = si;
+                out.frame = body_frame * si.frame;
+                tpl.shapes.push_back(out);
+            }
+        }
+
+        if (tpl.shapes.empty())
+            return tpl;
+
+        tpl.valid = true;
+    } catch (const std::exception& e) {
+        std::cerr << "ChScenarioActorShapes: could not build vehicle model " << vehicle_json << " ("
+                  << e.what() << "); actors will fall back to bounding boxes" << std::endl;
     }
+
+    return tpl;
+}
+
+/// Templates are cached: building a vehicle is far too expensive to repeat per actor, and a
+/// scenario may well contain several of the same category.
+const VehicleVisualTemplate& CachedVehicleTemplate(const std::string& vehicle_json,
+                                                   const std::string& tire_json) {
+    static std::map<std::string, VehicleVisualTemplate> cache;
+    auto it = cache.find(vehicle_json);
+    if (it == cache.end())
+        it = cache.emplace(vehicle_json, BuildVehicleTemplate(vehicle_json, tire_json)).first;
+
+    return it->second;
+}
+
+/// Attach a whole Chrono vehicle's geometry, chosen by the actor's category.
+///
+/// Placement reconciles two origins. Chrono expresses the assembly against the chassis reference
+/// frame; OpenSCENARIO places an actor by its rear axle centre at ground level. The template is
+/// therefore shifted so its rear axle lands on the actor origin -- approximated here by the
+/// bounding box centre offset the scenario reports, which is measured from that same point.
+bool AddVehicle(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, const ChActorVisualStyle& style) {
+    bool large = actor.object_category == ChScenarioVehicleCategory::BUS ||
+                 actor.object_category == ChScenarioVehicleCategory::TRUCK ||
+                 actor.object_category == ChScenarioVehicleCategory::SEMITRAILER ||
+                 actor.length > 8.0;
+
+    std::string vehicle_json = large
+        ? (style.bus_vehicle_json.empty() ? vehicle::GetVehicleDataFile("citybus/vehicle/CityBus_Vehicle.json")
+                                          : style.bus_vehicle_json)
+        : (style.car_vehicle_json.empty() ? vehicle::GetVehicleDataFile("sedan/vehicle/Sedan_Vehicle.json")
+                                          : style.car_vehicle_json);
+    std::string tire_json = large
+        ? (style.bus_tire_json.empty() ? vehicle::GetVehicleDataFile("citybus/tire/CityBus_TMeasyTire.json")
+                                       : style.bus_tire_json)
+        : (style.car_tire_json.empty() ? vehicle::GetVehicleDataFile("sedan/tire/Sedan_TMeasyTire.json")
+                                       : style.car_tire_json);
+
+    const VehicleVisualTemplate& tpl = CachedVehicleTemplate(vehicle_json, tire_json);
+    if (!tpl.valid)
+        return false;
+
+    // Two origins to reconcile. Chrono expresses the assembly against the chassis reference
+    // frame; OpenSCENARIO places the actor by its rear axle centre at ground level. Lifting by
+    // the ride height puts the tires on the road, and the longitudinal shift lines the model's
+    // wheelbase up with where the scenario says the axles are.
+    ChVector3d shift(actor.center_offset.x() - 0.5 * tpl.wheelbase, actor.center_offset.y(),
+                     tpl.ref_height);
+    for (const auto& si : tpl.shapes)
+        body->AddVisualShape(si.shape, ChFrame<double>(shift + si.frame.GetPos(), si.frame.GetRot()));
+
+    return true;
 }
 
 /// Attach a jointed figure approximating a person.
@@ -204,7 +277,8 @@ std::shared_ptr<ChBody> CreateScenarioActorBody(ChSystem& sys,
 
     switch (actor.object_type) {
         case ChScenarioObjectType::VEHICLE:
-            AddVehicle(body, actor, style);
+            if (!AddVehicle(body, actor, style))
+                AddBoundingBox(body, actor, style.misc_color);
             break;
         case ChScenarioObjectType::PEDESTRIAN:
             AddPedestrian(body, actor, style.pedestrian_color);
