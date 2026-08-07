@@ -23,6 +23,7 @@
 #include "chrono/assets/ChVisualMaterial.h"
 #include "chrono/assets/ChVisualShapeBox.h"
 #include "chrono/assets/ChVisualShapeCapsule.h"
+#include "chrono/assets/ChVisualShapeCylinder.h"
 #include "chrono/assets/ChVisualShapeModelFile.h"
 #include "chrono/assets/ChVisualShapeSphere.h"
 #include "chrono/core/ChTypes.h"
@@ -162,6 +163,52 @@ const VehicleVisualTemplate& CachedVehicleTemplate(const std::string& vehicle_js
     return it->second;
 }
 
+/// Attach a two-wheeler built from primitives.
+///
+/// Chrono ships no bicycle or motorbike model, and the category mapping would otherwise hand a
+/// 1.8 m bicycle a 4.9 m sedan -- worse than a box, because it is confidently the wrong thing.
+/// Two wheels, a frame and a rider at least give the right silhouette and footprint, which is
+/// what matters for a vulnerable-road-user scenario.
+void AddTwoWheeler(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, const ChColor& color) {
+    double l = actor.length > 0 ? actor.length : 1.8;
+    double w = actor.width > 0 ? actor.width : 0.5;
+    double h = actor.height > 0 ? actor.height : 1.7;
+
+    auto frame_mat = MakeMaterial(color);
+    auto tire_mat = MakeMaterial(ChColor(0.05f, 0.05f, 0.06f));
+    auto rider_mat = MakeMaterial(ChColor(0.20f, 0.20f, 0.24f));
+
+    double wheel_r = std::min(0.35 * h, 0.5 * l - 0.05);
+    double x = actor.center_offset.x();
+    double y = actor.center_offset.y();
+
+    // Cylinder axes run along local Z, so a wheel is laid over about X to spin around Y.
+    ChQuaterniond wheel_rot = QuatFromAngleX(CH_PI_2);
+    for (double side : {-1.0, 1.0}) {
+        auto wheel = chrono_types::make_shared<ChVisualShapeCylinder>(wheel_r, 0.06);
+        wheel->SetMaterial(0, tire_mat);
+        body->AddVisualShape(wheel,
+                             ChFrame<double>(ChVector3d(x + side * (0.5 * l - wheel_r), y, wheel_r),
+                                             wheel_rot));
+    }
+
+    auto frame = chrono_types::make_shared<ChVisualShapeBox>(0.75 * l, 0.4 * w, 0.22 * h);
+    frame->SetMaterial(0, frame_mat);
+    body->AddVisualShape(frame, ChFrame<double>(ChVector3d(x, y, wheel_r + 0.10 * h), QUNIT));
+
+    // A rider, since these categories are almost always ridden in a scenario.
+    double torso_len = 0.32 * h;
+    auto torso = chrono_types::make_shared<ChVisualShapeCapsule>(0.16 * w + 0.06, torso_len);
+    torso->SetMaterial(0, rider_mat);
+    body->AddVisualShape(
+        torso, ChFrame<double>(ChVector3d(x - 0.05 * l, y, h - 0.5 * torso_len - 0.11 * h),
+                               QuatFromAngleX(CH_PI_2)));
+
+    auto head = chrono_types::make_shared<ChVisualShapeSphere>(0.075 * h);
+    head->SetMaterial(0, rider_mat);
+    body->AddVisualShape(head, ChFrame<double>(ChVector3d(x - 0.05 * l, y, h - 0.075 * h), QUNIT));
+}
+
 /// Attach a whole Chrono vehicle's geometry, chosen by the actor's category.
 ///
 /// Placement reconciles two origins. Chrono expresses the assembly against the chassis reference
@@ -169,6 +216,12 @@ const VehicleVisualTemplate& CachedVehicleTemplate(const std::string& vehicle_js
 /// therefore shifted so its rear axle lands on the actor origin -- approximated here by the
 /// bounding box centre offset the scenario reports, which is measured from that same point.
 bool AddVehicle(std::shared_ptr<ChBody> body, const ChScenarioActor& actor, const ChActorVisualStyle& style) {
+    if (actor.object_category == ChScenarioVehicleCategory::BICYCLE ||
+        actor.object_category == ChScenarioVehicleCategory::MOTORBIKE) {
+        AddTwoWheeler(body, actor, ChColor(0.90f, 0.55f, 0.10f));
+        return true;
+    }
+
     bool large = actor.object_category == ChScenarioVehicleCategory::BUS ||
                  actor.object_category == ChScenarioVehicleCategory::TRUCK ||
                  actor.object_category == ChScenarioVehicleCategory::SEMITRAILER ||

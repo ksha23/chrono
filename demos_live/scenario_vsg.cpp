@@ -82,6 +82,15 @@ int main(int argc, char** argv) {
     printf("Loaded %s\n", xosc_file.c_str());
     printf("  %d entities, ego id %d | network %u roads\n", player.GetNumObjects(), player.GetEgoId(),
            network->GetNumRoads());
+    for (const auto& a : player.GetAllObjects()) {
+        const char* kind = a.object_type == ChScenarioObjectType::VEHICLE      ? "vehicle"
+                           : a.object_type == ChScenarioObjectType::PEDESTRIAN ? "pedestrian"
+                           : a.object_type == ChScenarioObjectType::MISC_OBJECT ? "misc"
+                                                                                : "unknown";
+        printf("    [%d] %-18s %-10s cat=%-2d %.1f x %.1f x %.1f m%s\n", a.id, a.name.c_str(), kind,
+               a.object_category, a.length, a.width, a.height,
+               a.id == player.GetEgoId() ? "   <- ego, driven by Chrono" : "");
+    }
 
     // ---------------------------------------------------------------------------------------
     // System, terrain, ego
