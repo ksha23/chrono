@@ -59,7 +59,8 @@ int main(int argc, char** argv) {
                                 ? argv[1]
                                 : esmini_root + "/resources/xosc/cut-in_external.xosc";
     double max_time = (argc > 2) ? std::atof(argv[2]) : 30.0;
-    double requested_speed = (argc > 3) ? std::atof(argv[3]) : 30.0;
+    bool speed_given = argc > 3;
+    double requested_speed = speed_given ? std::atof(argv[3]) : 30.0;
     bool keep_open = std::getenv("KEEP_OPEN") != nullptr;
 
     // ---------------------------------------------------------------------------------------
@@ -117,8 +118,15 @@ int main(int argc, char** argv) {
     spawn.pos -= spawn.rot.Rotate(ref_offset);
     spawn.pos.z() = ego0.pose.pos.z() + 0.65;
 
-    // An externally-controlled ego reports back 0 until we tell it otherwise.
-    double initial_speed = ego0.speed > 0.1 ? ego0.speed : requested_speed;
+    // An explicit argument always wins. Otherwise take the scenario's own initial speed, and
+    // fall back to the default only when it reports none -- which is what an externally
+    // controlled ego does, since esmini leaves its Init SpeedAction unapplied.
+    double initial_speed = speed_given ? requested_speed
+                                       : (ego0.speed > 0.1 ? ego0.speed : requested_speed);
+    printf("  ego starts road %u lane %+d s=%.1f, target %.1f m/s (%s)\n", ego0.road_id, ego0.lane_id,
+           ego0.s, initial_speed,
+           speed_given ? "from the command line"
+                       : (ego0.speed > 0.1 ? "from the scenario" : "default; scenario reports none"));
 
     WheeledVehicle audi(&sys, audi_json);
     audi.Initialize(spawn, initial_speed);
