@@ -259,11 +259,15 @@ int main(int argc, char** argv) {
         if (time >= next_report) {
             double yaw = ego_ref.rot.GetCardanAnglesZYX().z();
             ChLaneInfo info = network->GetLaneInfo(ego_ref.pos, yaw);
-            printf("t=%5.1f s  ego: lane %+d s=%7.1f v=%5.1f m/s", time, info.lane_id, info.s, ego_speed);
+            printf("t=%5.1f s  ego: lane %+d s=%7.1f v=%5.1f m/s xy=(%7.1f,%6.1f)", time, info.lane_id,
+                   info.s, ego_speed, ego_ref.pos.x(), ego_ref.pos.y());
             for (const auto& actor : player.GetActors()) {
                 bool same_road = info.valid && actor.road_id == info.road_id;
                 double gap = same_road ? actor.s - info.s : (actor.pose.pos - ego_ref.pos).Length();
-                printf(" | %s: lane %+d gap=%+6.1f m", actor.name.c_str(), actor.lane_id, gap);
+                double a_yaw = actor.pose.rot.GetCardanAnglesZYX().z() * 180.0 / CH_PI;
+                printf(" | %s: lane %+d gap=%+6.1f m xy=(%7.1f,%6.1f) yaw=%+6.1f deg",
+                       actor.name.c_str(), actor.lane_id, gap, actor.pose.pos.x(),
+                       actor.pose.pos.y(), a_yaw);
             }
             printf("\n");
             next_report += 0.5;
