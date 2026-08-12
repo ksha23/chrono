@@ -535,7 +535,7 @@ def main():
                  [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
             sx, sy, sz = inst["scale"]
             tx, ty, tz = inst["pos"]
-            for part in asset["parts"]:
+            for part in asset["info"]["parts"]:
                 mesh_path = os.path.join(args.outdir, part["mesh"])
                 if not os.path.exists(mesh_path):
                     continue

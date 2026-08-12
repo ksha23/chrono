@@ -11,10 +11,15 @@
 #
 # Usage:  ./build_configs.sh
 set -e
-source /opt/homebrew/Caskroom/miniconda/base/etc/profile.d/conda.sh
-conda activate chronopc
 DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$DIR/../.." && pwd)"
+# Locate the Chrono root by walking up to the marker directory, rather than counting "..".
+# These scripts have moved once already and the relative depth silently went wrong.
+ROOT="$DIR"
+while [ "$ROOT" != "/" ] && [ ! -d "$ROOT/src/chrono" ]; do ROOT="$(dirname "$ROOT")"; done
+if [ ! -d "$ROOT/src/chrono" ]; then
+  echo "could not locate the Chrono source root above $DIR" >&2
+  exit 1
+fi
 cd "$ROOT"
 DATA=data/mcity
 DEC="python3 $DIR/decimate_foliage.py"

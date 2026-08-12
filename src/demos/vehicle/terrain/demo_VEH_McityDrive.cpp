@@ -121,6 +121,10 @@ void PrintUsage() {
 }
 
 int main(int argc, char** argv) {
+    // Line-buffered: this demo reports progress, and a redirected stdout would otherwise hold it
+    // all until exit -- which makes a slow startup look like a hang.
+    setvbuf(stdout, nullptr, _IOLBF, 0);
+
     std::string foliage = "none";
     std::string data_dir;
     double speed_limit = 20.0;
@@ -185,7 +189,9 @@ int main(int argc, char** argv) {
     ground_mat->SetRestitution(0.01f);
 
     RigidTerrain terrain(&sys);
-    terrain.AddPatch(ground_mat, CSYSNORM, ground_obj, true, 0, false);
+    // connected_mesh = false: the collision BVH indexes triangles and does not need vertex
+    // adjacency, and computing it over 227k triangles dominated startup.
+    terrain.AddPatch(ground_mat, CSYSNORM, ground_obj, false, 0, false);
     terrain.Initialize();
 
     // ---------------------------------------------------------------------------------------
