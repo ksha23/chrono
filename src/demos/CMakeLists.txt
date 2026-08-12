@@ -127,6 +127,15 @@ if(CH_ENABLE_MODULE_VSG)
     endif()
 endif()
 
+# Scenario demos need both the module and a visual system to be worth building.
+if(CH_ENABLE_MODULE_SCENARIO AND CH_ENABLE_MODULE_VSG AND CH_ENABLE_MODULE_VEHICLE)
+    option(BUILD_DEMOS_SCENARIO "Build demo programs for SCENARIO module" TRUE)
+    mark_as_advanced(FORCE BUILD_DEMOS_SCENARIO)
+    if(BUILD_DEMOS_SCENARIO)
+        add_subdirectory(scenario)
+    endif()
+endif()
+
 if(CH_ENABLE_MODULE_MATLAB)
     option(BUILD_DEMOS_MATLAB "Build demo programs for Matlab module" TRUE)
     mark_as_advanced(FORCE BUILD_DEMOS_MATLAB)

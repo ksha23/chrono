@@ -24,6 +24,8 @@
 #include "chrono/utils/ChUtils.h"
 #include "chrono/collision/bullet/ChCollisionUtilsBullet.h"
 
+#include <vsg/utils/ComputeBounds.h>
+
 #include "chrono_vsg/ChVisualSystemVSG.h"
 #include "chrono_vsg/impl/BaseGuiComponents.h"
 #include "chrono_vsg/impl/BaseEventHandlers.h"
@@ -1019,6 +1021,82 @@ bool ChVisualSystemVSG::Run() {
     return m_viewer->active();
 }
 
+void ChVisualSystemVSG::EnableVisualStreaming(bool enable, double radius, double hysteresis) {
+    m_streaming = enable;
+    m_stream_radius = radius;
+    m_stream_hysteresis = std::max(0.0, hysteresis);
+    if (!enable) {
+        // Restore whatever visibility the children had before streaming took over.
+        for (size_t i = 0; i < m_stream_bounds.size() && i < m_visFixedScene->children.size(); i++)
+            m_visFixedScene->children[i].mask = m_stream_bounds[i].second;
+        m_stream_bounds.clear();
+        m_stream_shown = m_stream_total = 0;
+    }
+}
+
+void ChVisualSystemVSG::UpdateStreaming() {
+    if (!m_streaming || !m_initialized)
+        return;
+
+    auto& children = m_visFixedScene->children;
+
+    // Bounds are computed once and cached. They are recomputed only if the child list changed,
+    // which for fixed geometry means something was bound after streaming was switched on.
+    if (m_stream_bounds.size() != children.size()) {
+        m_stream_bounds.clear();
+        m_stream_bounds.reserve(children.size());
+        for (auto& child : children) {
+            vsg::ComputeBounds cb;
+            child.node->accept(cb);
+            vsg::dsphere sphere;
+            if (cb.bounds.valid()) {
+                auto centre = (cb.bounds.min + cb.bounds.max) * 0.5;
+                sphere.set(centre.x, centre.y, centre.z,
+                           vsg::length(cb.bounds.max - cb.bounds.min) * 0.5);
+            } else {
+                // No bounds means nothing to measure; never gate it off.
+                sphere.set(0.0, 0.0, 0.0, -1.0);
+            }
+            m_stream_bounds.emplace_back(sphere, child.mask);
+        }
+    }
+
+    const vsg::dvec3 focus(m_stream_focus.x(), m_stream_focus.y(), m_stream_focus.z());
+    m_stream_total = (int)children.size();
+    m_stream_shown = 0;
+
+    for (size_t i = 0; i < children.size(); i++) {
+        const auto& sphere = m_stream_bounds[i].first;
+        const auto base = m_stream_bounds[i].second;
+        bool is_static = false;
+        children[i].node->getValue("Static", is_static);
+        if (!is_static) {
+            // Anything that can move keeps whatever visibility it already had.
+            children[i].mask = base;
+            if (base)
+                m_stream_shown++;
+            continue;
+        }
+        if (!base || sphere.radius < 0) {
+            // Hidden for other reasons, or unmeasurable: leave it alone.
+            children[i].mask = base;
+            if (base)
+                m_stream_shown++;
+            continue;
+        }
+
+        // Distance to the object's surface, not its centre, so a large object straddling the
+        // boundary is kept while any of it is in range.
+        double d = vsg::length(vsg::dvec3(sphere.x, sphere.y, sphere.z) - focus) - sphere.radius;
+        bool was_on = children[i].mask != vsg::Mask(0);
+        double limit = m_stream_radius + (was_on ? m_stream_hysteresis : 0.0);
+        bool on = d <= limit;
+        children[i].mask = on ? base : vsg::Mask(0);
+        if (on)
+            m_stream_shown++;
+    }
+}
+
 void ChVisualSystemVSG::Render() {
     // Frame rate limiting - decouples the simulation time step from the rendering frame rate and reduces cpu overhead
     // if set to 0, no frame rate limiting is applied
@@ -1049,6 +1127,8 @@ void ChVisualSystemVSG::Render() {
     // Let any plugins perform pre-rendering operations
     for (auto& plugin : m_plugins)
         plugin->OnRender();
+
+    UpdateStreaming();
 
     Update();
 
@@ -1876,6 +1956,16 @@ void ChVisualSystemVSG::BindVisualShapesFixed(const std::shared_ptr<ChObj>& obj,
     vis_model_group->setValue("Tag", obj->GetTag());
     vis_model_group->setValue("Transform", vis_model_transform);
 
+    // Whether this model can be distance-gated by EnableVisualStreaming.
+    //
+    // "Fixed" in this function's name means the shapes are rigid, not that the object holds
+    // still: every moving body's rigid geometry lands here too, with its transform updated each
+    // frame. Streaming caches a world-space bound once, which is only valid for something that
+    // never moves -- gate a vehicle on it and the vehicle vanishes as soon as it drives beyond
+    // the radius measured from where it started.
+    auto as_body = std::dynamic_pointer_cast<ChBody>(obj);
+    vis_model_group->setValue("Static", as_body && as_body->IsFixed());
+
     // Add the group to the global holder
     vsg::Mask mask;
     switch (type) {
@@ -2376,12 +2466,55 @@ void ChVisualSystemVSG::PopulateVisualShapesFixed(vsg::ref_ptr<vsg::Group> group
         } else if (auto trimesh = std::dynamic_pointer_cast<ChVisualShapeTriangleMesh>(shape)) {
             if (trimesh->IsMutable())  // already treated as deformable mesh
                 continue;
+
+            // Share geometry between placements that draw the same mesh with the same materials.
+            //
+            // ChVisualShapeModelFile has done this for years through m_objCache; the triangle-mesh
+            // path had no equivalent, so adding one shape to a visual model N times rebuilt the
+            // vertex buffers N times. That is the difference between a scene of instanced props
+            // being cheap and being impossible: Mcity repeats a single tree over two hundred
+            // times, and its 2010 foliage placements expand to roughly 320M triangles of GPU
+            // buffers uncached against 2.9M shared.
+            //
+            // Pose and scale stay out of the key because they live in the MatrixTransform above
+            // the geometry, so placements differing only in where they sit still share.
+            auto hash_ptr = [](std::size_t seed, const void* p) {
+                return seed ^ (std::hash<const void*>{}(p) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
+            };
+            std::size_t key = hash_ptr(0, trimesh->GetMesh().get());
+            for (const auto& m : trimesh->GetMaterials())
+                key = hash_ptr(key, m.get());
+            key = key * 4 + (double_faced ? 2 : 0) + (wireframe ? 1 : 0);
+            if (trimesh->GetNumMaterials() == 0) {
+                // Colour and opacity are baked into the vertex data on this path, so two meshes
+                // sharing geometry but not colour must not share a cache entry.
+                key = hash_ptr(key, nullptr);
+                key ^= std::hash<float>{}(trimesh->GetColor().R) ^ (std::hash<float>{}(trimesh->GetOpacity()) << 1);
+            }
+
             auto transform = vsg::MatrixTransform::create();
             transform->matrix = vsg::dmat4CH(X_SM, trimesh->GetScale());
-            auto grp = trimesh->GetNumMaterials() > 0
-                           ? m_shapeBuilder->CreateTrimeshPbrMatShape(trimesh->GetMesh(), transform, trimesh->GetMaterials(), double_faced, wireframe)
-                           : m_shapeBuilder->CreateTrimeshColShape(trimesh->GetMesh(), transform, trimesh->GetColor(), trimesh->GetOpacity(), double_faced, wireframe);
-            group->addChild(grp);
+
+            static const bool no_cache = std::getenv("VSG_NO_TRIMESH_CACHE") != nullptr;
+            auto cached = no_cache ? m_trimeshCache.end() : m_trimeshCache.find(key);
+            if (cached != m_trimeshCache.end()) {
+                for (const auto& child : cached->second)
+                    transform->addChild(child);
+                auto grp = vsg::Group::create();
+                grp->addChild(transform);
+                group->addChild(grp);
+            } else {
+                auto grp = trimesh->GetNumMaterials() > 0
+                               ? m_shapeBuilder->CreateTrimeshPbrMatShape(trimesh->GetMesh(), transform, trimesh->GetMaterials(), double_faced, wireframe)
+                               : m_shapeBuilder->CreateTrimeshColShape(trimesh->GetMesh(), transform, trimesh->GetColor(), trimesh->GetOpacity(), double_faced, wireframe);
+                // Keep what the builder hung under the transform, not the transform itself.
+                if (!no_cache) {
+                    std::vector<vsg::ref_ptr<vsg::Node>> children(transform->children.begin(),
+                                                                  transform->children.end());
+                    m_trimeshCache[key] = std::move(children);
+                }
+                group->addChild(grp);
+            }
         } else if (auto model_file = std::dynamic_pointer_cast<ChVisualShapeModelFile>(shape)) {
             const auto& filename = model_file->GetFilename();
             const auto& scale = model_file->GetScale();

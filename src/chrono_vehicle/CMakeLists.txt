@@ -231,6 +231,10 @@ set(CV_TERRAIN_FILES
     terrain/SCMTerrain.cpp
     terrain/GranularTerrain.h
     terrain/GranularTerrain.cpp
+    terrain/ChMeshHeightField.h
+    terrain/ChMeshHeightField.cpp
+    terrain/ChMeshTerrain.h
+    terrain/ChMeshTerrain.cpp
 )
 if(CH_ENABLE_MODULE_FEA)
     set(CV_TERRAIN_FILES ${CV_TERRAIN_FILES}
@@ -263,6 +267,8 @@ set(CV_UTILS_FILES
     utils/ChVehiclePath.cpp
     utils/ChVehicleUtilsJSON.h
     utils/ChVehicleUtilsJSON.cpp
+    utils/ChSceneryModel.h
+    utils/ChSceneryModel.cpp
 )
 source_group("utils" FILES ${CV_UTILS_FILES})
 

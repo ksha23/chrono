@@ -532,7 +532,31 @@ class CH_VSG_API ChVisualSystemVSG : virtual public ChVisualSystem {
 
     std::vector<std::shared_ptr<ChVisualSystemVSGPlugin>> m_plugins;
 
+  public:
+    /// Draw only static visual geometry within \a radius of a moving focus point.
+    ///
+    /// A large static scene is mostly irrelevant at any instant: a vehicle in a town sees a few
+    /// hundred metres of it. This gates each fixed visual model on its distance to the focus, so
+    /// the cost of the scene follows what is near the observer rather than how big the world is.
+    /// The geometry stays resident -- this bounds per-frame work, not memory -- and complements
+    /// frustum culling, which removes what is outside the view but not what is merely far away.
+    ///
+    /// \a hysteresis widens the radius for objects already shown, so an object sitting exactly at
+    /// the boundary does not flicker on and off as the focus jitters.
+    void EnableVisualStreaming(bool enable, double radius = 150.0, double hysteresis = 20.0);
+
+    /// Point that streaming measures distance from; typically the vehicle or camera position.
+    void SetStreamingFocus(const ChVector3d& focus) { m_stream_focus = focus; }
+
+    /// Fixed visual models currently drawn, and the total considered. Zero when streaming is off.
+    void GetStreamingStats(int& shown, int& total) const { shown = m_stream_shown; total = m_stream_total; }
+
   private:
+    /// Re-gate fixed visual models against the streaming focus. Cheap: one distance test per
+    /// model, against bounds computed once.
+    void UpdateStreaming();
+
+
     enum class ObjectType { BODY, LINK, FEA, OTHER };
     enum class PointPointType { SPRING, SEGMENT };
 
@@ -682,6 +706,19 @@ class CH_VSG_API ChVisualSystemVSG : virtual public ChVisualSystem {
     void ExportScreenImage();
 
     std::map<std::size_t, vsg::ref_ptr<vsg::Node>> m_objCache;
+    bool m_streaming = false;
+    double m_stream_radius = 150.0;
+    double m_stream_hysteresis = 20.0;
+    ChVector3d m_stream_focus;
+    int m_stream_shown = 0, m_stream_total = 0;
+    /// World-space bounding sphere per child of m_visFixedScene, and the base mask that child
+    /// had before streaming started gating it.
+    std::vector<std::pair<vsg::dsphere, vsg::Mask>> m_stream_bounds;
+
+    /// Triangle-mesh geometry shared between placements, keyed by mesh and materials.
+    /// The counterpart of m_objCache for ChVisualShapeTriangleMesh; without it, adding one
+    /// shape to a visual model N times rebuilds its vertex buffers N times.
+    std::map<std::size_t, std::vector<vsg::ref_ptr<vsg::Node>>> m_trimeshCache;
     std::hash<std::string> m_stringHash;
     int m_windows_width = 800;
     int m_windows_height = 600;

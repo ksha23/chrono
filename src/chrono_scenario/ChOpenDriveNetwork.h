@@ -281,7 +281,14 @@ class ChApiScenario ChOpenDriveNetwork {
     /// supplied z as an offset carried above the road rather than as a point to project down
     /// from, so it cannot be used to disambiguate stacked roads: over an overpass this reports
     /// the surface esmini snaps to, which need not be the upper deck.
-    bool GetElevation(const ChVector3d& loc, double& elevation) const;
+    /// Road-surface elevation under a world location.
+    ///
+    /// Returns false only if the network cannot be queried at all. Otherwise \a elevation is the
+    /// height of the nearest road, and \a on_surface (when given) reports whether the query point
+    /// actually lies over drivable surface rather than merely near it. Callers standing something
+    /// on the ground want the elevation either way -- a point just past the pavement edge is still
+    /// at road height, and substituting a constant there is a cliff.
+    bool GetElevation(const ChVector3d& loc, double& elevation, bool* on_surface = nullptr) const;
 
     /// Extract the center line of the specified lane as a Bezier curve.
     /// Sampled every `ds` meters along the road. The result can be handed directly to

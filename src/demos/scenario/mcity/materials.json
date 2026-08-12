@@ -28,6 +28,20 @@
     { "match": "Terrain",          "kd": [0.34, 0.40, 0.26] },
     { "match": "Grass",            "kd": [0.28, 0.42, 0.20] },
 
+    { "_note": "Crosswalk signal and mailbox textures exist in this repo only as Unreal cooked",
+      "_note2": "binaries (.uasset/.ubulk), with no PNG anywhere, so these surfaces are authored.",
+      "_note3": "Rules sit above the generic Sign rule, which CrosswalkSignal would otherwise hit.",
+      "match": "CrosswalkSignal_s001_Go_Emissive", "kd": [0.22, 0.85, 0.32], "ks": [0.35, 0.35, 0.35], "ns": 40 },
+    { "match": "CrosswalkSignal_s001_Stop_Emissive", "kd": [0.95, 0.42, 0.10], "ks": [0.35, 0.35, 0.35], "ns": 40 },
+    { "match": "CrosswalkSignal_s001_Plastic",  "kd": [0.14, 0.14, 0.15] },
+    { "match": "CrosswalkSignal",               "kd": [0.16, 0.17, 0.17], "ks": [0.25, 0.25, 0.25], "ns": 35 },
+
+    { "match": "MailBox_s001_Wood",             "kd": [0.42, 0.30, 0.19] },
+    { "match": "MailBox_s001_Concrete",         "kd": [0.60, 0.59, 0.56] },
+    { "match": "MailBox_s001_Reflector",        "kd": [0.85, 0.18, 0.12], "ks": [0.45, 0.45, 0.45], "ns": 60 },
+    { "match": "MailBox_s001_Plastic",          "kd": [0.18, 0.19, 0.22] },
+    { "match": "MailBox",                       "kd": [0.13, 0.26, 0.47], "ks": [0.28, 0.28, 0.28], "ns": 35 },
+
     { "match": "TrafficLightCable","kd": [0.10, 0.10, 0.11] },
     { "match": "TrafficLight",     "kd": [0.12, 0.13, 0.12], "ks": [0.20, 0.20, 0.20], "ns": 30 },
     { "match": "SignPost",         "kd": [0.55, 0.56, 0.58], "ks": [0.30, 0.30, 0.30], "ns": 40 },

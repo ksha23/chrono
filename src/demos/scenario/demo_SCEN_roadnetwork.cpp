@@ -29,7 +29,6 @@ using namespace chrono::scenario;
 using namespace chrono::vsg3d;
 
 namespace {
-const char* kChronoRoot = "/Users/kylesha/Documents/sbel/chrono-sensor-metal/";
 }
 
 int main(int argc, char** argv) {
@@ -40,8 +39,9 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    SetChronoDataPath(std::string(kChronoRoot) + "data/");
-    vehicle::SetVehicleDataPath(std::string(kChronoRoot) + "data/vehicle/");
+    // Data paths come from Chrono's own defaults, which resolve against the working
+    // directory ("../data/"): run these from a build tree's bin/ as with every other
+    // Chrono demo. CHRONO_DATA_DIR / CHRONO_VEHICLE_DATA_DIR override if needed.
 
     std::string xodr_file = argv[1];
     double max_time = (argc > 2) ? std::atof(argv[2]) : 60.0;

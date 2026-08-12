@@ -85,7 +85,23 @@ void ChOpenDriveTerrain::SetRoadDiffuseTextureFile(const std::string& tex_file, 
 // -----------------------------------------------------------------------------------------------
 
 double ChOpenDriveTerrain::GetHeight(const ChVector3d& loc) const {
+    // The drawn geometry wins where it covers the query, so the tire contact patch and the
+    // rendered surface are the same surface rather than two estimates of it.
+    if (m_ground_field && m_ground_field->IsReady()) {
+        ChVector3d loc_ISO = ChWorldFrame::ToISO(loc);
+        double z;
+        // The query point's own height matters: it is a tyre contact patch, and the surface it
+        // stands on is the highest one at or below it. Ignoring z would let a tree canopy or a
+        // sign gantry overhead answer as "ground".
+        if (m_ground_field->HeightBelow(loc_ISO.x(), loc_ISO.y(), loc_ISO.z(), z))
+            return z;
+    }
+
     double elevation;
+    // No on_surface flag wanted here. A tire momentarily past the lane edge -- on a shoulder, or
+    // clipping a corner through a junction -- should stand on the nearest road's surface, not be
+    // dropped to a constant. With the network's datum at 277 m, as at Mcity, that constant was a
+    // 277 m cliff hidden under ground that renders as continuous and flat.
     if (!m_network || !m_network->GetElevation(loc, elevation))
         return m_off_network_height;
 

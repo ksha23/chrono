@@ -413,7 +413,9 @@ ChLaneInfo ChOpenDriveNetwork::GetLaneInfo(const ChVector3d& loc, double heading
 // Geometry
 // -----------------------------------------------------------------------------------------------
 
-bool ChOpenDriveNetwork::GetElevation(const ChVector3d& loc, double& elevation) const {
+bool ChOpenDriveNetwork::GetElevation(const ChVector3d& loc, double& elevation, bool* on_surface) const {
+    if (on_surface)
+        *on_surface = false;
     if (!m_initialized)
         return false;
 
@@ -426,16 +428,19 @@ bool ChOpenDriveNetwork::GetElevation(const ChVector3d& loc, double& elevation) 
     if (RmFailed(RM_SetWorldXYHPosition(m_scratch_elev, loc_ISO.x(), loc_ISO.y(), 0.0)))
         return false;
 
-    // esmini snaps to the nearest road however far away it is, so a successful call does not by
-    // itself mean the query point is over the road. A lane type of NONE is how it reports that.
-    if (RM_GetInLaneType(m_scratch_elev) == ChLaneType::NONE)
-        return false;
-
     RM_PositionData data;
     if (RmFailed(RM_GetPositionData(m_scratch_elev, &data)))
         return false;
 
     elevation = ChWorldFrame::FromISO(ChVector3d(data.x, data.y, data.z)).z();
+
+    // esmini snaps to the nearest road however far away it is, so a successful call does not by
+    // itself mean the query point is over the road. A lane type of NONE is how it reports that.
+    // The elevation is still filled in, because the snapped road's height is a far better answer
+    // for a point just off the pavement than any constant: reporting a fixed value instead drops
+    // the caller off a cliff the height of the network's own datum, which at Mcity is 277 m.
+    if (on_surface)
+        *on_surface = RM_GetInLaneType(m_scratch_elev) != ChLaneType::NONE;
     return true;
 }
 

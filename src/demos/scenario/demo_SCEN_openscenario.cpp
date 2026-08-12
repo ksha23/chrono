@@ -42,19 +42,27 @@ using namespace chrono::vehicle;
 using namespace chrono::scenario;
 
 namespace {
-const char* kChronoRoot = "/Users/kylesha/Documents/sbel/chrono-sensor-metal/";
-const char* kEsminiRootDefault = "/Users/kylesha/Documents/sbel/esmini";
+// esmini ships the example scenarios this demo drives; point ESMINI_ROOT at a clone of
+// https://github.com/esmini/esmini. No default is guessed, because a wrong guess fails with a
+// missing-file error that reads like a bug in the demo.
+const char* kEsminiRootDefault = "";
 
 }  // namespace
 
 int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
 
-    SetChronoDataPath(std::string(kChronoRoot) + "data/");
-    vehicle::SetVehicleDataPath(std::string(kChronoRoot) + "data/vehicle/");
+    // Data paths come from Chrono's own defaults, which resolve against the working
+    // directory ("../data/"): run these from a build tree's bin/ as with every other
+    // Chrono demo. CHRONO_DATA_DIR / CHRONO_VEHICLE_DATA_DIR override if needed.
 
     const char* esmini_root_env = std::getenv("ESMINI_ROOT");
     std::string esmini_root = esmini_root_env ? esmini_root_env : kEsminiRootDefault;
+    if (esmini_root.empty()) {
+        printf("Set ESMINI_ROOT to an esmini checkout (it provides the example scenarios).\n");
+        printf("  git clone https://github.com/esmini/esmini\n");
+        return 1;
+    }
     std::string xosc_file = (argc > 1 && argv[1][0] != '\0')
                                 ? argv[1]
                                 : esmini_root + "/resources/xosc/cut-in_external.xosc";
@@ -224,7 +232,7 @@ int main(int argc, char** argv) {
             // Opt-in frame capture, so a run can be checked without watching it.
             if (std::getenv("SAVE_FRAMES")) {
                 char fn[512];
-                snprintf(fn, sizeof(fn), "%sdemos_live/vsg_out/frame_%04d.png", kChronoRoot, frame_idx);
+                snprintf(fn, sizeof(fn), "%sdemos_live/vsg_out/frame_%04d.png", "./", frame_idx);
                 vis->WriteImageToFile(fn);
             }
             frame_idx++;

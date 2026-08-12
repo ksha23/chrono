@@ -68,8 +68,8 @@ set(Chrono_SCENARIO_FILES
     ChOpenDriveNetwork.cpp
     ChOpenDriveTerrain.h
     ChOpenDriveTerrain.cpp
-    ChSceneryModel.h
-    ChSceneryModel.cpp
+
+
 )
 
 if(Esmini_SE_FOUND)
@@ -155,3 +155,8 @@ if(Esmini_SE_FOUND)
                              ${CMAKE_BINARY_DIR}/lib
                      COMMENT "Copying esminiLib next to the Chrono libraries")
 endif()
+
+# Publish whether the scenario engine (as opposed to just the road manager) is available, so that
+# consumers outside this directory -- the demos, in particular -- can gate on it. A plain variable
+# set here is invisible to sibling directories.
+set(CH_SCENARIO_HAS_SCENARIO_ENGINE ${Esmini_SE_FOUND} CACHE INTERNAL "esmini ScenarioEngine available")

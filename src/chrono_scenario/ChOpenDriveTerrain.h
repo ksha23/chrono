@@ -39,6 +39,7 @@
 #include "chrono_vehicle/ChTerrain.h"
 
 #include "chrono_scenario/ChApiScenario.h"
+#include "chrono_vehicle/terrain/ChMeshHeightField.h"
 #include "chrono_scenario/ChOpenDriveNetwork.h"
 
 namespace chrono {
@@ -65,8 +66,22 @@ class ChApiScenario ChOpenDriveTerrain : public vehicle::ChTerrain {
     /// expose it, so this is a single constant unless a FrictionFunctor is installed.
     void SetContactFrictionCoefficient(float friction_coefficient) { m_friction = friction_coefficient; }
 
-    /// Set the elevation returned for locations off the road network (default: 0).
-    /// Queries outside the network cannot be answered from OpenDRIVE geometry.
+    /// Take ground height from drawn geometry instead of the OpenDRIVE elevation profile.
+    ///
+    /// When set, the height field answers first and the analytic surface is only a fallback for
+    /// points it does not cover. Use this whenever the visuals come from a different source than
+    /// the .xodr: the two are independently authored and need not agree. On Mcity they differ by
+    /// -0.24 to +0.29 m over the carriageway at the 5th and 95th percentiles, which is enough to
+    /// see the vehicle float and sink as it drives.
+    ///
+    /// OpenDRIVE keeps everything else -- lanes, routing, markings, signals.
+    void SetGroundHeightField(std::shared_ptr<vehicle::ChMeshHeightField> field) { m_ground_field = field; }
+
+    /// Set the elevation reported when the network cannot be queried at all (default: 0).
+    ///
+    /// This is a last resort, not the normal off-pavement answer: a location beyond the lane edge
+    /// still reports the nearest road's elevation, so driving onto a shoulder does not fall
+    /// through. Only a network that fails to answer reaches this value.
     void SetOffNetworkHeight(double height) { m_off_network_height = height; }
 
     /// Set the longitudinal and lateral resolution of the generated visualization mesh.
@@ -147,6 +162,7 @@ class ChApiScenario ChOpenDriveTerrain : public vehicle::ChTerrain {
 
     float m_friction;            ///< constant contact coefficient of friction
     double m_off_network_height;  ///< elevation reported off the network
+    std::shared_ptr<vehicle::ChMeshHeightField> m_ground_field;  ///< drawn geometry, preferred when present
 
     double m_mesh_ds;           ///< longitudinal mesh resolution
     int m_mesh_lateral_divs;    ///< lateral mesh samples per lane

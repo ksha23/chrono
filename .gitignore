@@ -125,6 +125,8 @@ demos_live/vsg_out/
 # converted from esmini; regenerate with demos_live/convert_esmini_models.sh
 data/vehicle/pedestrian/
 
-# Mcity digital twin, fetched + converted; see demos_live/mcity/
+# Mcity digital twin: fetched and converted by src/demos/scenario/mcity/setup_mcity.sh.
+# Chrono ships the converter, not the scene -- these are generated and disposable.
 data/mcity/
+mcity_out/
 demos_live/mcity_out/

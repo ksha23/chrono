@@ -13,6 +13,7 @@
 // =============================================================================
 
 #include <cmath>
+#include <unordered_map>
 
 #include <vsg/nodes/DepthSorted.h>
 #include <vsg/utils/ComputeBounds.h>
@@ -32,6 +33,30 @@ namespace vsg3d {
 namespace {
 /// Wrap a node in vsg::DepthSorted for correct back-to-front rendering of transparent objects.
 /// Must be called after geometry has been added as child so bounds can be computed.
+/// A vertex as the welder sees it: two corners merge only if all three attributes agree, so hard
+/// edges and UV seams survive. Bit-exact comparison is deliberate -- these values are copied from
+/// the same source arrays, so corners that should merge are identical, and anything approximate
+/// risks welding across a seam.
+struct Corner {
+    ChVector3d p, n;
+    ChVector2d uv;
+    bool operator==(const Corner& o) const { return p == o.p && n == o.n && uv == o.uv; }
+};
+
+struct CornerHash {
+    std::size_t operator()(const Corner& c) const {
+        std::size_t h = 1469598103934665603ULL;
+        auto mix = [&h](double v) {
+            std::size_t k = std::hash<double>{}(v);
+            h ^= k + 0x9e3779b97f4a7c15ULL + (h << 6) + (h >> 2);
+        };
+        mix(c.p.x()); mix(c.p.y()); mix(c.p.z());
+        mix(c.n.x()); mix(c.n.y()); mix(c.n.z());
+        mix(c.uv.x()); mix(c.uv.y());
+        return h;
+    }
+};
+
 vsg::ref_ptr<vsg::Node> wrapIfTransparent(vsg::ref_ptr<vsg::Node> node, std::shared_ptr<ChVisualMaterial> material) {
     bool use_blending = (material->GetOpacity() < 1.0) || (!material->GetOpacityTexture().empty());
     if (!use_blending)
@@ -455,7 +480,11 @@ vsg::ref_ptr<vsg::Group> ShapeBuilder::CreateTrimeshPbrMatShape(std::shared_ptr<
                                                                 bool wireframe,
                                                                 float wire_width) {
     auto scenegraph = vsg::Group::create();
-    transform->subgraphRequiresLocalFrustum = false;
+    // Frustum culling on, matching what the vehicle model transforms already do. Static
+    // scenery is the case that needs it most: a town-sized set of placements is mostly
+    // off-screen from a chase camera, and with culling off every instance is recorded
+    // every frame no matter where the camera points.
+    transform->subgraphRequiresLocalFrustum = true;
     scenegraph->addChild(transform);
 
     int num_materials = (int)materials.size();
@@ -490,6 +519,8 @@ vsg::ref_ptr<vsg::Group> ShapeBuilder::CreateTrimeshPbrMatShape(std::shared_ptr<
         std::vector<ChVector3d> tmp_vertices;
         std::vector<ChVector3d> tmp_normals;
         std::vector<ChVector2d> tmp_texcoords;
+        std::vector<unsigned int> tmp_indices;
+        std::unordered_map<Corner, unsigned int, CornerHash> weld;
         // Set the VSG vertex and index buffers for this material
         ChVector3d t[3];   // positions of triangle vertices
         ChVector3d n[3];   // normals at the triangle vertices
@@ -517,10 +548,28 @@ vsg::ref_ptr<vsg::Group> ShapeBuilder::CreateTrimeshPbrMatShape(std::shared_ptr<
                 for (int iv = 0; iv < 3; iv++)
                     uv[iv] = 0.0;
             }
+            // Weld corners that agree in position, normal and texture coordinate.
+            //
+            // Emitting three vertices per triangle and then indexing them 0,1,2,3... makes the
+            // index buffer decorative: the GPU shades three vertices per triangle no matter how
+            // much the mesh reuses them. A welded mesh averages nearer 0.6, so this is roughly a
+            // 5x cut in vertex shading and vertex-fetch bandwidth on every triangle mesh Chrono
+            // draws. Corners that genuinely differ -- a hard edge, or a UV seam -- have different
+            // keys and stay separate, so the result is visually identical.
             for (int j = 0; j < 3; j++) {
-                tmp_vertices.push_back(t[j]);
-                tmp_normals.push_back(n[j]);
-                tmp_texcoords.push_back(uv[j]);
+                Corner key{t[j], n[j], uv[j]};
+                auto it = weld.find(key);
+                unsigned int idx;
+                if (it == weld.end()) {
+                    idx = (unsigned int)tmp_vertices.size();
+                    weld.emplace(key, idx);
+                    tmp_vertices.push_back(t[j]);
+                    tmp_normals.push_back(n[j]);
+                    tmp_texcoords.push_back(uv[j]);
+                } else {
+                    idx = it->second;
+                }
+                tmp_indices.push_back(idx);
             }
         }
 
@@ -529,14 +578,15 @@ vsg::ref_ptr<vsg::Group> ShapeBuilder::CreateTrimeshPbrMatShape(std::shared_ptr<
         vsg::ref_ptr<vsg::vec3Array> vsg_vertices = vsg::vec3Array::create(nVert);
         vsg::ref_ptr<vsg::vec3Array> vsg_normals = vsg::vec3Array::create(nVert);
         vsg::ref_ptr<vsg::vec2Array> vsg_texcoords = vsg::vec2Array::create(nVert);
-        vsg::ref_ptr<vsg::uintArray> vsg_indices = vsg::uintArray::create(nVert);
+        vsg::ref_ptr<vsg::uintArray> vsg_indices = vsg::uintArray::create(tmp_indices.size());
         for (size_t k = 0; k < nVert; k++) {
             vsg_vertices->set(k, vsg::vec3CH(tmp_vertices[k]));
             vsg_normals->set(k, vsg::vec3CH(tmp_normals[k]));
             // apply texture scale
             vsg_texcoords->set(k, vsg::vec2(tmp_texcoords[k].x() * chronoMat->GetTextureScale().x(), (1.0 - tmp_texcoords[k].y()) * chronoMat->GetTextureScale().y()));
-            vsg_indices->set(k, (unsigned int)k);
         }
+        for (size_t k = 0; k < tmp_indices.size(); k++)
+            vsg_indices->set(k, tmp_indices[k]);
         auto colors = vsg::vec4Array::create(vsg_vertices->size(), vsg::vec4{1.0f, 1.0f, 1.0f, 1.0f});
 
         vsg::DataList arrays;

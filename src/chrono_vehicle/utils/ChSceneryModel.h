@@ -40,15 +40,17 @@
 #include <vector>
 
 #include "chrono/assets/ChColor.h"
+#include "chrono/core/ChVector3.h"
 #include "chrono/physics/ChBody.h"
 #include "chrono/physics/ChSystem.h"
 
-#include "chrono_scenario/ChApiScenario.h"
+#include "chrono_vehicle/ChApiVehicle.h"
+#include "chrono_vehicle/terrain/ChMeshHeightField.h"
 
 namespace chrono {
-namespace scenario {
+namespace vehicle {
 
-/// @addtogroup scenario_module
+/// @addtogroup vehicle_terrain
 /// @{
 
 /// What to load from a scenery manifest, and how much of it.
@@ -71,6 +73,55 @@ struct ChSceneryOptions {
     /// whole scene. Costs a handful of extra bodies and makes it possible to hide or move a
     /// category at run time.
     bool body_per_group = true;
+
+    /// Rigid offset applied to every placement.
+    ///
+    /// Needed when the scenery and the driving surface come from different sources that do not
+    /// share a vertical datum, which is common enough to be worth a knob but is not universal.
+    /// Mcity happens not to need one: sampling OpenDRIVE elevation against the road mesh in
+    /// world space puts the two within a median 0.012 m, so the default is no offset. Measure
+    /// before setting this -- comparing against asset-local vertices instead of placed ones
+    /// produces a confident, wrong answer.
+    ChVector3d position_offset = ChVector3d(0, 0, 0);
+
+    /// Assets whose triangles also become a queryable ground height, matched by name substring.
+    ///
+    /// Empty means no height field is built. Naming the drivable surfaces here -- for Mcity
+    /// "SM_Roads", "SM_Sidewalks", "SM_Curbs", "SM_Ground" -- lets a vehicle stand on the
+    /// geometry it is drawn against instead of on a separately authored analytic surface that
+    /// need not agree with it. See ChMeshHeightField for the measured disagreement.
+    std::vector<std::string> ground_assets;
+
+    /// Sample every asset into the ground height field except those matching ground_exclude.
+    ///
+    /// Safer as a default than listing what to include: a whitelist silently omits any surface
+    /// nobody remembered to name, and the failure mode is a vehicle sinking through geometry it
+    /// can see. Overhead objects are not a problem here because the query is height-aware -- see
+    /// ChMeshHeightField::HeightBelow -- so the exclusions are only about build cost.
+    bool ground_all = false;
+
+    /// Asset name fragments never sampled as ground. Only consulted when ground_all is set.
+    std::vector<std::string> ground_exclude;
+
+    /// Manifest groups never sampled as ground. Only consulted when ground_all is set.
+    ///
+    /// Prefer this to ground_exclude wherever a group exists. Names are a poor filter for
+    /// categories: excluding "Tree" does not exclude Red_Maple, Scarlet_Oak or Yew, and the
+    /// result was 447 trees in the collision surface -- 20.7M triangles, and a vehicle standing
+    /// on foliage. The group is stated by the producer and is exact.
+    std::vector<std::string> ground_exclude_groups;
+
+    /// Grid pitch of the height field, in metres.
+    double ground_cell_size = 2.0;
+
+    /// Split each group into bodies on an XY grid of this pitch, in metres (0 = one body per
+    /// group).
+    ///
+    /// Bodies are the unit a visual system can switch on and off, so this is what makes
+    /// distance-based streaming possible: with a single body per group, "the foliage" is one
+    /// indivisible object and gating it is all-or-nothing. Tiling turns a town into a few dozen
+    /// independently discardable pieces, at the cost of a few dozen extra collision-free bodies.
+    double tile_size = 0.0;
 };
 
 /// Static scenery: many placements drawn from a small set of meshes.
@@ -87,7 +138,7 @@ struct ChSceneryOptions {
 /// \endcode
 /// Mesh paths are relative to the manifest. Lengths are metres, and the frame is Chrono's own
 /// (Z up), so a producer is responsible for any unit or axis conversion.
-class ChApiScenario ChSceneryModel {
+class CH_VEHICLE_API ChSceneryModel {
   public:
     using Options = ChSceneryOptions;
 
@@ -114,6 +165,19 @@ class ChApiScenario ChSceneryModel {
     /// Assets named in the manifest whose mesh file could not be found.
     unsigned int GetNumMissingAssets() const { return m_num_missing; }
 
+    /// Material slots that resolved to a texture on disk.
+    unsigned int GetNumTexturedSurfaces() const { return m_num_textures; }
+
+    /// Ground height sampled from the assets named in Options::ground_assets.
+    /// Null when none were named.
+    std::shared_ptr<ChMeshHeightField> GetGroundHeightField() const { return m_ground; }
+
+    /// Write the ground surface to a Wavefront file, for RigidTerrain::AddPatch.
+    /// Returns false if no ground was accumulated or the file could not be written.
+    bool WriteGroundMesh(const std::string& path) const {
+        return m_ground && m_ground->IsReady() && m_ground->WriteWavefront(path);
+    }
+
     /// Print a short summary of what was loaded, per group.
     void ReportTo(std::ostream& out) const;
 
@@ -125,11 +189,13 @@ class ChApiScenario ChSceneryModel {
     unsigned int m_num_instances;
     unsigned int m_num_skipped;
     unsigned int m_num_missing;
+    unsigned int m_num_textures;
+    std::shared_ptr<ChMeshHeightField> m_ground;
 };
 
-/// @} scenario_module
+/// @} vehicle_terrain
 
-}  // end namespace scenario
+}  // end namespace vehicle
 }  // end namespace chrono
 
 #endif
