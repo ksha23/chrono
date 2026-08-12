@@ -13,8 +13,8 @@ within 40 m -- rather than the size of the site.
 
 So the geometry itself has to shrink, by roughly 20x.
 
-Two reductions, because the parts differ
-----------------------------------------
+Leaves only
+-----------
 Leaves, needles and flowers are thousands of disconnected cards sharing an atlas texture. Merging
 their vertices would average texture coordinates across unrelated leaves and smear the atlas, so
 those parts instead lose whole cards: every surviving leaf keeps its exact geometry and UVs, and
@@ -33,6 +33,20 @@ import math
 import os
 import random
 
+
+
+def chrono_data_dir():
+    """<chrono>/data/mcity, found by walking up to the source root.
+
+    Not a relative hop: these scripts have moved once already and a counted "../.." silently
+    resolved to the wrong directory, writing the scene where nothing would look for it.
+    """
+    d = os.path.dirname(os.path.abspath(__file__))
+    while d != "/" and not os.path.isdir(os.path.join(d, "src", "chrono")):
+        d = os.path.dirname(d)
+    if not os.path.isdir(os.path.join(d, "src", "chrono")):
+        raise SystemExit("could not locate the Chrono source root above " + __file__)
+    return os.path.join(d, "data", "mcity")
 
 def read_obj(path):
     """Vertices, texcoords, normals and faces of corner triples (v, vt, vn), all 0-based."""
@@ -179,7 +193,7 @@ def cluster(V, VT, VN, F, target):
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
-    data = os.path.abspath(os.path.join(here, "..", "..", "data", "mcity"))
+    data = chrono_data_dir()
     ap.add_argument("--dir", default=data)
     ap.add_argument("--in", dest="src", default=None)
     ap.add_argument("--out", dest="out", default=None)
@@ -189,21 +203,17 @@ def main():
     # keeps the tree recognisable.
     ap.add_argument("--leaf-fraction", type=float, default=0.3,
                     help="fraction of leaf cards to keep (0 = bare branches)")
-    # Branches are modelled one component per twig -- 1194 of them on a Red Maple -- so keeping
-    # the largest components by triangle count keeps the trunk and the structural limbs and
-    # discards the fine wiry ends, which read as noise once the canopy is gone. Only safe to do
-    # when the leaves have already been removed: thinning branches under a full canopy strands
-    # the leaves that grew on them.
-    ap.add_argument("--branch-fraction", type=float, default=1.0,
-                    help="fraction of bark triangles to keep on shrubs, largest limbs first")
-    # Scoped to shrubs on purpose. A bare tree reads correctly as a tree -- trunk and limbs are
-    # the shape you recognise -- but a bare shrub is a ball of wiry twigs that reads as noise,
-    # and there are 1200 of them. So the thinning applies to the bushes and hedges only.
-    ap.add_argument("--drop-shrubs", action="store_true",
-                    help="remove shrub and grass placements entirely, keeping only trees")
+    # Conifers model their branches inside the needle mesh rather than the bark mesh -- White
+    # Pine's bark is 878 triangles and Colorado Spruce's 4067, against 86k of limbs on a Hawthorn.
+    # Stripping the canopy therefore leaves those species as bare trunks standing in the scene, so
+    # with no branches to keep they are dropped instead. 0 keeps them, trunks and all.
+    ap.add_argument("--min-branch-tris", type=int, default=8000,
+                    help="in bare mode, drop species whose branches fall below this (0 = keep all)")
     ap.add_argument("--shrubs", default="Forsythia,Yew,Meadowlark,Holly,Blue_Berry_Elder,"
                                         "Grass_Trimmed_A,Grass_Trimmed_B",
-                    help="species treated as shrubs for --branch-fraction")
+                    help="species that --drop-shrubs removes")
+    ap.add_argument("--drop-shrubs", action="store_true",
+                    help="remove shrub and grass placements entirely, keeping only trees")
     ap.add_argument("--keep-fraction", type=float, default=1.0,
                     help="fraction of foliage placements to keep (density)")
     # Each variant needs its own directory. Sharing one means generating a leafy set silently
@@ -227,6 +237,7 @@ def main():
 
     before = after = 0
     report = []
+    original_solid = {}   # species -> bark triangles before decimation
     shrubs = {x for x in args.shrubs.split(",") if x}
     for ai in sorted(foliage_assets):
         a = assets[ai]
@@ -264,6 +275,13 @@ def main():
                 comps = components(V, F)
                 kinds.append("cards" if (len(comps) > 50 and len(F) / len(comps) < 200) else "solid")
 
+        # Record how much branch geometry this species has before anything is removed, so the
+        # trunk-only test below is not confused by decimation.
+        sp_name = a["name"].split("__")[0]
+        original_solid[sp_name] = max(
+            original_solid.get(sp_name, 0),
+            sum(n for n, k in zip(sizes, kinds) if k == "solid"))
+
         for p, n, kind in zip(parts, sizes, kinds):
             if kind == "skip":
                 continue
@@ -271,20 +289,7 @@ def main():
             V, VT, VN, F = read_obj(path)
             before += len(F)
 
-            species = a["name"].split("__")[0]
-            if kind == "solid" and args.branch_fraction < 1.0 and species in shrubs:
-                comps = components(V, F)
-                comps.sort(key=len, reverse=True)
-                budget = int(n * args.branch_fraction)
-                kept, acc = [], 0
-                for c in comps:
-                    if acc >= budget and kept:
-                        break
-                    kept.extend(c)
-                    acc += len(c)
-                F = kept
-                report.append((species, os.path.basename(p["mesh"]), "shrub", n, len(F), len(comps)))
-            elif kind == "cards" and args.leaf_fraction <= 0.0:
+            if kind == "cards" and args.leaf_fraction <= 0.0:
                 # Bare branches: drop the canopy entirely. Useful as a winter/skeleton variant
                 # and as the cheapest possible foliage.
                 ncomp = 0
@@ -303,6 +308,21 @@ def main():
 
     fol = [i for i in man["instances"] if i["group"] == "Foliage_Instanced"]
     other = [i for i in man["instances"] if i["group"] != "Foliage_Instanced"]
+
+    # With the canopy gone, a species whose branches lived in that canopy is now a trunk.
+    #
+    # Measured on the bark as authored, so the test says something about the asset rather than
+    # about whatever this run happened to remove.
+    if args.leaf_fraction <= 0.0 and args.min_branch_tris > 0:
+        poles = set()
+        for sp, orig in original_solid.items():
+            if orig < args.min_branch_tris:
+                poles.add(sp)
+        if poles:
+            before_n = len(fol)
+            fol = [i for i in fol if assets[i["asset"]]["name"].split("__")[0] not in poles]
+            print(f"  dropped {before_n - len(fol)} trunk-only placements "
+                  f"({', '.join(sorted(poles))}): their branches are modelled in the canopy")
     if args.drop_shrubs:
         before_n = len(fol)
         fol = [i for i in fol

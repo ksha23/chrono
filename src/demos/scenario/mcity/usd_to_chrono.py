@@ -35,6 +35,20 @@ import os
 import sys
 from collections import OrderedDict
 
+
+def chrono_data_dir():
+    """<chrono>/data/mcity, found by walking up to the source root.
+
+    Not a relative hop: these scripts have moved once already and a counted "../.." silently
+    resolved to the wrong directory, writing the scene where nothing would look for it.
+    """
+    d = os.path.dirname(os.path.abspath(__file__))
+    while d != "/" and not os.path.isdir(os.path.join(d, "src", "chrono")):
+        d = os.path.dirname(d)
+    if not os.path.isdir(os.path.join(d, "src", "chrono")):
+        raise SystemExit("could not locate the Chrono source root above " + __file__)
+    return os.path.join(d, "data", "mcity")
+
 try:
     from pxr import Usd, UsdGeom, UsdShade, Gf
 except ImportError:
@@ -338,7 +352,7 @@ def decompose(m):
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
-    default_dir = os.path.abspath(os.path.join(here, "..", "..", "data", "mcity"))
+    default_dir = chrono_data_dir()
     ap.add_argument("--in", dest="indir", default=default_dir)
     ap.add_argument("--out", dest="outdir", default=default_dir)
     ap.add_argument("--groups", default="", help="comma-separated /Root children to include")
@@ -501,6 +515,64 @@ def main():
             "rot": [round(v, 6) for v in q],
             "scale": [round(v, 6) for v in s],
         })
+
+    # The collision surface, as one merged Wavefront mesh.
+    #
+    # RigidTerrain::AddPatch takes a single OBJ and a single transform, while the scene is a few
+    # hundred instanced meshes at different placements. Merging here rather than in C++ keeps the
+    # runtime side to stock Chrono: the demo just points RigidTerrain at this file.
+    #
+    # Named explicitly, because this is a collision mesh rather than a height query.
+    #
+    # An exclusion list was tried first and was the wrong shape for this job: it let in a highway
+    # gantry, an electrical box, a scarecrow and 25k triangles of lane-marking paint lying flat on
+    # the road, doubling the mesh to no purpose. Bullet builds a BVH over whatever it is given,
+    # and that build is the single largest cost in starting this demo.
+    #
+    # Anything omitted here is simply not solid, so keep the list complete: every surface a wheel
+    # can end up on, including the kerbs, the roundabout apron and the traffic islands.
+    GROUND = ("Roads", "Ground", "Sidewalk", "Curb", "Roundabout", "TrafficIsland", "Terrain")
+    NOT_GROUND = ("LaneMarking",)  # paint, coplanar with the road it sits on
+
+    ground_path = os.path.join(args.outdir, "mcity_ground.obj")
+    n_tri = 0
+    with open(ground_path, "w") as gf:
+        gf.write("# Mcity ground, merged in world space for RigidTerrain::AddPatch\n")
+        base = 0
+        for inst in instances:
+            asset = live[inst["asset"]]
+            if not any(w in asset["name"] for w in GROUND):
+                continue
+            if any(w in asset["name"] for w in NOT_GROUND):
+                continue
+            q = inst["rot"]
+            w, x, y, z = q
+            R = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+                 [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+                 [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+            sx, sy, sz = inst["scale"]
+            tx, ty, tz = inst["pos"]
+            for part in asset["info"]["parts"]:
+                mesh_path = os.path.join(args.outdir, part["mesh"])
+                if not os.path.exists(mesh_path):
+                    continue
+                verts, faces = [], []
+                for line in open(mesh_path):
+                    if line.startswith("v "):
+                        f3 = line.split()
+                        verts.append((float(f3[1]) * sx, float(f3[2]) * sy, float(f3[3]) * sz))
+                    elif line.startswith("f "):
+                        faces.append([int(t.split("/")[0]) - 1 for t in line.split()[1:4]])
+                for vx, vy, vz in verts:
+                    gf.write("v {:.4f} {:.4f} {:.4f}\n".format(
+                        R[0][0] * vx + R[0][1] * vy + R[0][2] * vz + tx,
+                        R[1][0] * vx + R[1][1] * vy + R[1][2] * vz + ty,
+                        R[2][0] * vx + R[2][1] * vy + R[2][2] * vz + tz))
+                for a, b, c in faces:
+                    gf.write(f"f {base+a+1} {base+b+1} {base+c+1}\n")
+                    n_tri += 1
+                base += len(verts)
+    print(f"  ground mesh: {n_tri} triangles -> {ground_path}")
 
     manifest = {
         "name": "Mcity",

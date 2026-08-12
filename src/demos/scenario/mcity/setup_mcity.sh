@@ -11,7 +11,10 @@
 #   ./setup_mcity.sh                                       fetch the pieces over HTTPS
 #
 # Options:
-#   --repo DIR     read from a local clone instead of downloading
+#   --bundle SRC   install a pre-converted scene (URL or local .tar.gz) and stop. This is the
+#                  easy path: no USD toolchain, no 3.2 GB clone, no conversion -- roughly 190 MB
+#                  instead. Use it unless you are changing the conversion itself.
+#   --repo DIR     convert from a local clone instead of downloading
 #   --out DIR      where to write the converted scene (default: <chrono>/data/mcity)
 #   --foliage      include vegetation (adds ~200 MB and the LOD configurations)
 #   --skip-fetch   reuse whatever is already in --out
@@ -21,14 +24,23 @@
 set -e
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$DIR/../../../.." && pwd)"
+# Locate the Chrono root by walking up to the marker directory, rather than counting "..".
+# These scripts have moved once already and the relative depth silently went wrong.
+ROOT="$DIR"
+while [ "$ROOT" != "/" ] && [ ! -d "$ROOT/src/chrono" ]; do ROOT="$(dirname "$ROOT")"; done
+if [ ! -d "$ROOT/src/chrono" ]; then
+  echo "could not locate the Chrono source root above $DIR" >&2
+  exit 1
+fi
 OUT="$ROOT/data/mcity"
 REPO_DIR=""
+BUNDLE=""
 FOLIAGE=0
 SKIP_FETCH=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --bundle) BUNDLE="$2"; shift 2 ;;
     --repo) REPO_DIR="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     --foliage) FOLIAGE=1; shift ;;
@@ -38,12 +50,36 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+mkdir -p "$OUT"
+
+# The pre-converted path. Nothing below this point runs: no Python, no USD, no conversion.
+if [ -n "$BUNDLE" ]; then
+  echo "== installing pre-converted scene =="
+  case "$BUNDLE" in
+    http://*|https://*)
+      echo "  downloading $BUNDLE"
+      curl -fL --progress-bar "$BUNDLE" -o "$OUT/.bundle.tar.gz" || {
+        echo "  download failed" >&2; exit 1; }
+      SRC="$OUT/.bundle.tar.gz" ;;
+    *)
+      [ -f "$BUNDLE" ] || { echo "  no such file: $BUNDLE" >&2; exit 1; }
+      SRC="$BUNDLE" ;;
+  esac
+  echo "  extracting into $OUT"
+  tar -xzf "$SRC" -C "$OUT"
+  rm -f "$OUT/.bundle.tar.gz"
+  [ -f "$OUT/mcity_scene.json" ] || { echo "  archive did not contain a scene manifest" >&2; exit 1; }
+  echo
+  echo "done -- scene installed to $OUT"
+  echo "  cd bin && ./demo_SCEN_mcity --foliage none"
+  exit 0
+fi
+
 if ! python3 -c "import pxr" 2>/dev/null; then
   echo "usd-core is required:  python3 -m pip install usd-core" >&2
   exit 1
 fi
 
-mkdir -p "$OUT"
 USD_ROOT="Omniverse/Collected_McityMap_NSR_v4_1_6"
 
 if [ "$SKIP_FETCH" = 0 ]; then
@@ -85,7 +121,13 @@ else
 fi
 
 echo
-echo "done. from a build tree:"
-echo "  ./bin/demo_SCEN_mcity 0 15"
-echo "with a different configuration:"
-echo "  MCITY_SCENE=$OUT/mcity_scene_trees_bare.json ./bin/demo_SCEN_mcity 0 15"
+echo "done -- scene written to $OUT"
+echo
+echo "drive it from a build tree:"
+echo "  cd bin && ./demo_SCEN_mcity --foliage none"
+if [ "$FOLIAGE" = 1 ]; then
+  echo "  cd bin && ./demo_SCEN_mcity --foliage trees"
+  echo
+  echo "vegetation levels: none | trees | trees-leaf | shrubs | full"
+fi
+echo "  ./demo_SCEN_mcity --help    for all options"

@@ -12,7 +12,14 @@
 # Nothing fetched here is committed -- see .gitignore. Re-run to restore.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(cd "$DIR/../.." && pwd)"
+# Locate the Chrono root by walking up to the marker directory, rather than counting "..".
+# These scripts have moved once already and the relative depth silently went wrong.
+ROOT="$DIR"
+while [ "$ROOT" != "/" ] && [ ! -d "$ROOT/src/chrono" ]; do ROOT="$(dirname "$ROOT")"; done
+if [ ! -d "$ROOT/src/chrono" ]; then
+  echo "could not locate the Chrono source root above $DIR" >&2
+  exit 1
+fi
 OUT="${MCITY_DIR:-$ROOT/data/mcity}"
 REPO="mcity/mcity-digital-twin"
 RAW="https://raw.githubusercontent.com/$REPO/main"
