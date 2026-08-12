@@ -93,6 +93,7 @@ int main(int argc, char** argv) {
     double radius = 90.0;
     double max_seconds = 0;  // 0 = until the window is closed
     bool save_frames = false;
+    std::string ground_obj_override;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -108,6 +109,8 @@ int main(int argc, char** argv) {
             max_seconds = std::atof(argv[++i]);
         else if (a == "--save-frames")
             save_frames = true;
+        else if (a == "--ground-obj" && i + 1 < argc)
+            ground_obj_override = argv[++i];
         else {
             printf("usage: demo_VEH_McityDrive [--foliage none|trees|trees-leaf|shrubs|full]\n");
             printf("                           [--terrain mesh|rigid] [--radius M] [--data DIR]\n");
@@ -165,23 +168,22 @@ int main(int argc, char** argv) {
     //   mesh   ChMeshTerrain: a grid lookup, no bodies and no collision system. Cheapest, and
     //          enough for handling tires, which reach the ground only through GetHeight,
     //          GetNormal and GetPoint. Nothing can collide with it.
-    //   rigid  RigidTerrain over a merged ground mesh: the standard route, and the only one that
-    //          gives a solid world, so rigid and FEA tires work and other bodies can hit it.
-    //          Measured *faster* per step than the height field (0.858x against 0.744x) -- a BVH
-    //          raycast beats a grid bucket here.
+    //   rigid  RigidTerrain over a merged ground mesh: the standard route, and the only one
+    //          that gives a solid world, so rigid and FEA tires work and other bodies can hit
+    //          it. Measured slightly faster per step than the height field, since a BVH raycast
+    //          beats a grid bucket here. Costs a 227k-triangle collision mesh and the one-time
+    //          export of that mesh.
     //
-    //          Not the default, though, and not for performance: with a patch this large
-    //          (227k triangles) Chrono's VSG backend stops drawing the rest of the scene
-    //          entirely, even with the patch's own visualization disabled. Substituting a box
-    //          patch on the same code path renders correctly, so it is the mesh patch that does
-    //          it. Worth narrowing and reporting upstream; until then this option is for
-    //          headless or sensor-only use.
+    //          One ordering trap: RigidTerrain answers height queries by raycasting the
+    //          collision system, which does not exist until the first DoStepDynamics. Querying
+    //          it during setup returns its miss value of 0 -- see the spawn height below.
     std::unique_ptr<ChMeshTerrain> mesh_terrain;
     std::unique_ptr<RigidTerrain> rigid_terrain;
     ChTerrain* terrain_ptr = nullptr;
 
     if (terrain_kind == "rigid") {
-        std::string ground_obj = mcity_dir + "/mcity_ground.obj";
+        std::string ground_obj = ground_obj_override.empty() ? mcity_dir + "/mcity_ground.obj"
+                                                             : ground_obj_override;
         std::ifstream have(ground_obj);
         if (!have.good()) {
             printf("  writing merged ground mesh to %s\n", ground_obj.c_str());
@@ -211,9 +213,19 @@ int main(int argc, char** argv) {
 
     WheeledVehicle audi(&sys, GetVehicleDataFile("audi/json/audi_Vehicle.json"));
 
-    // Drop the car onto whatever the scene says is under the start point, rather than trusting a
-    // baked z: the ground comes from the meshes, so ask them.
-    double ground_z = terrain.GetHeight(ChVector3d(kStartPos.x(), kStartPos.y(), kStartPos.z()));
+    // Ask the height field, not the terrain, for the spawn height.
+    //
+    // RigidTerrain answers by raycasting the collision system, which has not been built before
+    // the first DoStepDynamics -- so the ray misses and RigidTerrain::GetHeight returns its
+    // miss value of 0. The car then spawns 274 m below the site, resting on nothing, and the
+    // chase camera follows it into empty sky. The height field is populated at load and has no
+    // such ordering constraint.
+    double ground_z = kStartPos.z();
+    {
+        double z;
+        if (field->HeightBelow(kStartPos.x(), kStartPos.y(), kStartPos.z() + 5.0, z))
+            ground_z = z;
+    }
     ChCoordsys<> start(ChVector3d(kStartPos.x(), kStartPos.y(), ground_z + 0.5),
                        QuatFromAngleZ(kStartYaw));
     audi.Initialize(start);
