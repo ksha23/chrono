@@ -124,3 +124,7 @@ demos_live/vsg_out/
 
 # converted from esmini; regenerate with demos_live/convert_esmini_models.sh
 data/vehicle/pedestrian/
+
+# Mcity digital twin, fetched + converted; see demos_live/mcity/
+data/mcity/
+demos_live/mcity_out/

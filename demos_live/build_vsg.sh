@@ -13,7 +13,7 @@ cd "$ROOT"
 VSGIMGUI="${VSGIMGUI_ROOT:-$HOME/opt/vsgImGui}"
 INC="-I src -I build -isystem $CONDA_PREFIX/include/eigen3 -isystem $CONDA_PREFIX/include -isystem $VSGIMGUI/include -I src/chrono/collision/bullet -I src/chrono_thirdparty/HACDv2 -I src/chrono_thirdparty/yaml-cpp/include"
 LIBS="-L build/lib -lChrono_core -lChrono_vehicle -lChronoModels_vehicle -lChrono_vsg -lChrono_vehicle_vsg -lChrono_scenario -Wl,-rpath,build/lib"
-for demo in scenario_vsg intersection_vsg; do
+for demo in scenario_vsg intersection_vsg map_viewer_vsg mcity_drive_vsg; do
   echo "building $demo"
   c++ -std=c++17 -O2 "$DIR/$demo.cpp" $INC $LIBS -o "$DIR/$demo"
 done

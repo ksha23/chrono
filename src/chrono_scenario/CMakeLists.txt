@@ -68,6 +68,8 @@ set(Chrono_SCENARIO_FILES
     ChOpenDriveNetwork.cpp
     ChOpenDriveTerrain.h
     ChOpenDriveTerrain.cpp
+    ChSceneryModel.h
+    ChSceneryModel.cpp
 )
 
 if(Esmini_SE_FOUND)
