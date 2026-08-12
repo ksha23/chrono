@@ -30,13 +30,29 @@ echo "  road network: $(du -h "$OUT/McityMap_Main.xodr" | cut -f1)"
 # The USD root stage plus the per-asset meshes it references.
 curl -sfL -o "$OUT/usd/McityMap_Main.usdc" "$RAW/$USD_ROOT/McityMap_Main.usdc"
 
-echo "  listing repository tree"
-PATHS=$(curl -sf "https://api.github.com/repos/$REPO/git/trees/main?recursive=1" |
-  python3 -c "
-import json,sys
+# The tree listing, cached on disk. GitHub rate-limits this endpoint per IP, and an unauthenticated
+# run that trips the limit gets an HTML error page rather than JSON. Without the cache that
+# produced an empty download list and a run that looked like it had succeeded.
+TREE="$OUT/repo_tree.json"
+if [ ! -s "$TREE" ]; then
+  echo "  listing repository tree"
+  curl -sfL -o "$TREE.tmp" "https://api.github.com/repos/$REPO/git/trees/main?recursive=1" || true
+  if python3 -c "import json,sys; json.load(open('$TREE.tmp'))['tree']" 2>/dev/null; then
+    mv "$TREE.tmp" "$TREE"
+  else
+    rm -f "$TREE.tmp"
+    echo "  could not list the repository (GitHub rate limit?); retry in a few minutes" >&2
+    exit 1
+  fi
+else
+  echo "  using cached repository tree"
+fi
+
+PATHS=$(python3 -c "
+import json
 keep=('$USD_ROOT/Props/','$USD_ROOT/FinalTrafficLights/')
 if $WANT_FOLIAGE: keep += ('$USD_ROOT/SubUSDs/','$USD_ROOT/Foliage_Instanced.usdc')
-for t in json.load(sys.stdin)['tree']:
+for t in json.load(open('$TREE'))['tree']:
     p=t['path']
     if p.endswith(('.usd','.usdc','.usda')) and p.startswith(keep): print(p)")
 

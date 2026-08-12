@@ -263,6 +263,8 @@ set(CV_UTILS_FILES
     utils/ChVehiclePath.cpp
     utils/ChVehicleUtilsJSON.h
     utils/ChVehicleUtilsJSON.cpp
+    utils/ChSceneryModel.h
+    utils/ChSceneryModel.cpp
 )
 source_group("utils" FILES ${CV_UTILS_FILES})
 

@@ -40,15 +40,16 @@
 #include <vector>
 
 #include "chrono/assets/ChColor.h"
+#include "chrono/core/ChVector3.h"
 #include "chrono/physics/ChBody.h"
 #include "chrono/physics/ChSystem.h"
 
-#include "chrono_scenario/ChApiScenario.h"
+#include "chrono_vehicle/ChApiVehicle.h"
 
 namespace chrono {
-namespace scenario {
+namespace vehicle {
 
-/// @addtogroup scenario_module
+/// @addtogroup vehicle_terrain
 /// @{
 
 /// What to load from a scenery manifest, and how much of it.
@@ -71,6 +72,19 @@ struct ChSceneryOptions {
     /// whole scene. Costs a handful of extra bodies and makes it possible to hide or move a
     /// category at run time.
     bool body_per_group = true;
+
+    /// Rigid offset applied to every placement.
+    ///
+    /// Needed when the scenery and the driving surface come from different sources that do not
+    /// share a vertical datum, which is common enough to be worth a knob but is not universal.
+    /// Mcity happens not to need one: sampling OpenDRIVE elevation against the road mesh in
+    /// world space puts the two within a median 0.012 m, so the default is no offset. Measure
+    /// before setting this -- comparing against asset-local vertices instead of placed ones
+    /// produces a confident, wrong answer.
+    ChVector3d position_offset = ChVector3d(0, 0, 0);
+
+
+
 };
 
 /// Static scenery: many placements drawn from a small set of meshes.
@@ -87,7 +101,7 @@ struct ChSceneryOptions {
 /// \endcode
 /// Mesh paths are relative to the manifest. Lengths are metres, and the frame is Chrono's own
 /// (Z up), so a producer is responsible for any unit or axis conversion.
-class ChApiScenario ChSceneryModel {
+class CH_VEHICLE_API ChSceneryModel {
   public:
     using Options = ChSceneryOptions;
 
@@ -114,6 +128,11 @@ class ChApiScenario ChSceneryModel {
     /// Assets named in the manifest whose mesh file could not be found.
     unsigned int GetNumMissingAssets() const { return m_num_missing; }
 
+    /// Material slots that resolved to a texture on disk.
+    unsigned int GetNumTexturedSurfaces() const { return m_num_textures; }
+
+
+
     /// Print a short summary of what was loaded, per group.
     void ReportTo(std::ostream& out) const;
 
@@ -125,11 +144,12 @@ class ChApiScenario ChSceneryModel {
     unsigned int m_num_instances;
     unsigned int m_num_skipped;
     unsigned int m_num_missing;
+    unsigned int m_num_textures;
 };
 
-/// @} scenario_module
+/// @} vehicle_terrain
 
-}  // end namespace scenario
+}  // end namespace vehicle
 }  // end namespace chrono
 
 #endif

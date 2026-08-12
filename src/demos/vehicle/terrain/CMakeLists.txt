@@ -25,6 +25,7 @@ if(CH_ENABLE_MODULE_VSG)
     
     set(DEMOS ${DEMOS}
         demo_VEH_RigidTerrain_WheeledVehicle
+        demo_VEH_McityDrive
         demo_VEH_RigidSCMTerrain_MixedPatches
         demo_VEH_SCMTerrain_RigidTire
         demo_VEH_RigidTerrain_MovingPatch
