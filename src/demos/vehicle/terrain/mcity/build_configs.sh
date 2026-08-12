@@ -24,6 +24,26 @@ cd "$ROOT"
 DATA=data/mcity
 DEC="python3 $DIR/decimate_foliage.py"
 
+# The foliage manifest names meshes under assets/. A previous non-foliage conversion can leave
+# that directory without them, and the decimator would then quietly skip every tree -- producing
+# manifests that reference meshes which do not exist.
+if [ -f "$DATA/mcity_scene_foliage.json" ]; then
+  MISSING=$(python3 - "$DATA" <<'PY2'
+import json, os, sys
+data = sys.argv[1]
+doc = json.load(open(os.path.join(data, "mcity_scene_foliage.json")))
+missing = sum(1 for a in doc["assets"] for p in a["parts"]
+              if not os.path.exists(os.path.join(data, p["mesh"])))
+print(missing)
+PY2
+)
+  if [ "$MISSING" -gt 0 ]; then
+    echo "  $MISSING source meshes named by mcity_scene_foliage.json are missing from $DATA/assets" >&2
+    echo "  re-run:  ./setup_mcity.sh --foliage --skip-fetch" >&2
+    exit 1
+  fi
+fi
+
 if [ ! -f "$DATA/mcity_scene_foliage.json" ]; then
   echo "missing $DATA/mcity_scene_foliage.json -- run:" >&2
   echo "  python3 $DIR/usd_to_chrono.py --exclude-groups \"\"" >&2
@@ -34,8 +54,8 @@ echo "== 1/4  trees only, bare branches =="
 $DEC --leaf-fraction 0 --drop-shrubs \
      --lod-dir lod_trees_bare --out $DATA/mcity_scene_trees_bare.json | tail -2
 
-echo "== 2/4  trees and shrubs, bare branches (shrub twigs thinned) =="
-$DEC --leaf-fraction 0 --branch-fraction 0.25 \
+echo "== 2/4  trees and shrubs, bare branches =="
+$DEC --leaf-fraction 0 \
      --lod-dir lod_all_bare --out $DATA/mcity_scene_all_bare.json | tail -2
 
 echo "== 3/4  trees only, with leaves =="
@@ -43,7 +63,7 @@ $DEC --leaf-fraction 0.4 --drop-shrubs \
      --lod-dir lod_trees_leaf --out $DATA/mcity_scene_trees_leaf.json | tail -2
 
 echo "== 4/4  everything: trees and shrubs, with leaves =="
-$DEC --leaf-fraction 0.4 --branch-fraction 0.25 \
+$DEC --leaf-fraction 0.4 \
      --lod-dir lod_full --out $DATA/mcity_scene_full.json | tail -2
 
 echo

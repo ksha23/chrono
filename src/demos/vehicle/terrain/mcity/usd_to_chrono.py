@@ -35,6 +35,20 @@ import os
 import sys
 from collections import OrderedDict
 
+
+def chrono_data_dir():
+    """<chrono>/data/mcity, found by walking up to the source root.
+
+    Not a relative hop: these scripts have moved once already and a counted "../.." silently
+    resolved to the wrong directory, writing the scene where nothing would look for it.
+    """
+    d = os.path.dirname(os.path.abspath(__file__))
+    while d != "/" and not os.path.isdir(os.path.join(d, "src", "chrono")):
+        d = os.path.dirname(d)
+    if not os.path.isdir(os.path.join(d, "src", "chrono")):
+        raise SystemExit("could not locate the Chrono source root above " + __file__)
+    return os.path.join(d, "data", "mcity")
+
 try:
     from pxr import Usd, UsdGeom, UsdShade, Gf
 except ImportError:
@@ -338,7 +352,7 @@ def decompose(m):
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
-    default_dir = os.path.abspath(os.path.join(here, "..", "..", "data", "mcity"))
+    default_dir = chrono_data_dir()
     ap.add_argument("--in", dest="indir", default=default_dir)
     ap.add_argument("--out", dest="outdir", default=default_dir)
     ap.add_argument("--groups", default="", help="comma-separated /Root children to include")
@@ -508,16 +522,17 @@ def main():
     # hundred instanced meshes at different placements. Merging here rather than in C++ keeps the
     # runtime side to stock Chrono: the demo just points RigidTerrain at this file.
     #
-    # Ground is everything except the categories a vehicle cannot drive on. Excluding is safer
-    # than listing what to include -- a whitelist silently omits any surface nobody remembered to
-    # name, and the failure mode is sinking through geometry you can see.
-    SKIP_GROUPS = {"Foliage_Instanced", "TrafficPoles", "StreetLights", "TrafficLights",
-                   "TrafficLightCables"}
-    SKIP_NAMES = ("Pole", "Sign", "TrafficLight", "Cable", "Fence", "GuardRail", "Facade",
-                  "Building", "StreetLight", "Hydrant", "Bollard", "Barrier", "Container",
-                  "WaterTower", "Pavilion", "Basketball", "Dumpster", "BusStop", "Bench",
-                  "Chair", "Table", "Meter", "Charger", "Barrel", "Rock", "Camera",
-                  "GPSBlocker", "MailBox", "TrashCan", "BikeRack")
+    # Named explicitly, because this is a collision mesh rather than a height query.
+    #
+    # An exclusion list was tried first and was the wrong shape for this job: it let in a highway
+    # gantry, an electrical box, a scarecrow and 25k triangles of lane-marking paint lying flat on
+    # the road, doubling the mesh to no purpose. Bullet builds a BVH over whatever it is given,
+    # and that build is the single largest cost in starting this demo.
+    #
+    # Anything omitted here is simply not solid, so keep the list complete: every surface a wheel
+    # can end up on, including the kerbs, the roundabout apron and the traffic islands.
+    GROUND = ("Roads", "Ground", "Sidewalk", "Curb", "Roundabout", "TrafficIsland", "Terrain")
+    NOT_GROUND = ("LaneMarking",)  # paint, coplanar with the road it sits on
 
     ground_path = os.path.join(args.outdir, "mcity_ground.obj")
     n_tri = 0
@@ -526,7 +541,9 @@ def main():
         base = 0
         for inst in instances:
             asset = live[inst["asset"]]
-            if inst["group"] in SKIP_GROUPS or any(w in asset["name"] for w in SKIP_NAMES):
+            if not any(w in asset["name"] for w in GROUND):
+                continue
+            if any(w in asset["name"] for w in NOT_GROUND):
                 continue
             q = inst["rot"]
             w, x, y, z = q

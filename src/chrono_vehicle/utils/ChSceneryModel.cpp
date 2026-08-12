@@ -79,6 +79,7 @@ unsigned int CountObjTriangles(const std::string& path) {
     return tris;
 }
 
+
 bool Listed(const std::vector<std::string>& list, const std::string& value) {
     return std::find(list.begin(), list.end(), value) != list.end();
 }
@@ -194,6 +195,7 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
         sys.Add(body);
         return body;
     };
+
 
     std::map<std::string, std::shared_ptr<ChBody>> group_bodies;
     std::shared_ptr<ChBody> single_body;
@@ -336,11 +338,13 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
         m_per_group[group]++;
     }
 
+
     m_bodies.clear();
     if (single_body)
         m_bodies.push_back(single_body);
     for (const auto& kv : group_bodies)
         m_bodies.push_back(kv.second);
+
 
     return true;
 }

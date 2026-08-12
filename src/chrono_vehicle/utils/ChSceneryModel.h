@@ -84,8 +84,8 @@ struct ChSceneryOptions {
     ChVector3d position_offset = ChVector3d(0, 0, 0);
 
 
-
 };
+
 
 /// Static scenery: many placements drawn from a small set of meshes.
 ///
@@ -115,6 +115,8 @@ class CH_VEHICLE_API ChSceneryModel {
 
     /// Bodies carrying the scenery, one per group or one in total.
     const std::vector<std::shared_ptr<ChBody>>& GetBodies() const { return m_bodies; }
+
+
 
     /// Distinct meshes actually loaded.
     unsigned int GetNumAssets() const { return m_num_assets; }

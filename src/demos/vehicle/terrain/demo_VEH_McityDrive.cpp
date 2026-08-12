@@ -58,12 +58,16 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
+#include <chrono>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <memory>
+#include <vector>
 
 #include "chrono/core/ChRealtimeStep.h"
 #include "chrono/physics/ChSystemNSC.h"
+#include "chrono/solver/ChIterativeSolver.h"
 
 #include "chrono_vehicle/ChVehicleDataPath.h"
 #include "chrono_vehicle/driver/ChInteractiveDriver.h"
@@ -110,6 +114,9 @@ void PrintUsage() {
         "                    Anything but 'none' needs setup_mcity.sh --foliage.\n"
         "  --data DIR        converted scene directory (default <chrono data>/mcity)\n"
         "  --speed-limit V   speed the throttle is scaled toward, m/s (default 20)\n"
+        "  --tire MODEL      pac02 | tmeasy | rigid   (default pac02)\n"
+        "  --tire-step S     tire internal step, s (default 1e-4)\n"
+        "                             build at startup and roughly half the frame rate.\n"
         "  -h, --help        this message\n"
         "\n"
         "First time? The scene is generated, not shipped:\n"
@@ -128,6 +135,8 @@ int main(int argc, char** argv) {
     std::string foliage = "none";
     std::string data_dir;
     double speed_limit = 20.0;
+    std::string tire = "pac02";
+    double tire_step = 1e-4;
 
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -137,6 +146,10 @@ int main(int argc, char** argv) {
             data_dir = argv[++i];
         else if (a == "--speed-limit" && i + 1 < argc)
             speed_limit = std::atof(argv[++i]);
+        else if (a == "--tire" && i + 1 < argc)
+            tire = argv[++i];
+        else if (a == "--tire-step" && i + 1 < argc)
+            tire_step = std::atof(argv[++i]);
         else {
             PrintUsage();
             return (a == "-h" || a == "--help") ? 0 : 1;
@@ -148,13 +161,28 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (tire != "pac02" && tire != "tmeasy" && tire != "rigid") {
+        printf("unknown --tire model: %s\n", tire.c_str());
+        PrintUsage();
+        return 1;
+    }
+
     std::string mcity_dir = data_dir.empty() ? GetChronoDataFile("mcity") : data_dir;
     std::string manifest = mcity_dir + "/" + ManifestFor(foliage);
     std::string ground_obj = mcity_dir + "/mcity_ground.obj";
 
+    auto t_boot = std::chrono::steady_clock::now();
+
     ChSystemNSC sys;
     sys.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
     sys.SetCollisionSystemType(ChCollisionSystem::Type::BULLET);
+
+    // Solver settings, matching what Chrono's own road-driving demos use. The defaults are a
+    // projected Gauss-Seidel solver with few iterations, which under-solves a vehicle's
+    // suspension constraints and shows up as the suspension juddering for no visible reason.
+    sys.SetSolverType(ChSolver::Type::BARZILAIBORWEIN);
+    sys.GetSolver()->AsIterative()->SetMaxIterations(150);
+    sys.SetMaxPenetrationRecoverySpeed(4.0);
 
     // ---------------------------------------------------------------------------------------
     // Scene
@@ -175,22 +203,25 @@ int main(int argc, char** argv) {
     // the scenery already draws these triangles, and drawing them twice would z-fight.
     // ---------------------------------------------------------------------------------------
 
-    {
-        std::ifstream f(ground_obj);
-        if (!f.good()) {
-            printf("\nCould not read %s\n", ground_obj.c_str());
-            printf("Re-run setup_mcity.sh; the converter writes it alongside the manifest.\n");
-            return 1;
-        }
+    std::ifstream gf(ground_obj);
+    if (!gf.good()) {
+        printf("\nCould not read %s\n", ground_obj.c_str());
+        printf("Re-run setup_mcity.sh; the converter writes it alongside the manifest.\n");
+        return 1;
     }
 
-    auto ground_mat = chrono_types::make_shared<ChContactMaterialNSC>();
-    ground_mat->SetFriction(0.9f);
-    ground_mat->SetRestitution(0.01f);
+    // Contact material, matching the tuning used by the Chrono HIL teleop scenes: friction 0.9,
+    // restitution 0.01, and a Young's modulus of 2e7. The stiffness matters -- the default is far
+    // stiffer than a road needs and makes the solver work harder for no benefit.
+    ChContactMaterialData minfo;
+    minfo.mu = 0.9f;
+    minfo.cr = 0.01f;
+    minfo.Y = 2e7f;
+    auto ground_mat = minfo.CreateMaterial(sys.GetContactMethod());
 
     RigidTerrain terrain(&sys);
     // connected_mesh = false: the collision BVH indexes triangles and does not need vertex
-    // adjacency, and computing it over 227k triangles dominated startup.
+    // adjacency. Visualization off: the scenery already draws these triangles.
     terrain.AddPatch(ground_mat, CSYSNORM, ground_obj, false, 0, false);
     terrain.Initialize();
 
@@ -198,13 +229,13 @@ int main(int argc, char** argv) {
     // Vehicle
     // ---------------------------------------------------------------------------------------
 
-    // Spawn height comes from the mesh, not from RigidTerrain.
+    // For RigidTerrain the spawn height comes from the mesh file, not from the terrain.
     //
     // RigidTerrain answers height queries by raycasting the collision system, and that system is
     // not built until the first DoStepDynamics. Asking during setup misses, and GetHeight returns
     // its miss value of zero -- which on a site whose datum is 274 m drops the vehicle out of the
     // world. Reading the ground mesh directly avoids the ordering entirely.
-    double ground_z = 0;
+    double ground_z = 274.26;
     {
         std::ifstream f(ground_obj);
         std::string tag;
@@ -235,8 +266,14 @@ int main(int argc, char** argv) {
 
     for (auto& axle : audi.GetAxles()) {
         for (auto& wheel : axle->GetWheels()) {
-            auto tire = ReadTireJSON(GetVehicleDataFile("audi/json/audi_Pac02Tire.json"));
-            audi.InitializeTire(tire, wheel, VisualizationType::MESH);
+            std::string tire_json = "audi/json/audi_Pac02Tire.json";
+            if (tire == "tmeasy")
+                tire_json = "audi/json/audi_TMeasyTire.json";
+            else if (tire == "rigid")
+                tire_json = "audi/json/audi_RigidTire.json";
+            auto t = ReadTireJSON(GetVehicleDataFile(tire_json));
+            t->SetStepsize(tire_step);
+            audi.InitializeTire(t, wheel, VisualizationType::MESH);
         }
     }
 
@@ -261,7 +298,12 @@ int main(int argc, char** argv) {
     vis->AttachDriver(&driver);
     vis->Initialize();
 
-    printf("\nW/S throttle and brake, A/D steer.\n\n");
+    printf("\n  [%.1f s to build the scene and open the window]\n", 
+           std::chrono::duration<double>(std::chrono::steady_clock::now() - t_boot).count());
+    printf("W/S throttle and brake, A/D steer.\n\n");
+    auto t_loop = std::chrono::steady_clock::now();
+    double next_report = 0;
+    double render_s = 0, physics_s = 0;
 
     const double step = 1e-3;
     const double render_step = 1.0 / 50;  // physics wants 1 kHz; the display does not
@@ -272,12 +314,23 @@ int main(int argc, char** argv) {
         double time = sys.GetChTime();
 
         if (time >= next_render) {
+            auto tR = std::chrono::steady_clock::now();
             vis->BeginScene();
             vis->Render();
             vis->EndScene();
+            render_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - tR).count();
             next_render += render_step;
         }
 
+
+        if (time >= next_report) {
+            double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_loop).count();
+            printf("  t=%5.1f s   %.2fx real time   (physics %.1f s, render %.1f s of %.1f s wall)\n",
+                   time, wall > 0 ? time / wall : 0, physics_s, render_s, wall);
+            next_report += 2.0;
+        }
+
+        auto tP = std::chrono::steady_clock::now();
         DriverInputs inputs = driver.GetInputs();
         driver.Synchronize(time);
         terrain.Synchronize(time);
@@ -289,8 +342,16 @@ int main(int argc, char** argv) {
         audi.Advance(step);
         vis->Advance(step);
         sys.DoStepDynamics(step);
+        physics_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - tP).count();
 
-        realtime.Spin(step);
+        // Throttle once per rendered frame, not once per physics step.
+        //
+        // Spinning every step caps each one at the step size, so the 19 steps between frames
+        // sleep away their slack and the 20th still has to pay for the render. The loop can
+        // never make that back, and a scene that runs comfortably faster than real time reports
+        // roughly half speed. Pacing per frame lets the fast steps absorb the slow one.
+        if (time >= next_render - step)
+            realtime.Spin(render_step);
     }
 
     return 0;

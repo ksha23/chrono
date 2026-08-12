@@ -42,6 +42,20 @@ import subprocess
 import sys
 from collections import Counter
 
+
+def chrono_data_dir():
+    """<chrono>/data/mcity, found by walking up to the source root.
+
+    Not a relative hop: these scripts have moved once already and a counted "../.." silently
+    resolved to the wrong directory, writing the scene where nothing would look for it.
+    """
+    d = os.path.dirname(os.path.abspath(__file__))
+    while d != "/" and not os.path.isdir(os.path.join(d, "src", "chrono")):
+        d = os.path.dirname(d)
+    if not os.path.isdir(os.path.join(d, "src", "chrono")):
+        raise SystemExit("could not locate the Chrono source root above " + __file__)
+    return os.path.join(d, "data", "mcity")
+
 try:
     from pxr import Usd, UsdGeom, UsdShade
 except ImportError:
@@ -254,7 +268,7 @@ def resolve(material, tex_index, tex_squashed, inline, mdl_dir):
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
-    ap.add_argument("--dir", default=os.path.abspath(os.path.join(here, "..", "..", "data", "mcity")))
+    ap.add_argument("--dir", default=chrono_data_dir())
     ap.add_argument("--no-fetch", action="store_true")
     # Chrono's VSG backend uploads textures as uncompressed RGBA, so on-disk PNG size is not the
     # cost that matters: 568 maps at mostly 2048 square is 8.0 GB resident, which on its own put
