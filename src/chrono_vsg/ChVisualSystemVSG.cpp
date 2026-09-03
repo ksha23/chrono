@@ -121,9 +121,9 @@ class ChMainGuiVSG : public vsg::Inherit<vsg::Command, ChMainGuiVSG> {
         const float y_min = viewport->WorkPos.y + pad;
         const float x_max = viewport->WorkPos.x + viewport->WorkSize.x;
 
-        float x = x_min;           // left edge of the next panel
-        float y = y_min;           // top edge of the current row
-        float row_height = 0.0f;   // height of the tallest panel in the current row
+        float x = x_min;          // left edge of the next panel
+        float y = y_min;          // top edge of the current row
+        float row_height = 0.0f;  // height of the tallest panel in the current row
 
         auto place = [&](const std::shared_ptr<ChGuiComponentVSG>& gui) {
             if (!gui->IsVisible() || gui->GetPlacement() != ChGuiComponentVSG::Placement::AUTO)

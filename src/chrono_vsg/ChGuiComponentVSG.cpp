@@ -20,12 +20,7 @@
 namespace chrono {
 namespace vsg3d {
 
-ChGuiComponentVSG::ChGuiComponentVSG()
-    : m_visible(true),
-      m_vsys(nullptr),
-      m_placement(Placement::AUTO),
-      m_layout_pos(0.0f, 0.0f),
-      m_layout_size(0.0f, 0.0f) {}
+ChGuiComponentVSG::ChGuiComponentVSG() : m_visible(true), m_vsys(nullptr), m_placement(Placement::AUTO), m_layout_pos(0.0f, 0.0f), m_layout_size(0.0f, 0.0f) {}
 
 bool ChGuiComponentVSG::BeginWindow(const char* name, bool* p_open, ImGuiWindowFlags flags) {
     if (m_placement == Placement::AUTO)

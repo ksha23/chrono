@@ -183,7 +183,6 @@ void ChSTRGuiComponentVSG::render(vsg::CommandBuffer& cb) {
         ImGui::EndTable();
     }
 
-
     EndWindow();
 }
 
