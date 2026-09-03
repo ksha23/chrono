@@ -26,6 +26,11 @@
 #include "chrono_sensor/sensors/ChSegmentationCamera.h"
 #include "chrono_sensor/sensors/ChLidarSensor.h"
 #include "chrono_sensor/sensors/ChRadarSensor.h"
+#include "chrono_sensor/sensors/ChPhysCameraSensor.h"
+#include "chrono_sensor/sensors/ChIMUSensor.h"
+#include "chrono_sensor/sensors/ChGPSSensor.h"
+#include "chrono_sensor/sensors/ChTachometerSensor.h"
+#include "chrono_sensor/sensors/ChNoiseModel.h"
 #include "chrono_sensor/filters/ChFilterAccess.h"
 
 using namespace chrono;
@@ -119,19 +124,26 @@ static ChFrame<double> CamPose() {
     return ChFrame<double>({-6, 0, 2.2}, QuatFromAngleAxis(0, {0, 1, 0}));
 }
 
+// A zero-size fixed body used purely as the sensor mount. NB: do not call this Ref() -- with
+// using namespace chrono in scope, Eigen::Ref is visible and silently wins the lookup.
+static std::shared_ptr<ChBody> SensorMount(ChSystem& sys) {
+    auto mount = chrono_types::make_shared<ChBodyEasyBox>(.01, .01, .01, 1000, false, false);
+    mount->SetFixed(true);
+    sys.Add(mount);
+    return mount;
+}
+
 // ---------------------------------------------------------------- scenarios
 
-static void ScCamera(const std::string& name, std::function<void(ChSystem&, std::shared_ptr<ChSensorManager>)> setup, bool gi = false, int ss = 2) {
+static void ScCamera(const std::string& name, std::function<void(ChSystem&, std::shared_ptr<ChSensorManager>)> setup, bool gi = false, int ss = 2, bool fog = false) {
     ChSystemNSC sys;
     sys.SetGravitationalAcceleration({0, 0, 0});
     Room(sys);
     auto mgr = MakeManager(sys, gi ? 6 : 4);
     setup(sys, mgr);
-    auto ref = chrono_types::make_shared<ChBodyEasyBox>(.01, .01, .01, 1000, false, false);
-    ref->SetFixed(true);
-    sys.Add(ref);
+    auto ref = SensorMount(sys);
     auto cam = chrono_types::make_shared<ChCameraSensor>(ref, 30.f, CamPose(), W, H, 1.396f, ss,
-                                                         CameraLensModelType::PINHOLE, gi, false);
+                                                         CameraLensModelType::PINHOLE, gi, false, Integrator::LEGACY, 2.2f, fog);
     cam->PushFilter(chrono_types::make_shared<ChFilterRGBA8Access>());
     mgr->AddSensor(cam);
     auto buf = Grab<UserRGBA8BufferPtr>(cam, mgr, sys);
@@ -139,6 +151,45 @@ static void ScCamera(const std::string& name, std::function<void(ChSystem&, std:
         Dump(name, "rgba8", W, H, buf->Buffer.get(), (size_t)W * H * 4);
     else
         printf("  !! %s produced no buffer\n", name.c_str());
+}
+
+// The same room and sphere through a distorted lens, so the lens model itself is what varies.
+static void ScCameraLens(const std::string& name, CameraLensModelType lens) {
+    ChSystemNSC sys;
+    sys.SetGravitationalAcceleration({0, 0, 0});
+    Room(sys);
+    Sphere(sys, 1.0, {0, 0, 1.2}, Mat({0.85f, 0.8f, 0.75f}, 0.35f, 0.f));
+    Box(sys, {0.5, 0.5, 2.2}, {1.6, -2.2, 1.1}, Mat({0.4f, 0.55f, 0.8f}, 0.5f, 0.f));
+    auto mgr = MakeManager(sys);
+    mgr->scene->AddPointLight({-2, 2, 5}, {1.f, 1.f, 1.f}, 60.f);
+    auto ref = SensorMount(sys);
+    auto cam = chrono_types::make_shared<ChCameraSensor>(ref, 30.f, CamPose(), W, H, 1.396f, 2, lens);
+    cam->PushFilter(chrono_types::make_shared<ChFilterRGBA8Access>());
+    mgr->AddSensor(cam);
+    auto buf = Grab<UserRGBA8BufferPtr>(cam, mgr, sys);
+    if (buf && buf->Buffer)
+        Dump(name, "rgba8", W, H, buf->Buffer.get(), (size_t)W * H * 4);
+}
+
+// One lidar geometry, several beam configurations. Divergence and sample_radius exercise the
+// multi-sample beam path; the return mode decides how those samples collapse to one range.
+static void ScLidar(const std::string& name, LidarBeamShape shape, unsigned int sample_radius, LidarReturnMode mode, float div) {
+    ChSystemNSC sys;
+    sys.SetGravitationalAcceleration({0, 0, 0});
+    Room(sys);
+    Sphere(sys, 1.0, {0, 0, 1.2}, Mat({0.8f, 0.8f, 0.8f}, 0.5f, 0.f));
+    Box(sys, {1.0, 1.0, 2.0}, {1.2, -2.0, 1.0}, Mat({0.8f, 0.8f, 0.8f}, 0.5f, 0.f));
+    Box(sys, {0.3, 2.0, 0.3}, {0.4, 1.8, 2.2}, Mat({0.8f, 0.8f, 0.8f}, 0.5f, 0.f));  // thin edge, for multi-return
+    auto mgr = MakeManager(sys);
+    mgr->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+    auto ref = SensorMount(sys);
+    auto li = chrono_types::make_shared<ChLidarSensor>(ref, 10.f, CamPose(), W, H, 1.396f, 0.35f, -0.35f, 40.f, shape,
+                                                       sample_radius, div, div, mode);
+    li->PushFilter(chrono_types::make_shared<ChFilterDIAccess>());
+    mgr->AddSensor(li);
+    auto b = Grab<UserDIBufferPtr>(li, mgr, sys);
+    if (b && b->Buffer)
+        Dump(name, "f32x2", W, H, b->Buffer.get(), (size_t)W * H * sizeof(PixelDI));
 }
 
 int main(int argc, char* argv[]) {
@@ -271,9 +322,7 @@ int main(int argc, char* argv[]) {
         b1->GetVisualModel()->GetShapeInstances()[0].shape->GetMaterial(0)->SetClassID(22);
         b1->GetVisualModel()->GetShapeInstances()[0].shape->GetMaterial(0)->SetInstanceID(202);
         mgr->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
-        auto ref = chrono_types::make_shared<ChBodyEasyBox>(.01, .01, .01, 1000, false, false);
-        ref->SetFixed(true);
-        sys.Add(ref);
+        auto ref = SensorMount(sys);
 
         auto dep = chrono_types::make_shared<ChDepthCamera>(ref, 30.f, CamPose(), W, H, 1.396f, 30.f);
         mgr->AddSensor(dep);
@@ -300,9 +349,7 @@ int main(int argc, char* argv[]) {
         Box(sys, {1.0, 1.0, 2.0}, {1.2, -2.0, 1.0}, Mat({0.8f, 0.8f, 0.8f}, 0.5f, 0.f));
         auto mgr = MakeManager(sys);
         mgr->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
-        auto ref = chrono_types::make_shared<ChBodyEasyBox>(.01, .01, .01, 1000, false, false);
-        ref->SetFixed(true);
-        sys.Add(ref);
+        auto ref = SensorMount(sys);
         auto li = chrono_types::make_shared<ChLidarSensor>(ref, 10.f, CamPose(), W, H, 1.396f, 0.35f, -0.35f, 40.f);
         li->PushFilter(chrono_types::make_shared<ChFilterDIAccess>());
         mgr->AddSensor(li);
@@ -318,15 +365,136 @@ int main(int argc, char* argv[]) {
         Sphere(sys, 1.0, {0, 0, 1.2}, Mat({0.8f, 0.8f, 0.8f}, 0.5f, 0.f));
         auto mgr = MakeManager(sys);
         mgr->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
-        auto ref = chrono_types::make_shared<ChBodyEasyBox>(.01, .01, .01, 1000, false, false);
-        ref->SetFixed(true);
-        sys.Add(ref);
+        auto ref = SensorMount(sys);
         const unsigned int RW = 240, RH = 120;
         auto ra = chrono_types::make_shared<ChRadarSensor>(ref, 10.f, CamPose(), RW, RH, 1.396f, 0.7f, 40.f);
         ra->PushFilter(chrono_types::make_shared<ChFilterRadarAccess>());
         mgr->AddSensor(ra);
         auto b = Grab<UserRadarBufferPtr>(ra, mgr, sys);
         if (b && b->Buffer) Dump("14_radar", "radar", RW, RH, b->Buffer.get(), (size_t)RW * RH * sizeof(RadarReturn));
+    }
+
+
+    // 18. physics-based camera. All the optional post stages are off so this isolates the render
+    //     path and the RGBA16 readback rather than the defocus/vignette/noise filter chain.
+    {
+        ChSystemNSC sys; sys.SetGravitationalAcceleration({0, 0, 0});
+        Room(sys);
+        Sphere(sys, 1.0, {0, 0, 1.2}, Mat({0.85f, 0.8f, 0.75f}, 0.35f, 0.f));
+        auto mgr = MakeManager(sys);
+        mgr->scene->AddPointLight({-2, 2, 5}, {1.f, 1.f, 1.f}, 60.f);
+        auto ref = SensorMount(sys);
+        auto pc = chrono_types::make_shared<ChPhysCameraSensor>(ref, 30.f, CamPose(), W, H,
+                                                                CameraLensModelType::PINHOLE, 2);
+        pc->SetCtrlParameters(4.f, 0.256f, 100.f, 0.012f, 10.f);
+        pc->PushFilter(chrono_types::make_shared<ChFilterRGBA16Access>());
+        mgr->AddSensor(pc);
+        auto b = Grab<UserRGBA16BufferPtr>(pc, mgr, sys);
+        if (b && b->Buffer) Dump("18_phys_camera", "rgba16", W, H, b->Buffer.get(), (size_t)W * H * sizeof(PixelRGBA16));
+    }
+
+    // ---- 18-20. lens models: the pinhole path is covered above, these are the distorted ones.
+    ScCameraLens("19_lens_fov", CameraLensModelType::FOV_LENS);
+    ScCameraLens("20_lens_radial", CameraLensModelType::RADIAL);
+
+    // 21. depth camera through a non-pinhole lens
+    {
+        ChSystemNSC sys; sys.SetGravitationalAcceleration({0, 0, 0});
+        Room(sys);
+        Sphere(sys, 0.9, {0, 1.5, 1.1}, Mat({0.8f, 0.3f, 0.3f}, 0.4f, 0.f));
+        auto mgr = MakeManager(sys);
+        mgr->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+        auto ref = SensorMount(sys);
+        auto dep = chrono_types::make_shared<ChDepthCamera>(ref, 30.f, CamPose(), W, H, 1.396f, 30.f,
+                                                            CameraLensModelType::FOV_LENS);
+        mgr->AddSensor(dep);
+        auto d = Grab<UserDepthBufferPtr>(dep, mgr, sys);
+        if (d && d->Buffer) Dump("21_depth_fov", "f32", W, H, d->Buffer.get(), (size_t)W * H * sizeof(PixelDepth));
+    }
+
+    // 22. lidar with an elliptical beam, multi-sample radius and real divergence
+    ScLidar("22_lidar_elliptical", LidarBeamShape::ELLIPTICAL, 2, LidarReturnMode::MEAN_RETURN, 0.003f);
+    // 23. same geometry, strongest-return mode and a wider beam
+    ScLidar("23_lidar_strongest", LidarBeamShape::RECTANGULAR, 2, LidarReturnMode::STRONGEST_RETURN, 0.01f);
+
+    // 24. radar against MOVING bodies, so the doppler channels carry signal
+    {
+        ChSystemNSC sys; sys.SetGravitationalAcceleration({0, 0, 0});
+        Room(sys);
+        auto a = Sphere(sys, 0.8, {0, 1.4, 1.2}, Mat({0.8f, 0.8f, 0.8f}, 0.5f, 0.f));
+        auto b = Sphere(sys, 0.8, {0, -1.4, 1.2}, Mat({0.8f, 0.8f, 0.8f}, 0.5f, 0.f));
+        a->SetFixed(false); b->SetFixed(false);
+        a->SetPosDt({3.0, 0, 0});     // approaching the sensor
+        b->SetPosDt({-2.0, 1.0, 0});  // receding and crossing
+        auto mgr = MakeManager(sys);
+        mgr->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+        auto ref = SensorMount(sys);
+        const unsigned int RW = 240, RH = 120;
+        auto ra = chrono_types::make_shared<ChRadarSensor>(ref, 10.f, CamPose(), RW, RH, 1.396f, 0.7f, 40.f);
+        ra->PushFilter(chrono_types::make_shared<ChFilterRadarAccess>());
+        mgr->AddSensor(ra);
+        auto bf = Grab<UserRadarBufferPtr>(ra, mgr, sys);
+        if (bf && bf->Buffer) Dump("24_radar_doppler", "radar", RW, RH, bf->Buffer.get(), (size_t)RW * RH * sizeof(RadarReturn));
+    }
+
+    // 25. exponential fog
+    ScCamera("25_fog", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        Sphere(s, 1.0, {0, 0, 1.2}, Mat({0.85f, 0.8f, 0.75f}, 0.35f, 0.f));
+        Box(s, {0.6, 0.6, 2.4}, {2.5, -2.0, 1.2}, Mat({0.7f, 0.7f, 0.75f}, 0.6f, 0.f));
+        m->scene->AddPointLight({-2, 2, 5}, {1.f, 1.f, 1.f}, 60.f);
+        m->scene->SetFogColor({0.55f, 0.6f, 0.7f});
+        m->scene->SetFogScattering(0.06f);
+    }, false, 2, true);
+
+    // 26. emissive materials, which bypass the lighting integral entirely
+    ScCamera("26_emissive", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        auto e1 = chrono_types::make_shared<ChVisualMaterial>();
+        e1->SetDiffuseColor({0.1f, 0.1f, 0.1f});
+        e1->SetEmissiveColor({0.2f, 0.9f, 0.4f});
+        e1->SetEmissivePower(4.f);
+        auto sp = chrono_types::make_shared<ChBodyEasySphere>(0.9, 1000, true, false);
+        sp->SetPos({0, 1.4, 1.2}); sp->SetFixed(true); s.Add(sp); Paint(sp, e1);
+        Sphere(s, 0.9, {0, -1.4, 1.2}, Mat({0.8f, 0.8f, 0.8f}, 0.4f, 0.f));
+        m->scene->AddPointLight({-3, 0, 5}, {0.5f, 0.5f, 0.5f}, 50.f);
+    });
+
+    // 27-29. non-rendered sensors. These do not touch the ray-tracing backend at all, so any
+    //        difference would be in the manager, the key-frame plumbing or the RNG streams.
+    {
+        ChSystemNSC sys; sys.SetGravitationalAcceleration({0, 0, -9.81});
+        auto body = chrono_types::make_shared<ChBodyEasyBox>(1, 1, 1, 1000, false, false);
+        body->SetPos({0, 0, 2});
+        body->SetPosDt({2.0, 0.5, 0});
+        body->SetAngVelLocal({0.3, 0.7, 1.1});
+        sys.Add(body);
+        auto mgr = MakeManager(sys);
+        auto none = chrono_types::make_shared<ChNoiseNone>();
+        auto acc = chrono_types::make_shared<ChAccelerometerSensor>(body, 100.f, ChFrame<double>(), none);
+        acc->PushFilter(chrono_types::make_shared<ChFilterAccelAccess>());
+        mgr->AddSensor(acc);
+        auto gyr = chrono_types::make_shared<ChGyroscopeSensor>(body, 100.f, ChFrame<double>(), none);
+        gyr->PushFilter(chrono_types::make_shared<ChFilterGyroAccess>());
+        mgr->AddSensor(gyr);
+        auto mag = chrono_types::make_shared<ChMagnetometerSensor>(body, 100.f, ChFrame<double>(), none, ChVector3d(43.07, -89.40, 260.0));
+        mag->PushFilter(chrono_types::make_shared<ChFilterMagnetAccess>());
+        mgr->AddSensor(mag);
+        auto gps = chrono_types::make_shared<ChGPSSensor>(body, 100.f, ChFrame<double>(), ChVector3d(43.07, -89.40, 260.0), none);
+        gps->PushFilter(chrono_types::make_shared<ChFilterGPSAccess>());
+        mgr->AddSensor(gps);
+        auto tach = chrono_types::make_shared<ChTachometerSensor>(body, 100.f, ChFrame<double>(), ChTachometerSensor::Axis::Z);
+        tach->PushFilter(chrono_types::make_shared<ChFilterTachometerAccess>());
+        mgr->AddSensor(tach);
+
+        auto a = Grab<UserAccelBufferPtr>(acc, mgr, sys);
+        if (a && a->Buffer) Dump("27_imu_accel", "f64x3", 1, 1, a->Buffer.get(), sizeof(AccelData));
+        auto g = Grab<UserGyroBufferPtr>(gyr, mgr, sys);
+        if (g && g->Buffer) Dump("27_imu_gyro", "f64x3", 1, 1, g->Buffer.get(), sizeof(GyroData));
+        auto mg = Grab<UserMagnetBufferPtr>(mag, mgr, sys);
+        if (mg && mg->Buffer) Dump("27_imu_magnet", "f64x3", 1, 1, mg->Buffer.get(), sizeof(MagnetData));
+        auto gp = Grab<UserGPSBufferPtr>(gps, mgr, sys);
+        if (gp && gp->Buffer) Dump("28_gps", "f64x3", 1, 1, gp->Buffer.get(), sizeof(GPSData));
+        auto tc = Grab<UserTachometerBufferPtr>(tach, mgr, sys);
+        if (tc && tc->Buffer) Dump("29_tachometer", "f32", 1, 1, tc->Buffer.get(), sizeof(TachometerData));
     }
 
     g_index.close();
