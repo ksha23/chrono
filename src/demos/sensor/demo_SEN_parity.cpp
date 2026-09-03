@@ -17,6 +17,7 @@
 #include "chrono/physics/ChBodyEasy.h"
 #include "chrono/assets/ChVisualMaterial.h"
 #include "chrono/core/ChFrame.h"
+#include "chrono/core/ChDataPath.h"
 
 #include "chrono_sensor/ChSensorManager.h"
 #include "chrono_sensor/sensors/ChCameraSensor.h"
@@ -209,6 +210,33 @@ int main(int argc, char* argv[]) {
         Sphere(s, 1.0, {0, 0, 1.2}, Mat({0.85f, 0.85f, 0.85f}, 0.9f, 0.f));
         m->scene->AddRectangleLight({-1, 0, 5.4}, {1.f, 1.f, 1.f}, 90.f, {2.0f, 0, 0}, {0, 2.0f, 0});
     }, /*gi=*/true, /*ss=*/4);
+
+    // 15. albedo texture mapping
+    ScCamera("15_textured", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        auto tex = chrono_types::make_shared<ChVisualMaterial>();
+        tex->SetDiffuseColor({1.f, 1.f, 1.f});
+        tex->SetSpecularColor({1.f, 1.f, 1.f});
+        tex->SetRoughness(0.6f);
+        tex->SetKdTexture(GetChronoDataFile("textures/redwhite.png"));
+        auto b1 = chrono_types::make_shared<ChBodyEasyBox>(1.6, 1.6, 1.6, 1000, true, false);
+        b1->SetPos({0, 1.3, 1.0});
+        b1->SetRot(QuatFromAngleZ(0.6));
+        b1->SetFixed(true);
+        s.Add(b1);
+        Paint(b1, tex);
+        Sphere(s, 0.85, {0, -1.4, 1.0}, Mat({0.9f, 0.9f, 0.9f}, 0.15f, 1.f));
+        m->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+    });
+
+    // 16. HDR environment map as background and as the only light
+    ScCamera("16_envmap", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        Sphere(s, 1.1, {0, 0, 1.3}, Mat({0.95f, 0.95f, 0.95f}, 0.08f, 1.f));
+        Background b;
+        b.mode = BackgroundMode::ENVIRONMENT_MAP;
+        b.env_tex = GetChronoDataFile("sensor/textures/kloppenheim_06_4k.hdr");
+        m->scene->SetBackground(b);
+        m->scene->AddPointLight({-3, 1, 5}, {0.6f, 0.6f, 0.6f}, 60.f);
+    });
 
     // 10-12. depth / normal / segmentation on one shared geometry set
     {

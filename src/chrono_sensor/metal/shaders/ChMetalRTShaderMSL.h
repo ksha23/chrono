@@ -298,7 +298,10 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
     // this with EnableDynamicOrigin (recenters coords); we scale the epsilon with |hit| instead.
     float eps = max(5e-3, length(h.pos)*3e-5);
     float sh = shadowRay(h.pos+N*eps, toL, dL-eps, eps, accel, nBase, gTexId, gUV, gOpacity, gOpacityTexId, gTexScale, texs, samp);
-    float3 incoming = float3(L.color) * (atten*sh) * NdL;        // ls.L * attenuation * NdL
+    // OptiX folds one NdL into ls.L inside every Ch*Light sampler and the shader applies another in
+    // incoming_light_ray = ls.L * attenuation * NdL, so the cosine appears squared. The Vulkan RT
+    // backend reproduces the same square deliberately. Match both.
+    float3 incoming = float3(L.color) * (atten*sh) * NdL * NdL;   // ls.L (carries one NdL) * atten * NdL
     float3 hv = normalize(toL+view); float NdH=max(dot(N,hv),0.0), VdH=max(dot(view,hv),0.0);
     float3 F = F0 + (float3(1.0)-F0)*pow(1.0-VdH,5.0);           // Schlick Fresnel
     col += (float3(1.0)-F) * diffAlbedo * incoming;              // diffuse
