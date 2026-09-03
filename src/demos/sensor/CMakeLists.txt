@@ -5,6 +5,13 @@ set(DEMOS
   demo_SEN_GPSIMU
 )
 
+# Cross-backend parity capture harness: builds against whichever backend is enabled.
+if(CH_USE_SENSOR_OPTIX OR CH_USE_SENSOR_METAL_RT OR CH_USE_SENSOR_VULKAN_RT)
+    set(DEMOS ${DEMOS}
+        demo_SEN_parity
+    )
+endif()
+
 if(CH_USE_SENSOR_VULKAN_RT)
     set(DEMOS ${DEMOS}
         demo_SEN_buildtest
