@@ -1,0 +1,17 @@
+01_point_light,rgba8,480,360,691200
+02_spot_light,rgba8,480,360,691200
+03_directional_light,rgba8,480,360,691200
+04_rect_light,rgba8,480,360,691200
+05_disk_light,rgba8,480,360,691200
+06_brdf_sweep,rgba8,480,360,691200
+07_glass,rgba8,480,360,691200
+08_multi_light,rgba8,480,360,691200
+09_diffuse_gi,rgba8,480,360,691200
+15_textured,rgba8,480,360,691200
+16_envmap,rgba8,480,360,691200
+17_metallic_workflow,rgba8,480,360,691200
+10_depth,f32,480,360,691200
+11_normal,f32x3,480,360,2073600
+12_segmentation,u16x2,480,360,691200
+13_lidar,f32x2,480,360,1382400
+14_radar,radar,240,120,921600
