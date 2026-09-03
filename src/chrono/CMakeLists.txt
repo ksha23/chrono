@@ -1653,9 +1653,13 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "Windows")
     endif()
 endif()
 
-if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
-    target_link_options(Chrono_core PUBLIC $<$<COMPILE_LANGUAGE:CXX>:-Wl,-no_compact_unwind>)
-endif()
+# NOTE: do not add -Wl,-no_compact_unwind here. On arm64 macOS clang emits only
+# __compact_unwind in its object files, so suppressing the linker's __unwind_info leaves a
+# library with landing-pad tables (__gcc_except_tab) and no unwind tables at all. Any
+# exception thrown from such a library then terminates the process instead of propagating:
+# the unwinder cannot walk out of the throwing frame, so not even catch(...) in the caller
+# runs. Chrono_core happened to keep an __eh_frame section and so still worked, which is why
+# this went unnoticed; Chrono_sensor did not.
 
 # Compiler warning level and disabled warnings
 
