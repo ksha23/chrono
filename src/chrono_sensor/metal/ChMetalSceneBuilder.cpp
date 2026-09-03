@@ -423,6 +423,33 @@ void ChMetalSceneBuilder::Build(MetalRenderScene& scene) {
         return idx;
     };
     std::vector<int> faceMat;
+    // Every material property that toTexIds bakes into the geometry below is baked into the SHARED,
+    // cached geometry, so all of it has to appear in the cache key. Keying on shape dimensions and the
+    // Kd texture alone let two shapes of the same size but different roughness, metallic, specular or
+    // opacity share one entry, and the second shape silently rendered with the first one's material --
+    // only the per-instance tint escapes the cache, so the objects still had the right colour.
+    auto materialKey = [](const std::vector<std::shared_ptr<ChVisualMaterial>>& mats) {
+        std::string key;
+        char buf[256];
+        for (const auto& m : mats) {
+            if (!m) {
+                key += "|~";
+                continue;
+            }
+            const ChColor& ks = m->GetSpecularColor();
+            const ChColor& ke = m->GetEmissiveColor();
+            const ChVector2f& ts = m->GetTextureScale();
+            snprintf(buf, sizeof(buf), "|%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%d,%g,%g", m->GetOpacity(), m->GetRoughness(),
+                     m->GetMetallic(), ks.R, ks.G, ks.B, ke.R, ke.G, ke.B, m->GetEmissivePower(),
+                     m->GetUseSpecularWorkflow() ? 1 : 0, ts.x(), ts.y());
+            key += buf;
+            key += "|" + m->GetKdTexture() + "|" + m->GetRoughnessTexture() + "|" + m->GetMetallicTexture() + "|" +
+                   m->GetOpacityTexture() + "|" + m->GetNormalMapTexture() + "|" + m->GetKsTexture() + "|" +
+                   m->GetKeTexture() + "|" + m->GetWeightTexture();
+        }
+        return key;
+    };
+
     auto toTexIds = [&](MetalGeometry& g, std::vector<int>& fm, const std::vector<std::shared_ptr<ChVisualMaterial>>& mats) {
         g.texId.clear();
         g.texId.reserve(fm.size());
@@ -591,8 +618,9 @@ void ChMetalSceneBuilder::Build(MetalRenderScene& scene) {
                     float t[3] = {1, 1, 1};
                     addInstance(gi, body, sf, t, 0, true, mesh);
                 } else {
-                    char k[64];
-                    snprintf(k, 64, "mesh:%p", (void*)mesh.get());
+                    char kb2[64];
+                    snprintf(kb2, 64, "mesh:%p", (void*)mesh.get());
+                    std::string k = std::string(kb2) + materialKey(tm->GetMaterials());
                     if (!m_geom_cache.count(k)) {
                         meshToGeom(mesh, g, faceMat, tm->GetMaterials(), vdef[0], vdef[1], vdef[2], ChVector3d(1, 1, 1));
                         if (g.verts.empty())
@@ -607,8 +635,9 @@ void ChMetalSceneBuilder::Build(MetalRenderScene& scene) {
             } else if (auto mf = std::dynamic_pointer_cast<ChVisualShapeModelFile>(sh)) {
                 std::string fn = mf->GetFilename();
                 ChVector3d sc = mf->GetScale();
-                char k[600];
-                snprintf(k, 600, "file:%s:%g,%g,%g", fn.c_str(), sc.x(), sc.y(), sc.z());
+                char kb3[600];
+                snprintf(kb3, 600, "file:%s:%g,%g,%g", fn.c_str(), sc.x(), sc.y(), sc.z());
+                std::string k = std::string(kb3) + materialKey(mf->GetMaterials());
                 {
                     auto sl = fn.find_last_of("/\\");
                     curBaseDir = (sl == std::string::npos) ? std::string() : fn.substr(0, sl);
@@ -658,7 +687,7 @@ void ChMetalSceneBuilder::Build(MetalRenderScene& scene) {
                 // texture-aware cache key: same-size primitives with different textures must not share geometry
                 auto& pmats = sh->GetMaterials();
                 std::string ptex = pmats.empty() ? std::string() : pmats[0]->GetKdTexture();
-                std::string k = std::string(kb) + "|" + ptex;
+                std::string k = std::string(kb) + materialKey(pmats);
                 if (!m_geom_cache.count(k)) {
                     if (auto s2 = std::dynamic_pointer_cast<ChVisualShapeBox>(sh)) {
                         auto L = s2->GetLengths();
