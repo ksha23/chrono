@@ -271,6 +271,9 @@ void ChFilterMetalRTRender::Apply() {
         cam.fogScatter = 0.f;
         cam.useGi = 0;
         cam.integratorPath = 0;
+        // ChSensorManager::SetRayRecursions reaches us as m_ray_recursions but was previously unread, so the
+        // setting did nothing on Metal. OptiX spends two levels of its budget before the first surface.
+        cam.hitLimit = m_ray_recursions > 2 ? m_ray_recursions - 2 : 1;
         cam.envIntensity = m_scene->GetEnvIntensity();  // env-map radiance scale (OptiX AddEnvironmentLight)
         if (auto cc = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) {
             if (cc->GetUseFog())

@@ -51,6 +51,13 @@ struct Uniforms {
     uint integratorPath;                               // 1 = Integrator::PATH. OptiX dispatches on the integrator
                                                        // (camera_shader.cuh), not on use_gi, so LEGACY + use_gi must
                                                        // stay in the legacy shader rather than switch to path tracing.
+    uint hitLimit;                                     // camera-ray surface-hit budget. OptiX's DefaultCameraPRD
+                                                       // starts PRIMARY rays at depth 2 and only spawns a child
+                                                       // while depth+1 < max_depth, so a camera ray gets
+                                                       // max_depth-2 hits, and radiance past the budget is
+                                                       // dropped to black rather than falling through to the
+                                                       // background. ChFilterVulkanRTRender.cpp encodes the same
+                                                       // rule in OptiXCameraHitLimit().
 };
 
 // Fold both halves of the 64-bit ChSensorManager stream seed into this shader's 32-bit hash domain,
@@ -215,30 +222,29 @@ static float shadowRay(float3 origin, float3 dir, float maxd, float minD, instan
    device const uint* nBase, device const int* gTexId, device const float* gUV, device const float* gOpacity, device const int* gOpacityTexId, device const float* gTexScale,
    array<texture2d<float>, 64> texs, sampler samp){
   intersector<triangle_data,instancing> sit; sit.assume_geometry_type(geometry_type::triangle); sit.force_opacity(forced_opacity::opaque);
-  float remaining = maxd;
+  float remaining = maxd; float atten = 1.0;
   for(int i=0;i<16;i++){
     ray sr; sr.origin=origin; sr.direction=dir; sr.min_distance=minD; sr.max_distance=remaining;
     auto res=sit.intersect(sr,accel);
-    if(res.type==intersection_type::none) return 1.0;        // reached the light unobstructed
+    if(res.type==intersection_type::none) return atten;      // reached the light unobstructed
     uint tri=nBase[res.instance_id]+res.primitive_id; int texId=gTexId[tri];
     float2 bc=res.triangle_barycentric_coord; float w0=1.0-bc.x-bc.y;
     float2 uv=w0*float2(gUV[tri*6],gUV[tri*6+1])+bc.x*float2(gUV[tri*6+2],gUV[tri*6+3])+bc.y*float2(gUV[tri*6+4],gUV[tri*6+5]);
     uv.y=1.0-uv.y; uv*=float2(gTexScale[tri*2],gTexScale[tri*2+1]);
-    float opac=gOpacity[tri]; int otx=gOpacityTexId[tri]; if(otx>=0) opac=texs[otx].sample(samp,uv).r;
-    // glass/transparent -> light passes (OptiX shadow uses opacity_tex)
-    if(opac < 0.5){
-      float adv=res.distance+minD;
-      origin+=dir*adv;
-      remaining-=adv;
-      if(remaining<=minD) return 1.0;
-      continue;
-    }
-    if(texId<0) return 0.0;                                   // untextured/opaque geometry -> shadowed
-    if(texs[texId].sample(samp,uv).a >= 0.1) return 0.0;     // opaque texel -> shadowed
-    float adv=res.distance+minD; origin+=dir*adv; remaining-=adv;  // transparent leaf -> pass through, continue
-    if(remaining<=minD) return 1.0;
+    float opac=gOpacity[tri];
+    // shadow_shader.cuh: an alpha-cut-out texel (kd alpha ~ 0) drops transparency to 0 so light passes;
+    // an opacity texture overrides the material value outright.
+    if(texId>=0 && texs[texId].sample(samp,uv).a < 1e-6) opac=0.0;
+    int otx=gOpacityTexId[tri]; if(otx>=0) opac=texs[otx].sample(samp,uv).r;
+    // OptiX attenuates CONTINUOUSLY -- atten = 1 - opacity, multiplied along the ray -- rather than
+    // treating a surface as either fully blocking or fully clear. A 0.35-opacity pane passes 65% of the
+    // light, and two of them pass 42%.
+    atten *= (1.0 - opac);
+    if(atten <= 0.01) return 0.0;                             // params.importance_cutoff
+    float adv=res.distance+minD; origin+=dir*adv; remaining-=adv;
+    if(remaining<=minD) return atten;
   }
-  return 1.0;
+  return atten;
 }
 
 // Direct-illumination shading, ported from Chrono's OptiX legacy shader (camera_legacy_shader.cuh):
@@ -532,7 +538,7 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       r.direction=normalize(fp - r.origin);
     }
     float3 color=float3(0.0); float trans=1.0; float primDist=-1.0;
-    for(int layer=0; layer<8 && trans>0.02; layer++){
+    for(int layer=0; layer<int(max(u.hitLimit,1u)) && trans>0.02; layer++){
       Hit h=trace(r, accel, gN, gA, tint, iR, nBase, matI, gUV, gTexId, gOpacity, gRough, gMetallic, gRoughTexId, gMetalTexId, gOpacityTexId, gTangent, gNormalTexId, gSpecular,
           gEmissive, gTexScale, gKsTexId, gKeTexId, gBlendKdTexId, gBlendWeightTexId, texs, samp, envTex, u);
       if(primDist<0.0 && !h.sky) primDist=h.dist;   // first surface distance (for fog)
@@ -583,7 +589,10 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
       }
       color += trans*shaded; trans=0.0; break;                   // opaque -> stop
     }
-    color += trans*skycol(dir,envTex,samp,u);              // any remaining transmission shows the sky/background
+    // Whatever transmission is still unresolved when the hit budget runs out is DROPPED, not resolved
+    // against the background: OptiX leaves refracted_color at float3(0) once depth+1 == max_depth
+    // (camera_legacy_shader.cuh). A sky or opaque hit has already zeroed trans and broken out above, so
+    // reaching here with trans > 0 means the budget was exhausted.
     if(u.fogScatter>0.0 && primDist>0.0){ float ba=exp(-u.fogScatter*primDist); color=ba*color+(1.0-ba)*float3(u.fogColor); }  // exp fog (OptiX)
     physDist = max(primDist, 0.0);                         // sky -> 0, matching phys_cam_raygen.cu's default prd.distance
     acc+=color; }
