@@ -61,7 +61,8 @@ struct MetalCameraParams {
     float bgHorizon[3] = {0.58f, 0.72f, 0.88f};  ///< gradient horizon
     float fogColor[3] = {0.6f, 0.7f, 0.8f};      ///< fog color
     float fogScatter = 0.f;                      ///< exponential fog scattering (0 = off)
-    int useGi = 0;                               ///< 1 = path-traced global illumination
+    int useGi = 0;                               ///< 1 = global illumination requested
+    int integratorPath = 0;                      ///< 1 = Integrator::PATH (else LEGACY)
     float exposure = 1.f;                        ///< linear exposure/gain
     float vignette = 0.f;                        ///< vignette strength (0 = off)
     float apertureR = 0.f;                       ///< lens aperture radius for depth of field (0 = pinhole)

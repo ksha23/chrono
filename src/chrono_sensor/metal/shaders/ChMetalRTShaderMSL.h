@@ -48,6 +48,9 @@ struct Uniforms {
                                                        // (OptiX passes ChLidarSensor::GetClipNear() as optixTrace tmin,
                                                        //  which is what lets a sensor sit inside its own housing)
     uint rngSeedLo; uint rngSeedHi;                    // halves of ChSensorManager::GetDeterministicSeed for this render
+    uint integratorPath;                               // 1 = Integrator::PATH. OptiX dispatches on the integrator
+                                                       // (camera_shader.cuh), not on use_gi, so LEGACY + use_gi must
+                                                       // stay in the legacy shader rather than switch to path tracing.
 };
 
 // Fold both halves of the 64-bit ChSensorManager stream seed into this shader's 32-bit hash domain,
@@ -434,11 +437,56 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     outTex.write(float4(h.dist, amp, float(h.inst), 1.0), tid); return;  // b = hit instance index
   }
 
+  // LEGACY + GI (OptiX camera_legacy_shader.cuh). use_gi does NOT switch OptiX to path tracing: it
+  // REPLACES the ambient term with a single cosine-sampled indirect bounce --
+  //     color = mirror + direct + refracted;  color += use_gi ? gi_reflection : ambient;
+  // -- and recurses with the contribution carried DOWNWARD via prd_reflection.contrib_to_pixel, so each
+  // level's own direct lighting is scaled by the product of the BRDF weights above it. The recursion is
+  // unrolled into a loop here.
+  if(u.useGi!=0u){
+    uint spp=max(u.aa*u.aa,1u); uint seed=((tid.y*u.width+tid.x)*9781u+1u)^cameraRngKey(u);
+    float3 acc=float3(0.0);
+    for(uint s=0;s<spp;s++){
+      float jx=rndf(seed), jy=rndf(seed);
+      float nx=(2.0*(float(tid.x)+jx)/float(u.width)-1.0)*aspect, ny=(2.0*(float(tid.y)+jy)/float(u.height)-1.0);
+      ray r; r.origin=float3(u.camPos); r.direction=camRayDir(nx,ny,u); r.min_distance=1e-3; r.max_distance=INFINITY;
+      float3 contrib=float3(1.0), color=float3(0.0);
+      for(int d=0; d<5; d++){
+        Hit h=trace(r, accel, gN, gA, tint, iR, nBase, matI, gUV, gTexId, gOpacity, gRough, gMetallic, gRoughTexId, gMetalTexId, gOpacityTexId, gTangent, gNormalTexId, gSpecular,
+            gEmissive, gTexScale, gKsTexId, gKeTexId, gBlendKdTexId, gBlendWeightTexId, texs, samp, envTex, u);
+        if(h.sky){ color += contrib*h.albedo; break; }
+        float3 view=-r.direction;
+        color += contrib * (directLighting(h,view,u,lights,accel,nBase,gTexId,gUV,gOpacity,gOpacityTexId,gTexScale,texs,samp,seed) + h.emissive*abs(dot(h.n,view)));
+        // The GI bounce, standing in for ambient: cosine-sampled direction, weighted by the same
+        // Cook-Torrance + Lambert split the direct loop uses (CalculateGIReflectionColor).
+        float3 nd=cosineHemisphere(h.n, rndf(seed), rndf(seed));
+        float NdL=dot(h.n,nd); if(NdL<=0.0) break;
+        float3 hv=normalize(nd+view);
+        float NdH=max(dot(h.n,hv),0.0), VdH=max(dot(view,hv),0.0), NdV=max(dot(h.n,view),0.0);
+        float mt=clamp(h.metallic,0.0,1.0); bool sw=h.useSpec>0.5;
+        float3 F0 = sw ? (h.ks*0.08) : (mt*h.albedo + (1.0-mt)*float3(0.04));
+        float3 dA = sw ? h.albedo : (h.albedo*(1.0-mt));
+        float3 F  = sw ? (F0 + (float3(1.0)-F0)*pow(1.0-VdH,5.0)) : F0;
+        float3 fct = F * NormalDist(NdH,h.rough) * HammonSmith(NdV,NdL,h.rough);
+        // weight = transparency * contrib_to_pixel * mat_blend_weight (blend weight 1 for one material),
+        // halved when the mirror term is negligible. OptiX tests mirror_reflection_color < 1e-6 on all three
+        // channels -- note that is the opposite of what its comment says, and the code is what parity follows.
+        // This branch traces no mirror ray, so that test holds trivially here.
+        contrib *= 0.5 * h.opacity * (fct*NdL + (float3(1.0)-F)*dA*NdL);
+        if(max(max(contrib.x,contrib.y),contrib.z) <= 0.01) break;   // params.importance_cutoff
+        float eps=max(5e-3,length(h.pos)*3e-5);
+        r.origin=h.pos+h.n*eps; r.direction=nd; r.min_distance=1e-3; r.max_distance=INFINITY;
+      }
+      acc+=color;
+    }
+    outTex.write(float4(cameraPost(acc/float(spp),tid,u,seed),1.0),tid); return;
+  }
+
   // GI (mode 0 with use_gi): iterative path tracer -- NEE direct lighting per bounce + cosine-sampled
   // diffuse indirect bounces, Russian roulette, sky/env as the light. Ports camera_path_shader.cuh
   // (recursion unrolled to a loop). aa^2 = samples/pixel; opt-in (noisy at low spp, needs high spp or
   // a denoiser for a clean image), so the fast legacy path stays the default.
-  if(u.useGi!=0u){
+  if(u.integratorPath!=0u){
     uint spp=max(u.aa*u.aa,1u); uint seed=((tid.y*u.width+tid.x)*9781u+1u)^cameraRngKey(u); float3 acc=float3(0.0);
     float physDist=0.0;   // primary-hit distance of the last sample (mode 6 alpha channel)
     for(uint s=0;s<spp;s++){

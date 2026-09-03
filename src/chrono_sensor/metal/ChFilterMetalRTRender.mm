@@ -270,11 +270,15 @@ void ChFilterMetalRTRender::Apply() {
         cam.fogColor[2] = fc.z();
         cam.fogScatter = 0.f;
         cam.useGi = 0;
+        cam.integratorPath = 0;
         cam.envIntensity = m_scene->GetEnvIntensity();  // env-map radiance scale (OptiX AddEnvironmentLight)
         if (auto cc = std::dynamic_pointer_cast<ChCameraSensor>(sensor)) {
             if (cc->GetUseFog())
                 cam.fogScatter = m_scene->GetFogScattering();
             cam.useGi = cc->GetUseGI() ? 1 : 0;
+            // OptiX selects the shader from the integrator, not from use_gi (camera_shader.cuh), so a
+            // LEGACY camera with GI enabled stays in the legacy shader with GI replacing ambient.
+            cam.integratorPath = (cc->GetIntegrator() == Integrator::PATH) ? 1 : 0;
             cam.useDenoiser = cc->GetUseDenoiser();
             cam.gamma = cc->GetGamma();  // OptiX-configurable output gamma
         }
@@ -285,6 +289,7 @@ void ChFilterMetalRTRender::Apply() {
             if (phys->GetUseFog())
                 cam.fogScatter = m_scene->GetFogScattering();
             cam.useGi = phys->GetUseGI() ? 1 : 0;
+            cam.integratorPath = (phys->GetIntegrator() == Integrator::PATH) ? 1 : 0;
             cam.useDenoiser = phys->GetUseDenoiser();
             cam.gamma = phys->GetGamma();
         }

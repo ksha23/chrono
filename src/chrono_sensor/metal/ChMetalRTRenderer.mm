@@ -370,6 +370,7 @@ struct ChMetalRTRenderer::Impl {
         uf[58] = cam.clipNear > 0.f ? cam.clipNear : 0.f;
         ui[59] = cam.rngSeedLo;
         ui[60] = cam.rngSeedHi;
+        ui[61] = cam.integratorPath ? 1u : 0u;
     }
     void encodeTrace(id<MTLCommandBuffer> cb, id<MTLTexture> tex, int tw, int th) {
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];
