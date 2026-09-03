@@ -238,6 +238,26 @@ int main(int argc, char* argv[]) {
         m->scene->AddPointLight({-3, 1, 5}, {0.6f, 0.6f, 0.6f}, 60.f);
     });
 
+    // 17. metallic/roughness workflow (SetUseSpecularWorkflow(false)) -- exercises the branch that
+    //     Chrono's default (use_specular_workflow = true) never reaches.
+    ScCamera("17_metallic_workflow", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        for (int i = 0; i < 5; i++)
+            for (int j = 0; j < 2; j++) {
+                auto mm = chrono_types::make_shared<ChVisualMaterial>();
+                mm->SetUseSpecularWorkflow(false);
+                mm->SetDiffuseColor({0.9f, 0.75f, 0.35f});
+                mm->SetRoughness(0.05f + 0.235f * i);
+                mm->SetMetallic(j ? 1.f : 0.f);
+                auto b = chrono_types::make_shared<ChBodyEasySphere>(0.55, 1000, true, false);
+                b->SetPos({0.0, -3.0 + i * 1.5, 0.8 + j * 1.5});
+                b->SetFixed(true);
+                s.Add(b);
+                Paint(b, mm);
+            }
+        m->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+        m->scene->AddPointLight({-2, -3, 3}, {0.4f, 0.5f, 0.9f}, 50.f);
+    });
+
     // 10-12. depth / normal / segmentation on one shared geometry set
     {
         ChSystemNSC sys;

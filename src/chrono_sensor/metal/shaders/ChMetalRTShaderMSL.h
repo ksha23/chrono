@@ -303,7 +303,9 @@ static float3 directLighting(Hit h, float3 view, constant Uniforms& u, device co
     // backend reproduces the same square deliberately. Match both.
     float3 incoming = float3(L.color) * (atten*sh) * NdL * NdL;   // ls.L (carries one NdL) * atten * NdL
     float3 hv = normalize(toL+view); float NdH=max(dot(N,hv),0.0), VdH=max(dot(view,hv),0.0);
-    float3 F = F0 + (float3(1.0)-F0)*pow(1.0-VdH,5.0);           // Schlick Fresnel
+    // OptiX applies Schlick ONLY in the specular workflow; the metallic workflow uses F0 directly
+    // (camera_legacy_shader.cuh: F = metallic*Kd + (1-metallic)*0.04, with no angular term).
+    float3 F = specWF ? (F0 + (float3(1.0)-F0)*pow(1.0-VdH,5.0)) : F0;
     col += (float3(1.0)-F) * diffAlbedo * incoming;              // diffuse
     col += F * NormalDist(NdH,rough) * HammonSmith(NdV,NdL,rough) * incoming;  // Cook-Torrance specular
   }
