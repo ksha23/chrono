@@ -68,13 +68,29 @@ static inline uint cameraRngKey(constant Uniforms& u) {
 }
 
 // Camera ray direction for a normalized image coord (nx includes aspect, ny does not).
-static inline float3 camRayDir(float nx, float ny, constant Uniforms& u) {
+static inline float3 camRayDir(float nx, float ny, constant Uniforms& u) {  // nx/ny may be remapped below
     float3 right=float3(u.camRight), up=float3(u.camUp), fwd=float3(u.camForward);
-    if (u.lensModel==1u) {                                  // FOV_LENS: equidistant fisheye
-        float r=sqrt(nx*nx+ny*ny); float theta=r*(u.lidarHFov*0.5);
-        if (r<1e-6) return normalize(fwd);
-        float3 axis=(nx*right+ny*up)/r;
-        return normalize(cos(theta)*fwd + sin(theta)*axis);
+    if (u.lensModel==1u) {
+        // FOV_LENS. camera_raygen.cu remaps the image-plane coordinate and then projects it through the
+        // ordinary pinhole, rather than using an equidistant fisheye. Its uv carries the aspect ratio on
+        // Y where nx/ny carry it on X, so convert into its convention, remap, and convert back.
+        float aspect = float(u.width) / float(u.height);
+        float2 uv = float2(nx, ny) / aspect;
+        // NB: the guard really is asymmetric upstream -- uv.x is compared without abs() -- so the
+        // horizontal centre line of the left half is left undistorted. Reproduced deliberately.
+        if (uv.x > 1e-5 || abs(uv.y) > 1e-5) {
+            float tanH = aspect * u.tanHalfFov;             // tan(hFOV/2)
+            float focal = 1.0 / tanH;
+            float2 uvn = uv / focal;
+            float rd = length(uvn);
+            if (rd > 1e-9) {
+                float hFOV = 2.0 * atan(tanH);
+                float ru = tan(rd * hFOV) / (2.0 * tanH);
+                uv = uvn * (ru / rd) * focal;
+            }
+        }
+        nx = uv.x * aspect;
+        ny = uv.y * aspect;
     }
     float k=1.0;
     if (u.lensModel==2u) { float r2=nx*nx+ny*ny; k=1.0+u.dk1*r2+u.dk2*r2*r2+u.dk3*r2*r2*r2; }  // RADIAL
@@ -593,7 +609,14 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     // against the background: OptiX leaves refracted_color at float3(0) once depth+1 == max_depth
     // (camera_legacy_shader.cuh). A sky or opaque hit has already zeroed trans and broken out above, so
     // reaching here with trans > 0 means the budget was exhausted.
-    if(u.fogScatter>0.0 && primDist>0.0){ float ba=exp(-u.fogScatter*primDist); color=ba*color+(1.0-ba)*float3(u.fogColor); }  // exp fog (OptiX)
+    // Exponential fog. A ray that reaches the background is fogged too: miss.cu applies the same blend
+    // with optixGetRayTmax(), which is effectively infinite there, so the background resolves to very
+    // nearly pure fog colour rather than staying unfogged.
+    if(u.fogScatter>0.0){
+      float fogDist = (primDist>0.0) ? primDist : 1e16;
+      float ba=exp(-u.fogScatter*fogDist);
+      color=ba*color+(1.0-ba)*float3(u.fogColor);
+    }
     physDist = max(primDist, 0.0);                         // sky -> 0, matching phys_cam_raygen.cu's default prd.distance
     acc+=color; }
   if(u.mode==6u){ outTex.write(float4(physCamPost(acc/float(aa*aa),u),physDist), tid); return; }
