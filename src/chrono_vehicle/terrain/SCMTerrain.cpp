@@ -784,8 +784,11 @@ void SCMLoader::CreateVisualizationMesh(double sizeX, double sizeY) {
 }
 
 void SCMLoader::SetupInitial() {
-    // If no user-specified active domains, create one that will encompass all collision shapes in the system
-    if (!m_user_domains) {
+    // If no user-specified active domains, create one that will encompass all collision shapes in the system.
+    // Guarded on the list being empty as well: this runs both at the end of SCMTerrain::Initialize and again
+    // when the containing ChSystem sets up its physics items, and ComputeInternalForces asserts that exactly
+    // one default domain exists.
+    if (!m_user_domains && m_active_domains.empty()) {
         SCMLoader::ActiveDomainInfo ad;
         ad.m_body = nullptr;
         ad.m_center = {0, 0, 0};
