@@ -17,6 +17,7 @@
 #define PROFILE false
 
 #include "chrono_sensor/filters/ChFilterRadarVisualizeCluster.h"
+#include "chrono_sensor/filters/ChFilterVisualizeGuards.h"
 #ifdef CHRONO_HAS_OPTIX
 #include "chrono_sensor/sensors/ChOptixSensor.h"
 #include "chrono_sensor/utils/CudaMallocHelper.h"
@@ -54,6 +55,9 @@ CH_SENSOR_API void ChFilterRadarVisualizeCluster::Initialize(std::shared_ptr<ChS
 
 CH_SENSOR_API void ChFilterRadarVisualizeCluster::Apply() {
 #ifdef USE_SENSOR_GLFW
+    // Hand back whatever GL context the caller had current (see ChFilterVisualizeGuards.h).
+    GLContextGuard gl_context_guard;
+
     if (!m_window && !m_window_disabled) {
         CreateGlfwWindow(Name());
         float hfov = m_radar->GetHFOV();
@@ -73,10 +77,12 @@ CH_SENSOR_API void ChFilterRadarVisualizeCluster::Apply() {
         glfwMakeContextCurrent(m_window.get());
 
         int window_w, window_h;
-        glfwGetWindowSize(m_window.get(), &window_w, &window_h);
+        glfwGetFramebufferSize(m_window.get(), &window_w, &window_h);
         //
 
         // Set Viewport to window dimensions
+        // Framebuffer size (pixels), not window size (points): on a HiDPI/Retina display
+        // the two differ by backingScaleFactor and the image would fill only the lower-left corner.
         glViewport(0, 0, window_w, window_h);
 
         // Reset projection matrix stack
@@ -136,7 +142,7 @@ CH_SENSOR_API void ChFilterRadarVisualizeCluster::Apply() {
         glFlush();
 
         glfwSwapBuffers(m_window.get());
-        glfwPollEvents();
+        PollGlfwEventsPreservingHostEvents();  // not glfwPollEvents: see ChFilterVisualizeGuards.h
     }
 #endif
 }
