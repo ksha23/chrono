@@ -83,10 +83,14 @@ Read these before trusting a specific answer.
 - **203 files were only partially parsed.** Chrono's heavy template C++ trips
   tree-sitter; those files contributed some symbols but not all. Two `.m` files
   have no extractor at all.
-- **~11,160 edges have a dangling endpoint**: they reference a symbol that was
-  never declared as a node, typically external or system symbols, and with
-  Bullet excluded also the `cbt*` types Chrono's collision wrappers name. They
-  are present in the graph but resolve to nothing.
+- **~11,160 edges have a dangling endpoint**, but 11,030 of them (98.8%) are
+  `imports` edges pointing outside the repository: `<cmath>`, `<iostream>`,
+  `cuda_runtime`, `argparse`. Those are expected, since the target is not a file
+  in this corpus. Only about 130 non-import edges dangle, and those are the ones
+  worth treating as extraction noise.
+- **Connectivity is healthy**: 90.8% of nodes (36,098) sit in one connected
+  component, and only 173 nodes (0.4%) are isolated. Median degree is 2, mean
+  3.5, max 460. The remaining 596 components are small, mostly 2 to 8 nodes.
 - **1,600 parallel edges were collapsed** when the multigraph was flattened to
   an undirected graph, e.g. a `calls` and a `references` edge between the same
   pair become one.
