@@ -372,6 +372,7 @@ struct ChMetalRTRenderer::Impl {
         ui[60] = cam.rngSeedHi;
         ui[61] = cam.integratorPath ? 1u : 0u;
         ui[62] = (uint32_t)(cam.hitLimit > 0 ? cam.hitLimit : 1);
+        ui[63] = (uint32_t)cam.lidarBeamShape;
     }
     void encodeTrace(id<MTLCommandBuffer> cb, id<MTLTexture> tex, int tw, int th) {
         id<MTLComputeCommandEncoder> e = [cb computeCommandEncoder];

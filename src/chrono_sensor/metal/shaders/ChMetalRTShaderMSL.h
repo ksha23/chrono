@@ -58,6 +58,7 @@ struct Uniforms {
                                                        // dropped to black rather than falling through to the
                                                        // background. ChFilterVulkanRTRender.cpp encodes the same
                                                        // rule in OptiXCameraHitLimit().
+    uint lidarBeamShape;                               // 0 = RECTANGULAR, 1 = ELLIPTICAL
 };
 
 // Fold both halves of the 64-bit ChSensorManager stream seed into this shader's 32-bit hash domain,
@@ -403,11 +404,36 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
     // table is data users compare across backends.
     float baseAz = float(tid.x)/float(max(1u,u.width-1u)) * u.lidarHFov - u.lidarHFov*0.5;
     float baseEl = float(tid.y)/float(max(1u,u.height-1u)) * (u.lidarVMax-u.lidarVMin) + u.lidarVMin;
-    uint rad = max(u.lidarSampleRadius,1u); uint n = 2u*rad-1u;
-    float firstR=1e9, firstI=0.0, lastR=0.0, sumR=0.0, sumI=0.0, strongR=0.0, strongI=-1.0; uint hits=0u;
+    uint rad = min(max(u.lidarSampleRadius,1u),4u); uint n = 2u*rad-1u;
+    const uint MAXS = 49u;                       // n <= 7, i.e. sample_radius <= 4
+    float sR[49], sI[49]; uint ns=0u;
+    float firstR=1e9, firstI=0.0, lastR=0.0, sumR=0.0, sumI=0.0; uint hits=0u;
     for(uint sj=0;sj<n;sj++) for(uint si=0;si<n;si++){
-      float oaz=(n>1u)?((float(si)/float(n-1u))-0.5)*u.lidarHDiv:0.0;
-      float oel=(n>1u)?((float(sj)/float(n-1u))-0.5)*u.lidarVDiv:0.0;
+      // Bin-centred across the full divergence, as lidar_raygen.cu does: frac = ((s+0.5)/n)*2-1,
+      // theta = frac * div/2. An endpoint-inclusive spread puts the outermost samples on the beam
+      // edge instead of inside it, which widens the footprint by a further n/(n-1).
+      float2 frac = float2((float(si)+0.5)/float(n)*2.0-1.0, (float(sj)+0.5)/float(n)*2.0-1.0);
+      float oaz, oel;
+      // The two branches in lidar_raygen.cu are swapped relative to their own comments: the
+      // ELLIPTICAL case is the plain rectangular grid, and the RECTANGULAR case is the ellipse-radius
+      // math -- which additionally swaps the horizontal/vertical axes and swaps sin/cos, so a
+      // horizontal grid step produces a vertical angular offset. Reproduced as written, not as
+      // commented, because parity follows the code.
+      if(u.lidarBeamShape==1u){
+        oaz = frac.x*u.lidarHDiv*0.5;
+        oel = frac.y*u.lidarVDiv*0.5;
+      } else {
+        float angle = atan2(frac.y, frac.x);
+        float ring  = max(abs(frac.x), abs(frac.y));
+        float2 axis = float2(u.lidarVDiv*0.5*ring, u.lidarHDiv*0.5*ring);
+        float radius = 0.0;
+        if(!(axis.x==0.0 && axis.y==0.0)){
+          float sa=sin(angle), ca=cos(angle);
+          radius = (axis.x*axis.y)/sqrt(axis.x*axis.x*sa*sa + axis.y*axis.y*ca*ca);
+        }
+        oaz = radius*sin(angle);
+        oel = radius*cos(angle);
+      }
       float az=baseAz+oaz, el=baseEl+oel;
       float3 dir=normalize(cos(el)*(cos(az)*fwd + sin(az)*leftv) + sin(el)*up);
       ray r; r.origin=float3(u.camPos); r.direction=dir; r.min_distance=max(1e-3,u.clipNear); r.max_distance=(u.maxDist>0.0)?u.maxDist:INFINITY;
@@ -417,13 +443,28 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
         float inten=abs(dot(h.n,-dir));                                          // OptiX lidar: lidar_intensity(=1) * |N.V|
         sumR+=h.dist; sumI+=inten; lastR=max(lastR,h.dist);
         if(h.dist<firstR){ firstR=h.dist; firstI=inten; }
-        if(inten>strongI){ strongI=inten; strongR=h.dist; } }
+        if(ns<MAXS){ sR[ns]=h.dist; sI[ns]=inten; ns++; } }
+    }
+    // STRONGEST_RETURN is not an intensity argmax. lidar_reduce.cu's strong_reduce_kernel scores each
+    // sample by how many OTHER samples agree with it in RANGE within 5 cm, weighted by their
+    // intensity, so on a smooth surface the winner is a central sample rather than the most face-on
+    // one, which is always a footprint edge.
+    float strongR=0.0, strongI=0.0, bestScore=-1.0;
+    for(uint a=0;a<ns;a++){
+      float sc=sI[a];
+      for(uint b=0;b<ns;b++){
+        if(b==a) continue;
+        float dr=abs(sR[b]-sR[a]);
+        if(dr<0.05) sc += ((0.05-dr)/0.05)*sI[b];
+      }
+      sc /= float(n*n);
+      if(sc>bestScore){ bestScore=sc; strongR=sR[a]; strongI=sc; }
     }
     if(u.lidarReturnMode==4u){ // DUAL_RETURN: first + strongest, packed (firstR,firstI,strongR,strongI)
       outTex.write(hits>0u?float4(firstR,firstI,strongR,strongI):float4(0,0,0,0), tid); return;
     }
     float outR=0.0, outI=0.0;
-    if(hits>0u){ uint rm=u.lidarReturnMode; float mI=sumI/float(hits);
+    if(hits>0u){ uint rm=u.lidarReturnMode; float mI=sumI/float(n*n);   // lidar_reduce.cu divides by d*d, not by hits
       if(rm==2u){ outR=firstR; outI=mI; }        // FIRST_RETURN
       else if(rm==3u){ outR=lastR; outI=mI; }    // LAST_RETURN
       else if(rm==1u){ outR=sumR/float(hits); outI=mI; } // MEAN_RETURN

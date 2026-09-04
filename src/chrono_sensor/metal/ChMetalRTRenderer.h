@@ -64,6 +64,7 @@ struct MetalCameraParams {
     int useGi = 0;                               ///< 1 = global illumination requested
     int integratorPath = 0;                      ///< 1 = Integrator::PATH (else LEGACY)
     int hitLimit = 1;                            ///< camera-ray surface-hit budget (OptiX max_depth - 2)
+    int lidarBeamShape = 0;                      ///< LidarBeamShape: 0 RECTANGULAR, 1 ELLIPTICAL
     float exposure = 1.f;                        ///< linear exposure/gain
     float vignette = 0.f;                        ///< vignette strength (0 = off)
     float apertureR = 0.f;                       ///< lens aperture radius for depth of field (0 = pinhole)

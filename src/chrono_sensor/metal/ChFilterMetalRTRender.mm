@@ -321,8 +321,11 @@ void ChFilterMetalRTRender::Apply() {
                 cam.lidarVMax = ld->GetMaxVertAngle();
                 cam.maxDist = ld->GetMaxDistance();
                 cam.lidarSampleRadius = (int)ld->GetSampleRadius();
-                cam.lidarHDiv = ld->GetHorizDivAngle() * (float)(2 * ld->GetSampleRadius());  // spread sub-rays across the beam footprint
-                cam.lidarVDiv = ld->GetVertDivAngle() * (float)(2 * ld->GetSampleRadius());
+                // The divergence is the FULL beam width; lidar_raygen.cu spreads its samples across it
+                // bin-centred. Scaling it by the sample count here made the footprint 2*radius too wide.
+                cam.lidarHDiv = ld->GetHorizDivAngle();
+                cam.lidarVDiv = ld->GetVertDivAngle();
+                cam.lidarBeamShape = (int)ld->GetBeamShape();
                 cam.lidarReturnMode = (int)ld->GetReturnMode();
                 cam.clipNear = ld->GetClipNear();  // sensor sits inside its own housing on some vehicles
             }
