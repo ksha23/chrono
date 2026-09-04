@@ -1,0 +1,16 @@
+# Scope control for the graphify knowledge graph (graphify-out/).
+# gitignore syntax. See graphify-out/README.md.
+
+# Vendored third-party sources. GoogleTest, gMock and yaml-cpp test suites are
+# pure test scaffolding for a dependency, and in the first build they dominated
+# roughly a third of the largest communities, crowding out Chrono itself.
+src/chrono_thirdparty/
+
+# Bullet is vendored under the Chrono tree rather than chrono_thirdparty/.
+# It is third-party in origin, and its cbtGjkEpa/cbtGImpact internals crowded out
+# Chrono's own ChCollision* wrapper layer, so it is excluded too.
+src/chrono/collision/bullet/
+
+# Note: data/ is NOT excluded here. Its 564 vehicle specification JSONs are real
+# Chrono::Vehicle content. Its prose assets and 337 textures are skipped at
+# extraction time instead, since images cost one extraction pass each.

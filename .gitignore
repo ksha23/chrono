@@ -115,3 +115,14 @@ src/chrono_granular/DoxyGenDocs/
 ##---------------------------------------------------
 
 src/demos/python/DEMO_OUTPUT
+
+##---------------------------------------------------
+## graphify knowledge-graph artifacts
+##---------------------------------------------------
+
+## Uncompressed graph (the gzipped copy is committed instead)
+graphify-out/graph.json
+## Extraction cache and intermediate sidecars
+graphify-out/cache/
+graphify-out/cost.json
+graphify-out/.graphify_*
