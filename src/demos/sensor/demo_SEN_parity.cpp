@@ -16,6 +16,9 @@
 #include "chrono/physics/ChSystemNSC.h"
 #include "chrono/physics/ChBodyEasy.h"
 #include "chrono/assets/ChVisualMaterial.h"
+#include "chrono/assets/ChVisualShapeTriangleMesh.h"
+#include "chrono/assets/ChVisualShapeModelFile.h"
+#include "chrono/geometry/ChTriangleMeshConnected.h"
 #include "chrono/core/ChFrame.h"
 #include "chrono/core/ChDataPath.h"
 
@@ -496,6 +499,79 @@ int main(int argc, char* argv[]) {
         auto tc = Grab<UserTachometerBufferPtr>(tach, mgr, sys);
         if (tc && tc->Buffer) Dump("29_tachometer", "f32", 1, 1, tc->Buffer.get(), sizeof(TachometerData));
     }
+
+    // 30. ONE ChTriangleMeshConnected shared by two bodies carrying DIFFERENT materials. The scene
+    //     builder caches generated geometry, and this is the shape of scene that catches a cache key
+    //     which does not distinguish the materials baked into that shared geometry.
+    ScCamera("30_mesh_shared", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        auto mesh = ChTriangleMeshConnected::CreateFromWavefrontFile(GetChronoDataFile("models/cylinderZ.obj"), false, true);
+        auto add = [&](ChVector3d pos, std::shared_ptr<ChVisualMaterial> mat) {
+            auto b = chrono_types::make_shared<ChBody>();
+            b->SetPos(pos);
+            b->SetFixed(true);
+            auto sh = chrono_types::make_shared<ChVisualShapeTriangleMesh>();
+            sh->SetMesh(mesh);          // the SAME mesh object for both bodies
+            sh->AddMaterial(mat);
+            b->AddVisualShape(sh);
+            s.Add(b);
+        };
+        add({0.0, 1.6, 0.9}, Mat({0.9f, 0.35f, 0.25f}, 0.15f, 1.f));   // smooth metal
+        add({0.0, -1.6, 0.9}, Mat({0.25f, 0.45f, 0.9f}, 0.95f, 0.f));  // rough dielectric
+        m->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+    });
+
+    // 31. Two ChVisualShapeModelFile of the SAME file with different override materials, which is the
+    //     other geometry-cache path.
+    ScCamera("31_mesh_modelfile", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        auto add = [&](ChVector3d pos, std::shared_ptr<ChVisualMaterial> mat) {
+            auto b = chrono_types::make_shared<ChBody>();
+            b->SetPos(pos);
+            b->SetFixed(true);
+            auto mf = chrono_types::make_shared<ChVisualShapeModelFile>();
+            mf->SetFilename(GetChronoDataFile("models/pallet.obj"));
+            mf->SetScale(3.0);
+            mf->AddMaterial(mat);
+            b->AddVisualShape(mf);
+            s.Add(b);
+        };
+        add({0.0, 1.8, 0.1}, Mat({0.85f, 0.75f, 0.3f}, 0.2f, 1.f));
+        add({0.0, -1.8, 0.1}, Mat({0.3f, 0.8f, 0.4f}, 0.9f, 0.f));
+        m->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+    });
+
+    // 32. The texture channels the other scenarios never touch: normal, roughness/metallic and
+    //     opacity maps, rather than an albedo map alone.
+    ScCamera("32_pbr_textures", [](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+        const std::string base = GetChronoDataFile("models/FlightHelmet/FlightHelmet_Materials_LeatherPartsMat_");
+        auto full = chrono_types::make_shared<ChVisualMaterial>();
+        full->SetDiffuseColor({1.f, 1.f, 1.f});
+        full->SetSpecularColor({1.f, 1.f, 1.f});
+        full->SetKdTexture(base + "BaseColor.png");
+        full->SetNormalMapTexture(base + "Normal.png");
+        full->SetRoughnessTexture(base + "OcclusionRoughMetal.png");
+        full->SetMetallicTexture(base + "OcclusionRoughMetal.png");
+        auto b1 = chrono_types::make_shared<ChBodyEasyBox>(1.8, 1.8, 1.8, 1000, true, false);
+        b1->SetPos({0, 1.4, 1.0});
+        b1->SetRot(QuatFromAngleZ(0.5));
+        b1->SetFixed(true);
+        s.Add(b1);
+        Paint(b1, full);
+
+        auto opac = chrono_types::make_shared<ChVisualMaterial>();
+        opac->SetDiffuseColor({0.9f, 0.9f, 0.95f});
+        opac->SetSpecularColor({1.f, 1.f, 1.f});
+        opac->SetRoughness(0.2f);
+        opac->SetOpacityTexture(GetChronoDataFile("textures/checker1.png"));
+        opac->SetIllumination(9);
+        auto b2 = chrono_types::make_shared<ChBodyEasyBox>(0.2, 1.8, 1.8, 1000, true, false);
+        b2->SetPos({-1.2, -1.4, 1.0});
+        b2->SetFixed(true);
+        s.Add(b2);
+        Paint(b2, opac);
+
+        m->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
+        m->scene->AddPointLight({-2, -2, 3}, {0.5f, 0.6f, 0.9f}, 50.f);
+    });
 
     g_index.close();
     printf("done.\n");
