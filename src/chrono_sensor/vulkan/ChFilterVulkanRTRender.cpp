@@ -2020,11 +2020,16 @@ struct ChVulkanRTGpuRenderer {
 
     ~ChVulkanRTGpuRenderer() { Destroy(); }
 
-    bool Render(const std::shared_ptr<ChVulkanRTScene>& scene, const ChVulkanRTGpuFrame& frame) {
+    /// Outcome of a GPU render attempt. NoGeometry is not a failure: a scene with nothing in it
+    /// renders as pure background, which this path cannot express because it has no acceleration
+    /// structure to trace against, so the caller renders that frame on the CPU instead.
+    enum class RenderResult { Rendered, NoGeometry, Failed };
+
+    RenderResult Render(const std::shared_ptr<ChVulkanRTScene>& scene, const ChVulkanRTGpuFrame& frame) {
         if (!scene || !m_device || !m_device->GetDevice())
-            return false;
+            return RenderResult::Failed;
         if (frame.width == 0 || frame.height == 0)
-            return true;
+            return RenderResult::Rendered;
 
         if (m_scene_revision != scene->GetRevision()) {
             BuildScene(scene);
@@ -2033,7 +2038,7 @@ struct ChVulkanRTGpuRenderer {
         }
 
         if (m_vertices.empty() || m_triangles.empty())
-            return false;
+            return RenderResult::NoGeometry;
 
         EnsureOutput(frame.width, frame.height, frame.pipeline);
         if (m_descriptors_dirty)
@@ -2076,7 +2081,7 @@ struct ChVulkanRTGpuRenderer {
 
         RecordAndSubmitRender(pc, frame.width, frame.height, frame.pipeline);
         CopyOutputToHost(frame);
-        return true;
+        return RenderResult::Rendered;
     }
 
   private:
@@ -3591,16 +3596,22 @@ void ChFilterVulkanRTRender::Apply() {
             gpu_frame.clip_near = static_cast<float>(radar->GetClipNear());
         }
 
-        if (m_gpu_renderer->Render(m_scene, gpu_frame))
+        const auto gpu_result = m_gpu_renderer->Render(m_scene, gpu_frame);
+        if (gpu_result == ChVulkanRTGpuRenderer::RenderResult::Rendered)
             return;
+        if (gpu_result == ChVulkanRTGpuRenderer::RenderResult::Failed)
+            throw std::runtime_error("Chrono::Sensor Vulkan RT GPU renderer failed to render; CPU fallback is only used when no Vulkan RT GPU is available");
 
-        throw std::runtime_error("Chrono::Sensor Vulkan RT GPU renderer had a Vulkan device but no renderable GPU scene; CPU fallback is only used when no Vulkan RT GPU is available");
+        // NoGeometry: a scene with nothing in it is a valid scene that renders as pure
+        // background. The GPU path has no acceleration structure to trace against in that
+        // case, so this frame falls through to the CPU renderer, which handles it.
     }
 #endif
 
-    // CPU fallback is only reached when no Vulkan RT device exists.  Do not build
-    // the host BVH/cache on the GPU path; doing so was a large serial cost before
-    // every Vulkan render and masked ray-tracing parallelism.
+    // Reached when no Vulkan RT device exists, or when one does but the scene holds no
+    // geometry, which the GPU path cannot trace. Do not build the host BVH/cache on the
+    // GPU path; doing so was a large serial cost before every Vulkan render and masked
+    // ray-tracing parallelism.
     if (!m_render_cache)
         m_render_cache = std::make_unique<ChVulkanRTRenderCache>();
     if (!m_scene || m_render_cache->scene != m_scene.get() || m_render_cache->scene_revision != m_scene->GetRevision())
