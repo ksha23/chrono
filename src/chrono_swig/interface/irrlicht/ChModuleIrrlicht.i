@@ -173,6 +173,20 @@ using namespace gui;
 %ignore irr::io::createWriteFile;
 %include "IWriteFile.h"
 %include "IVideoDriver.h"
+// Let Python implement irr::IEventReceiver.
+//
+// ChVisualSystemIrrlicht::AddUserEventReceiver() is already wrapped, but without
+// a director SWIG emits IEventReceiver as an abstract class with no constructor,
+// so a Python script can name the type and cannot subclass it:
+//
+//     >>> irrlicht.IEventReceiver()
+//     AttributeError: No constructor defined - class is abstract
+//
+// That leaves no way to read the mouse or the keyboard of the Irrlicht window
+// from Python. The Python module is already generated with directors enabled
+// (%module(directors="1", threads="1") in ChModuleIrrlicht_python.i), so this
+// feature line is the only missing piece.
+%feature("director") irr::IEventReceiver;
 %include "IEventReceiver.h"
 %include "ISceneNode.h"
 %include "ICameraSceneNode.h"
