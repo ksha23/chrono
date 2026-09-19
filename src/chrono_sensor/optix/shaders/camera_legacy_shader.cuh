@@ -218,6 +218,12 @@ static __device__ __inline__ float3 CalculateContributionToPixel(const ContextPa
             }
 
             float3 partial_contrib = mirror_correction * weight * f_ct * NdL / (4 * CUDART_PI_F);
+            // Cap the weight at 1 without changing its colour. Clamping each channel on its own
+            // drives a coloured F to white as soon as its largest channel saturates, so a smooth
+            // metal, where F * D * G is far above 1, reflects colourlessly.
+            const float contrib_max = fmaxf(partial_contrib.x, fmaxf(partial_contrib.y, partial_contrib.z));
+            if (contrib_max > 1.f)
+                partial_contrib = partial_contrib / contrib_max;
             partial_contrib = clamp(partial_contrib, make_float3(0), make_float3(1));
 
             partial_contrib = partial_contrib * prd_camera->contrib_to_pixel;
