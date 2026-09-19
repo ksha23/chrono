@@ -40,6 +40,7 @@ using namespace chrono;
 using namespace chrono::sensor;
 
 static std::string g_out = ".";
+static std::string g_only;  // when set, only scenes whose name contains it are rendered
 static std::ofstream g_index;
 
 static const unsigned int W = 480, H = 360;
@@ -138,10 +139,13 @@ static std::shared_ptr<ChBody> SensorMount(ChSystem& sys) {
 
 // ---------------------------------------------------------------- scenarios
 
-static void ScCamera(const std::string& name, std::function<void(ChSystem&, std::shared_ptr<ChSensorManager>)> setup, bool gi = false, int ss = 2, bool fog = false) {
+static void ScCamera(const std::string& name, std::function<void(ChSystem&, std::shared_ptr<ChSensorManager>)> setup, bool gi = false, int ss = 2, bool fog = false, bool room = true) {
+    if (!g_only.empty() && name.find(g_only) == std::string::npos)
+        return;
     ChSystemNSC sys;
     sys.SetGravitationalAcceleration({0, 0, 0});
-    Room(sys);
+    if (room)
+        Room(sys);
     auto mgr = MakeManager(sys, gi ? 6 : 4);
     setup(sys, mgr);
     auto ref = SensorMount(sys);
@@ -158,6 +162,8 @@ static void ScCamera(const std::string& name, std::function<void(ChSystem&, std:
 
 // The same room and sphere through a distorted lens, so the lens model itself is what varies.
 static void ScCameraLens(const std::string& name, CameraLensModelType lens) {
+    if (!g_only.empty() && name.find(g_only) == std::string::npos)
+        return;
     ChSystemNSC sys;
     sys.SetGravitationalAcceleration({0, 0, 0});
     Room(sys);
@@ -177,6 +183,8 @@ static void ScCameraLens(const std::string& name, CameraLensModelType lens) {
 // One lidar geometry, several beam configurations. Divergence and sample_radius exercise the
 // multi-sample beam path; the return mode decides how those samples collapse to one range.
 static void ScLidar(const std::string& name, LidarBeamShape shape, unsigned int sample_radius, LidarReturnMode mode, float div) {
+    if (!g_only.empty() && name.find(g_only) == std::string::npos)
+        return;
     ChSystemNSC sys;
     sys.SetGravitationalAcceleration({0, 0, 0});
     Room(sys);
@@ -198,6 +206,7 @@ static void ScLidar(const std::string& name, LidarBeamShape shape, unsigned int 
 int main(int argc, char* argv[]) {
     g_out = (argc > 1) ? argv[1] : ".";
     std::string tag = (argc > 2) ? argv[2] : "unknown";
+    g_only = (argc > 3) ? argv[3] : "";
     g_index.open(g_out + "/index.csv");
     printf("parity capture -> %s (backend tag: %s)\n", g_out.c_str(), tag.c_str());
 
@@ -572,6 +581,41 @@ int main(int argc, char* argv[]) {
         m->scene->AddPointLight({-3, 1, 5}, {1.f, 1.f, 1.f}, 80.f);
         m->scene->AddPointLight({-2, -2, 3}, {0.5f, 0.6f, 0.9f}, 50.f);
     });
+
+    // 35. Mirror tint loss, isolated. Gold metal in the metallic workflow, roughness stepped across
+    //     the range where the mirror weight crosses 1, inside a closed neutral grey box so the only
+    //     colour a reflection can carry is the metal's own. Three light levels, because the reading
+    //     is only valid on one that does not clip.
+    // NB: AddPointLight's third argument is max_range, and const_color defaults to true, which
+    // disables distance attenuation, so the light's brightness is its colour and nothing else.
+    for (float lev : {0.15f, 0.30f, 0.60f}) {
+        char nm[64];
+        snprintf(nm, sizeof(nm), "35_metal_tint_l%02d", (int)(lev * 100));
+        ScCamera(nm, [lev](ChSystem& s, std::shared_ptr<ChSensorManager> m) {
+            auto grey = Mat({0.6f, 0.6f, 0.6f}, 0.85f, 0.f);
+            Box(s, {12, 8, .2}, {-2, 0, -.1}, grey);   // floor
+            Box(s, {12, 8, .2}, {-2, 0, 6}, grey);     // ceiling
+            Box(s, {.2, 8, 6}, {4, 0, 3}, grey);       // behind the spheres
+            Box(s, {.2, 8, 6}, {-8, 0, 3}, grey);      // behind the camera, so sphere centres reflect it
+            Box(s, {12, .2, 6}, {-2, 4, 3}, grey);
+            Box(s, {12, .2, 6}, {-2, -4, 3}, grey);
+            const float rough[5] = {0.05f, 0.1f, 0.15f, 0.2f, 0.3f};
+            for (int i = 0; i < 5; i++) {
+                auto mm = chrono_types::make_shared<ChVisualMaterial>();
+                mm->SetUseSpecularWorkflow(false);
+                mm->SetDiffuseColor({0.9f, 0.75f, 0.35f});
+                mm->SetRoughness(rough[i]);
+                mm->SetMetallic(1.f);
+                auto b = chrono_types::make_shared<ChBodyEasySphere>(0.55, 1000, true, false);
+                b->SetPos({0.0, -3.0 + i * 1.5, 1.5});
+                b->SetFixed(true);
+                s.Add(b);
+                Paint(b, mm);
+            }
+            m->scene->AddPointLight({-3, 1, 5}, {lev, lev, lev}, 30.f);
+            m->scene->AddPointLight({-2, -3, 3}, {lev * 0.6f, lev * 0.6f, lev * 0.6f}, 30.f);
+        }, false, 2, false, false);
+    }
 
     g_index.close();
     printf("done.\n");
