@@ -208,6 +208,10 @@ using namespace gui;
 //
 // The three methods ignored below take ITriangleSelector and triangle3d, which
 // are not wrapped. The two screen/world conversions do not need them.
+// position2d is a #define for vector2d, not a class. Without this header SWIG
+// never sees that macro, so the signature below reads as an unknown template
+// and vector2di is rejected at the call.
+%include "position2d.h"
 %include "line3d.h"
 %template(line3df) irr::core::line3d<irr::f32>;
 %ignore irr::scene::ISceneCollisionManager::getCollisionPoint;
