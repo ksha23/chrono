@@ -192,6 +192,28 @@ using namespace gui;
 %include "ICameraSceneNode.h"
 %include "IrrlichtDevice.h"
 %include "IMeshSceneNode.h"
+// Let Python turn a screen pixel into a world ray.
+//
+// ISceneManager::getSceneCollisionManager() is already reachable, but with the
+// class undeclared SWIG hands back an opaque SwigPyObject and every method on
+// it is unreachable:
+//
+//     >>> type(sm.getSceneCollisionManager()).__name__
+//     'SwigPyObject'
+//
+// getRayFromScreenCoordinates() is the one that matters. It is how a mouse
+// click becomes something to pick with, and without it every Python caller
+// re-derives the ray from the camera's FOV, aspect ratio and basis by hand --
+// which is easy to get subtly wrong and has nothing to do with the application.
+//
+// The three methods ignored below take ITriangleSelector and triangle3d, which
+// are not wrapped. The two screen/world conversions do not need them.
+%include "line3d.h"
+%template(line3df) irr::core::line3d<irr::f32>;
+%ignore irr::scene::ISceneCollisionManager::getCollisionPoint;
+%ignore irr::scene::ISceneCollisionManager::getCollisionResultPosition;
+%ignore irr::scene::ISceneCollisionManager::getSceneNodeAndCollisionPointFromRay;
+%include "ISceneCollisionManager.h"
 %include "ISceneManager.h"
 %include "IGUIEnvironment.h"
 
