@@ -41,7 +41,7 @@ namespace vehicle {
 // -----------------------------------------------------------------------------
 
 // Process joystick events every 16 ticks (~60 Hz)
-const int JoystickProcessFrequency = 16;
+const int JoystickProcessFrequency_default = 0;
 
 // Output joystick debug info every 30 ticks
 const int JoystickOutputFrequency = 32;
@@ -113,6 +113,7 @@ class ChJoystickIRR {
     irr::core::array<irr::SJoystickInfo> joystick_info;  // Irrlicht joystick information
     std::string joystick_file;                           // JSON specification file
     int m_joystick_proccess_frame;                       // counter for successive event processing frames
+    int m_process_frequency;                             // number of frames to skip between reads
     bool joystick_debug;                                 // enable/disable debug output
     int joystick_debug_frame;                            // counter for successive output frames
 
@@ -407,19 +408,37 @@ bool ChVehicleEventReceiver::ProcessJoystickEvents(const SEvent& event,
                                                    ChJoystickIRR* joystick,
                                                    ChVehicle* vehicle,
                                                    ChInteractiveDriver* driver) {
-    // Driver only handles input every 16 ticks (~60 Hz)
-    if (joystick->m_joystick_proccess_frame < JoystickProcessFrequency) {
+    // Always sample axes and buttons so stored values stay fresh.
+    joystick->steerAxis.GetValue(event.JoystickEvent);
+    joystick->throttleAxis.GetValue(event.JoystickEvent);
+    joystick->brakeAxis.GetValue(event.JoystickEvent);
+    joystick->clutchAxis.GetValue(event.JoystickEvent);
+    joystick->shiftUpButton.IsPressed(event.JoystickEvent);
+    joystick->shiftDownButton.IsPressed(event.JoystickEvent);
+    joystick->toggleManualGearboxButton.IsPressed(event.JoystickEvent);
+    joystick->gearReverseButton.IsPressed(event.JoystickEvent);
+    joystick->gear1Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear2Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear3Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear4Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear5Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear6Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear7Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear8Button.IsPressed(event.JoystickEvent, true);
+    joystick->gear9Button.IsPressed(event.JoystickEvent, true);
+
+    // Throttle how often we push values to the driver.
+    if (joystick->m_joystick_proccess_frame < joystick->m_process_frequency) {
         joystick->m_joystick_proccess_frame++;
         return true;
     }
-
     joystick->m_joystick_proccess_frame = 0;
 
-    // Update steering, throttle and brake axes...
-    driver->SetSteering(joystick->steerAxis.GetValue(event.JoystickEvent));
-    driver->SetThrottle(joystick->throttleAxis.GetValue(event.JoystickEvent));
-    driver->SetBraking(joystick->brakeAxis.GetValue(event.JoystickEvent));
-    driver->SetClutch(joystick->clutchAxis.GetValue(event.JoystickEvent));
+    // Push latest axis values to the driver.
+    driver->SetSteering(joystick->steerAxis.value);
+    driver->SetThrottle(joystick->throttleAxis.value);
+    driver->SetBraking(joystick->brakeAxis.value);
+    driver->SetClutch(joystick->clutchAxis.value);
 
     // joystick callback
     if (joystick->callback_button > -1 && joystick->callback_function != nullptr &&
@@ -437,7 +456,7 @@ bool ChVehicleEventReceiver::ProcessJoystickEvents(const SEvent& event,
     // Automatic transmission: check shift to manumatic and gear shift
     if (transmission->IsAutomatic()) {
         // Toggle between a automatic and manumatic shift modes
-        if (joystick->toggleManualGearboxButton.IsPressed(event.JoystickEvent)) {
+        if (joystick->toggleManualGearboxButton.buttonPressedCount == 1) {
             if (transmission_auto->GetShiftMode() == ChAutomaticTransmission::ShiftMode::AUTOMATIC) {
                 transmission_auto->SetShiftMode(ChAutomaticTransmission::ShiftMode::MANUAL);
             } else {
@@ -446,9 +465,9 @@ bool ChVehicleEventReceiver::ProcessJoystickEvents(const SEvent& event,
         }
 
         // Shift up or down
-        if (joystick->shiftUpButton.IsPressed(event.JoystickEvent)) {
+        if (joystick->shiftUpButton.buttonPressedCount == 1) {
             transmission_auto->ShiftUp();
-        } else if (joystick->shiftDownButton.IsPressed(event.JoystickEvent)) {
+        } else if (joystick->shiftDownButton.buttonPressedCount == 1) {
             transmission_auto->ShiftDown();
         }
     }
@@ -456,36 +475,36 @@ bool ChVehicleEventReceiver::ProcessJoystickEvents(const SEvent& event,
     // Manual transmission
     if (transmission->IsManual()) {
         // Sequential gear shifts: up or down
-        if (joystick->shiftUpButton.IsPressed(event.JoystickEvent)) {
+        if (joystick->shiftUpButton.buttonPressedCount == 1) {
             transmission_manual->ShiftUp();
-        } else if (joystick->shiftDownButton.IsPressed(event.JoystickEvent)) {
+        } else if (joystick->shiftDownButton.buttonPressedCount == 1) {
             transmission_manual->ShiftDown();
         }
         // Support an H-shifter if present and change gears if you press
         // the clutch and shift the car into a specific gear.
         if (joystick->clutchAxis.axis != ChJoystickAxisIRR::NONE) {
-            double clutchPosition = joystick->clutchAxis.GetValue(event.JoystickEvent);
+            double clutchPosition = joystick->clutchAxis.value;
             // Check if the clutch is pressed...
             if ((joystick->clutchAxis.scaled_max - clutchPosition) < 0.1) {
-                bool reverseGearEngaged = joystick->gearReverseButton.IsPressed(event.JoystickEvent);
+                bool reverseGearEngaged = joystick->gearReverseButton.buttonPressed;
                 int forwardGearEngaged = 0;
-                if (joystick->gear1Button.IsPressed(event.JoystickEvent, true))
+                if (joystick->gear1Button.buttonPressedCount > 0)
                     forwardGearEngaged = 1;
-                else if (joystick->gear2Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear2Button.buttonPressedCount > 0)
                     forwardGearEngaged = 2;
-                else if (joystick->gear3Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear3Button.buttonPressedCount > 0)
                     forwardGearEngaged = 3;
-                else if (joystick->gear4Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear4Button.buttonPressedCount > 0)
                     forwardGearEngaged = 4;
-                else if (joystick->gear5Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear5Button.buttonPressedCount > 0)
                     forwardGearEngaged = 5;
-                else if (joystick->gear6Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear6Button.buttonPressedCount > 0)
                     forwardGearEngaged = 6;
-                else if (joystick->gear7Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear7Button.buttonPressedCount > 0)
                     forwardGearEngaged = 7;
-                else if (joystick->gear8Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear8Button.buttonPressedCount > 0)
                     forwardGearEngaged = 8;
-                else if (joystick->gear9Button.IsPressed(event.JoystickEvent, true))
+                else if (joystick->gear9Button.buttonPressedCount > 0)
                     forwardGearEngaged = 9;
 
                 if (reverseGearEngaged) {
@@ -555,6 +574,10 @@ void ChVehicleVisualSystemIrrlicht::SetJoystickConfigFile(const std::string& fil
 
 void ChVehicleVisualSystemIrrlicht::SetJoystickDebug(bool val) {
     m_joystick->joystick_debug = val;
+}
+
+void ChVehicleVisualSystemIrrlicht::SetJoystickProcessFrequency(int skip_frames) {
+    m_joystick->m_process_frequency = std::max(skip_frames, 0);
 }
 
 void ChVehicleVisualSystemIrrlicht::SetButtonCallback(int button, void (*cbfun)()) {
@@ -891,6 +914,7 @@ ChJoystickIRR::ChJoystickIRR(ChVehicleVisualSystemIrrlicht* vsys)
       joystick_debug(false),
       joystick_debug_frame(0),
       m_joystick_proccess_frame(0),
+      m_process_frequency(JoystickProcessFrequency_default),
       callback_button(-1),
       callback_function(nullptr),
       joystick_file(GetVehicleDataFile("joystick/controller_Default.json")) {}
@@ -931,6 +955,9 @@ void ChJoystickIRR::Initialize() {
     gear8Button.Read(d, "gear8", joystick_debug);
     gear9Button.Read(d, "gear9", joystick_debug);
     toggleManualGearboxButton.Read(d, "toggleManualGearbox", joystick_debug);
+
+    if (d.HasMember("processFrequency") && d["processFrequency"].IsInt())
+        m_process_frequency = std::max(d["processFrequency"].GetInt(), 0);
 
     // Loop over available controllers and distribute axes per controller if specified
     for (u32 id = 0; id < joystick_info.size(); ++id) {
