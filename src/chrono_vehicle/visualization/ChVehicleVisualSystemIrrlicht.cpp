@@ -573,8 +573,11 @@ void ChVehicleVisualSystemIrrlicht::AttachDriver(ChDriver* driver) {
 
     // The Irrlicht device reports key releases, so held-key driving controls can be supported. This only
     // proposes a default; an explicit call to ChInteractiveDriver::SetKeyboardMode always wins.
-    if (auto idriver = dynamic_cast<ChInteractiveDriver*>(driver))
+    if (auto idriver = dynamic_cast<ChInteractiveDriver*>(driver)) {
         idriver->SetDefaultKeyboardMode(m_keyboard_mode);
+        if (m_joystick && m_joystick->Active())
+            idriver->SetHasJoystick(true);
+    }
 }
 
 void ChVehicleVisualSystemIrrlicht::AttachVehicle(ChVehicle* vehicle) {
@@ -596,6 +599,12 @@ void ChVehicleVisualSystemIrrlicht::Initialize() {
 
     // Initialize joysticks
     m_joystick->Initialize();
+
+    // Tell the driver a joystick is available so SetInputMode(JOYSTICK) succeeds.
+    if (m_joystick->Active()) {
+        if (auto driver = dynamic_cast<ChInteractiveDriver*>(GetDriver()))
+            driver->SetHasJoystick(true);
+    }
 
     // Attach the event receivers for chase camera and vehicle control
     AddUserEventReceiver(m_camera_control);
