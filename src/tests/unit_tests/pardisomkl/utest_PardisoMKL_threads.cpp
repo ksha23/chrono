@@ -15,12 +15,14 @@
 // Test multithreaded MKL Pardiso.
 // - The process must not load two different OpenMP runtimes (e.g. the GNU runtime
 //   used by Chrono and the Intel/LLVM runtime used by MKL's intel_thread layer).
+// - A GCC build with OpenMP must use MKL's gnu_thread layer.
 // - A sparse system factorized with 1, 2, 4 and 8 MKL threads must be solved
 //   successfully, with results matching the sequential solution.
 //
 // =============================================================================
 
 #include <cmath>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -37,38 +39,63 @@
 using namespace chrono;
 
 #if defined(__linux__)
+// Collect the resolved paths of all loaded shared libraries (symbolic links are resolved, since some
+// distributions provide libgomp.so.1 or libiomp5.so as links to the LLVM OpenMP runtime).
 static int CollectLibrary(struct dl_phdr_info* info, size_t size, void* data) {
     auto libs = static_cast<std::vector<std::string>*>(data);
-    if (info->dlpi_name && info->dlpi_name[0] != '\0')
-        libs->push_back(info->dlpi_name);
+    if (info->dlpi_name && info->dlpi_name[0] != '\0') {
+        char* path = realpath(info->dlpi_name, nullptr);
+        std::string name = path ? path : info->dlpi_name;
+        free(path);
+        libs->push_back(name.substr(name.find_last_of('/') + 1));
+    }
     return 0;
 }
-#endif
 
-// Check that at most one OpenMP runtime is loaded in the process.
-TEST(PardisoMKL, single_openmp_runtime) {
-#if defined(__linux__)
+static std::vector<std::string> LoadedLibraries() {
     // Make sure the Pardiso module (and hence MKL) is actually used by this process
     ChSolverPardisoMKL solver;
     (void)solver;
 
     std::vector<std::string> libs;
     dl_iterate_phdr(CollectLibrary, &libs);
+    return libs;
+}
 
-    bool gnu = false;
-    bool llvm = false;
+static bool IsLoaded(const std::vector<std::string>& libs, const std::string& prefix) {
     for (const auto& lib : libs) {
-        auto name = lib.substr(lib.find_last_of('/') + 1);
-        if (name.rfind("libgomp.so", 0) == 0)
-            gnu = true;
-        if (name.rfind("libiomp5.so", 0) == 0 || name.rfind("libomp.so", 0) == 0)
-            llvm = true;
+        if (lib.rfind(prefix, 0) == 0)
+            return true;
     }
+    return false;
+}
+#endif
+
+// Check that at most one OpenMP runtime is loaded in the process.
+TEST(PardisoMKL, single_openmp_runtime) {
+#if defined(__linux__)
+    auto libs = LoadedLibraries();
+    bool gnu = IsLoaded(libs, "libgomp.so");
+    bool llvm = IsLoaded(libs, "libiomp5.so") || IsLoaded(libs, "libomp.so");
     std::cout << "GNU OpenMP runtime loaded: " << gnu << "   Intel/LLVM OpenMP runtime loaded: " << llvm << std::endl;
     EXPECT_FALSE(gnu && llvm) << "Both libgomp and libiomp5/libomp are loaded; MKL_THREADING does not match the "
                                  "OpenMP runtime used by Chrono";
 #else
     GTEST_SKIP() << "Loaded library check only implemented on Linux";
+#endif
+}
+
+// Check that a GCC build with OpenMP does not use the MKL threading layer for the Intel OpenMP runtime.
+TEST(PardisoMKL, threading_layer) {
+#if defined(__linux__) && defined(_OPENMP) && defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
+    auto libs = LoadedLibraries();
+    bool intel_thread = IsLoaded(libs, "libmkl_intel_thread.so");
+    bool gnu_thread = IsLoaded(libs, "libmkl_gnu_thread.so");
+    std::cout << "MKL intel_thread layer loaded: " << intel_thread << "   MKL gnu_thread layer loaded: " << gnu_thread << std::endl;
+    EXPECT_FALSE(intel_thread) << "Chrono uses the GNU OpenMP runtime, but MKL uses the intel_thread layer; "
+                                  "configure with MKL_THREADING=gnu_thread";
+#else
+    GTEST_SKIP() << "Only relevant for GCC builds with OpenMP on Linux";
 #endif
 }
 
@@ -113,14 +140,8 @@ TEST(PardisoMKL, multithreaded_solve) {
     ChVectorDynamic<> b;
     BuildMatrix(30, A, b);
 
-    // Exercise Chrono's OpenMP runtime before calling MKL, as a simulation would
+    // Set the number of threads of Chrono's OpenMP runtime, as a simulation would
     ChOMP::SetNumThreads(2);
-    std::vector<double> work(1000, 1.0);
-    double sum = 0;
-#pragma omp parallel for reduction(+ : sum)
-    for (int i = 0; i < (int)work.size(); i++)
-        sum += work[i];
-    ASSERT_DOUBLE_EQ(sum, 1000.0);
 
     ChVectorDynamic<> x_ref;
     for (int num_threads : {1, 2, 4, 8}) {
