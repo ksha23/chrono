@@ -33,6 +33,12 @@
 #include <unordered_map>
 
 #include <optix_stubs.h>
+#ifdef _WIN32
+    #include <process.h>  // _getpid
+#else
+    #include <dlfcn.h>   // dladdr
+    #include <unistd.h>  // getpid
+#endif
 // #include <optix_function_table_definition.h>
 
 #include "chrono_sensor/ChConfigSensor.h"
@@ -91,7 +97,7 @@ const std::string& GetSensorShaderDir() {
 namespace {
 
 // Bumped whenever the on-disk format or the meaning of the key changes, so old entries are never read.
-const char* const kShaderCacheFormat = "chrono-sensor-nvrtc-cache-1";
+const char* const kShaderCacheFormat = "chrono-sensor-nvrtc-cache-2";
 const char kShaderCacheMagic[8] = {'C', 'H', 'N', 'V', 'R', 'T', 'C', '1'};
 
 // Two 64-bit lanes: FNV-1a and a rotate-multiply mix. Not cryptographic; entries are also validated
@@ -135,10 +141,27 @@ bool ReadFileBytes(const std::filesystem::path& path, std::string& out) {
     return true;
 }
 
+// Size and modification time of a file, plus the path it resolves to, or "<missing>".
+std::string FileStamp(const std::filesystem::path& path) {
+    std::error_code ec;
+    const auto size = std::filesystem::file_size(path, ec);
+    if (ec)
+        return "<missing>";
+    // cast: the tick count is a 128-bit integer in libc++, which ostream does not print
+    const long long mtime = static_cast<long long>(std::filesystem::last_write_time(path, ec).time_since_epoch().count());
+    const auto resolved = std::filesystem::weakly_canonical(path, ec);
+    std::ostringstream os;
+    os << (ec ? path : resolved).generic_string() << " size=" << size << " mtime=" << mtime;
+    return os.str();
+}
+
 // Hash the contents of every file reached through #include "..." from 'content', recursively. Quoted
 // includes are resolved the way NVRTC resolves them: next to the including file first, then in the -I
 // directories. Directives inside inactive #if blocks are followed too, which can only add files to the
 // key. An unresolved include is hashed by name, so a file appearing later still changes the key.
+// An #include <...> found in the -I directories (OptiX, NanoVDB, CUDA headers) is hashed by its
+// resolved path, size and modification time, not by its contents, and is not followed further; one
+// that is not found there (an NVRTC built-in header) is hashed by name only.
 void HashQuotedIncludes(const std::filesystem::path& file,
                         const std::string& content,
                         const std::vector<std::string>& include_dirs,
@@ -154,12 +177,28 @@ void HashQuotedIncludes(const std::filesystem::path& file,
         if (i == std::string::npos || line.compare(i, 7, "include") != 0)
             continue;
         i = line.find_first_not_of(" \t", i + 7);
-        if (i == std::string::npos || line[i] != '"')
+        if (i == std::string::npos || (line[i] != '"' && line[i] != '<'))
             continue;
-        const size_t close = line.find('"', i + 1);
+        const bool angle = (line[i] == '<');
+        const size_t close = line.find(angle ? '>' : '"', i + 1);
         if (close == std::string::npos)
             continue;
         const std::string name = line.substr(i + 1, close - i - 1);
+
+        if (angle) {
+            hash.Add("<" + name + ">");
+            std::string stamp = "<system>";
+            for (const auto& dir : include_dirs) {
+                std::error_code ec;
+                const std::filesystem::path candidate = std::filesystem::path(dir) / name;
+                if (std::filesystem::is_regular_file(candidate, ec)) {
+                    stamp = FileStamp(candidate);
+                    break;
+                }
+            }
+            hash.Add(stamp);
+            continue;
+        }
 
         std::vector<std::filesystem::path> candidates = {file.parent_path() / name};
         for (const auto& dir : include_dirs)
@@ -237,7 +276,12 @@ void WriteCacheEntry(const std::filesystem::path& path, const std::string& key, 
     std::error_code ec;
     std::filesystem::create_directories(path.parent_path(), ec);
     std::ostringstream tmp_name;
-    tmp_name << path.filename().string() << ".tmp." << std::this_thread::get_id() << "." << std::chrono::steady_clock::now().time_since_epoch().count();
+#ifdef _WIN32
+    const long long pid = _getpid();
+#else
+    const long long pid = getpid();
+#endif
+    tmp_name << path.filename().string() << ".tmp." << pid << "." << std::this_thread::get_id() << "." << std::chrono::steady_clock::now().time_since_epoch().count();
     const std::filesystem::path tmp = path.parent_path() / tmp_name.str();
     {
         std::ofstream f(tmp, std::ios::binary);
@@ -261,12 +305,53 @@ void WriteCacheEntry(const std::filesystem::path& path, const std::string& key, 
         std::filesystem::remove(tmp, ec);
 }
 
+// True for the names this cache writes: "<module>-<32 hex digits>.nvrtc", or that followed by ".tmp.<...>"
+// for an interrupted write. Anything else in the cache directory is left alone by Clear.
+bool IsShaderCacheEntryName(const std::string& name) {
+    size_t ext = name.rfind(".nvrtc.tmp.");
+    if (ext == std::string::npos) {
+        if (name.size() < 6 || name.compare(name.size() - 6, 6, ".nvrtc") != 0)
+            return false;
+        ext = name.size() - 6;
+    }
+    if (ext < 34 || name[ext - 33] != '-')
+        return false;
+    for (size_t k = ext - 32; k < ext; k++) {
+        if (!std::isxdigit(static_cast<unsigned char>(name[k])) || std::isupper(static_cast<unsigned char>(name[k])))
+            return false;
+    }
+    return true;
+}
+
+#ifdef USE_CUDA_NVRTC
+// Identity of the NVRTC in use, part of every key. nvrtcVersion reports only major.minor, so a patch
+// update installed in place (12.4.0 to 12.4.1) would not change it. The path the loaded NVRTC library
+// resolves to, with its size and modification time, does (not on Windows, where only the versions are
+// keyed and CHRONO_SENSOR_SHADER_CACHE=clear is needed after such an update). The GPU is deliberately
+// not part of the key: no -arch is passed to NVRTC, so its output does not depend on the device.
+const std::string& NvrtcToolchainId() {
+    static const std::string id = [] {
+        int major = 0, minor = 0;
+        nvrtcVersion(&major, &minor);
+        std::string library = "<unknown>";
+    #ifndef _WIN32
+        Dl_info info;
+        if (dladdr(reinterpret_cast<const void*>(&nvrtcVersion), &info) != 0 && info.dli_fname)
+            library = FileStamp(info.dli_fname);
+    #endif
+        std::ostringstream os;
+        os << "nvrtc=" << major << "." << minor << " cuda=" << CUDA_VERSION << " optix=" << OPTIX_VERSION << " lib=" << library;
+        return os.str();
+    }();
+    return id;
+}
+#endif
+
 }  // namespace
 
-std::string ComputeShaderCacheKey(const std::string& source_file,
-                                  const std::vector<std::string>& include_dirs,
-                                  const std::vector<std::string>& options,
-                                  const std::string& toolchain) {
+namespace shader_cache {
+
+std::string ComputeKey(const std::string& source_file, const std::vector<std::string>& include_dirs, const std::vector<std::string>& options, const std::string& toolchain) {
     std::string source;
     if (!ReadFileBytes(source_file, source))
         throw std::runtime_error("Shader source not found: " + source_file);
@@ -285,7 +370,7 @@ std::string ComputeShaderCacheKey(const std::string& source_file,
     return hash.Hex();
 }
 
-std::string GetShaderCacheDir() {
+std::string GetDirectory() {
     if (!ShaderCacheEnabled())
         return "";
     std::string dir = GetEnv("CHRONO_SENSOR_SHADER_CACHE_DIR");
@@ -303,26 +388,29 @@ std::string GetShaderCacheDir() {
     return (std::filesystem::path(base) / "chrono" / "sensor_shaders").string();
 }
 
-void ClearShaderCache(bool disk) {
+void Clear(bool disk) {
     {
         std::lock_guard<std::mutex> lock(shader_cache_mutex);
         shader_memory_cache.clear();
     }
     if (!disk)
         return;
-    const std::string dir = GetShaderCacheDir();
+    const std::string dir = GetDirectory();
     std::error_code ec;
     if (dir.empty() || !std::filesystem::is_directory(dir, ec))
         return;
-    for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
-        const std::string name = entry.path().filename().string();
-        if (name.find(".nvrtc") != std::string::npos)
-            std::filesystem::remove(entry.path(), ec);
+    // Collect first, then remove; every filesystem call takes an error_code, so nothing here throws.
+    std::vector<std::filesystem::path> entries;
+    for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (IsShaderCacheEntryName(it->path().filename().string()))
+            entries.push_back(it->path());
     }
+    for (const auto& entry : entries)
+        std::filesystem::remove(entry, ec);
 }
 
-ShaderCacheStats GetShaderCacheStats() {
-    ShaderCacheStats stats;
+Stats GetStats() {
+    Stats stats;
     stats.memory_hits = stat_memory_hits;
     stats.disk_hits = stat_disk_hits;
     stats.compiles = stat_compiles;
@@ -331,7 +419,7 @@ ShaderCacheStats GetShaderCacheStats() {
     return stats;
 }
 
-std::string CompileShader(const std::string& file_name, bool emit_optixir, bool* cache_hit) {
+std::string Compile(const std::string& file_name, bool emit_optixir, bool* cache_hit) {
     if (cache_hit)
         *cache_hit = false;
 #ifdef USE_CUDA_NVRTC
@@ -372,18 +460,10 @@ std::string CompileShader(const std::string& file_name, bool emit_optixir, bool*
         static std::once_flag clear_once;
         std::call_once(clear_once, [] {
             if (ShaderCacheMode() == "clear")
-                ClearShaderCache(true);
+                Clear(true);
         });
 
-        int major = 0, minor = 0, device = 0, cc_major = 0, cc_minor = 0;
-        nvrtcVersion(&major, &minor);
-        if (cudaGetDevice(&device) == cudaSuccess) {
-            cudaDeviceGetAttribute(&cc_major, cudaDevAttrComputeCapabilityMajor, device);
-            cudaDeviceGetAttribute(&cc_minor, cudaDevAttrComputeCapabilityMinor, device);
-        }
-        std::ostringstream toolchain;
-        toolchain << "nvrtc=" << major << "." << minor << " optix=" << OPTIX_VERSION << " sm=" << cc_major << cc_minor;
-        key = ComputeShaderCacheKey(cuda_file, include_dirs, options, toolchain.str());
+        key = ComputeKey(cuda_file, include_dirs, options, NvrtcToolchainId());
 
         {
             std::lock_guard<std::mutex> lock(shader_cache_mutex);
@@ -396,7 +476,7 @@ std::string CompileShader(const std::string& file_name, bool emit_optixir, bool*
             }
         }
 
-        const std::string dir = GetShaderCacheDir();
+        const std::string dir = GetDirectory();
         if (!dir.empty()) {
             disk_entry = std::filesystem::path(dir) / (file_name + "-" + key + ".nvrtc");
             std::string payload;
@@ -469,9 +549,11 @@ std::string CompileShader(const std::string& file_name, bool emit_optixir, bool*
 #else
     (void)file_name;
     (void)emit_optixir;
-    throw std::runtime_error("CompileShader requires Chrono::Sensor built with NVRTC (CH_USE_SENSOR_NVRTC)");
+    throw std::runtime_error("shader_cache::Compile requires Chrono::Sensor built with NVRTC (CH_USE_SENSOR_NVRTC)");
 #endif  // USE_CUDA_NVRTC
 }
+
+}  // namespace shader_cache
 
 void GetShaderFromFile(OptixDeviceContext context,
                        OptixModule& module,
@@ -498,7 +580,7 @@ void GetShaderFromFile(OptixDeviceContext context,
     static bool emit_optixir = (CH_OPTIX_EMIT_OPTIXIR != 0);
 
     if (emit_optixir) {
-        const std::string optixir = CompileShader(file_name, true);
+        const std::string optixir = shader_cache::Compile(file_name, true);
         log[0] = '\0';
         sizeof_log = sizeof(log);
         const OptixResult result = optixModuleCreate(context, &module_compile_options, &pipeline_compile_options,
@@ -512,7 +594,7 @@ void GetShaderFromFile(OptixDeviceContext context,
                   << log << std::endl;
     }
 
-    const std::string ptx = CompileShader(file_name, false);
+    const std::string ptx = shader_cache::Compile(file_name, false);
     sizeof_log = sizeof(log);
     OPTIX_ERROR_CHECK(optixModuleCreate(context, &module_compile_options, &pipeline_compile_options, ptx.c_str(),
                                         ptx.size(), log, &sizeof_log, &module));

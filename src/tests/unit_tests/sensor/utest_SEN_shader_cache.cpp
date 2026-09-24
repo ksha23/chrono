@@ -13,10 +13,11 @@
 // Unit tests for the NVRTC shader cache in ChOptixUtils.
 //
 // - The cache key changes when the shader source, any file it includes (directly or transitively),
-//   the compile options or the toolchain description change, and does not change with the current
-//   working directory.
+//   a header it includes with <...> from an include directory, the compile options or the toolchain
+//   description change, and does not change with the current working directory.
 // - A cached module is byte-identical to a fresh NVRTC compile, is served from memory and from disk
 //   (including from a different working directory), and a corrupt disk entry is recompiled.
+// - Clearing the disk cache deletes only the files the cache writes, not other files in the directory.
 // - Every NVRTC program that is created is destroyed.
 //
 // =============================================================================
@@ -83,36 +84,47 @@ TEST(ChShaderCache, KeyTracksSourcesOptionsAndToolchain) {
 
     const std::vector<std::string> dirs = {inc_dir.string()};
     const std::vector<std::string> opts = {"-I" + inc_dir.string(), "-use_fast_math"};
-    const std::string key = ComputeShaderCacheKey(src.string(), dirs, opts, "tc");
+    const std::string key = shader_cache::ComputeKey(src.string(), dirs, opts, "tc");
     EXPECT_EQ(key.size(), 32u);
-    EXPECT_EQ(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc"));
+    EXPECT_EQ(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
 
     // transitive include, found next to the including file
     WriteText(inc_dir / "lib" / "b.cuh", "int b2;\n");
-    EXPECT_NE(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc"));
+    EXPECT_NE(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
     WriteText(inc_dir / "lib" / "b.cuh", "int b;\n");
-    EXPECT_EQ(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc"));
+    EXPECT_EQ(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
 
     // direct include, found through the include directory
     WriteText(inc_dir / "lib" / "a.cuh", "  #  include \"b.cuh\"\n#include <cuda_runtime.h>\nint a2;\n");
-    EXPECT_NE(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc"));
+    EXPECT_NE(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
     WriteText(inc_dir / "lib" / "a.cuh", "  #  include \"b.cuh\"\n#include <cuda_runtime.h>\nint a;\n");
 
     // main source, options and toolchain
     WriteText(src, "#include \"lib/a.cuh\"\n__global__ void k2() {}\n");
-    EXPECT_NE(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc"));
+    EXPECT_NE(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
     WriteText(src, "#include \"lib/a.cuh\"\n__global__ void k() {}\n");
-    EXPECT_NE(key, ComputeShaderCacheKey(src.string(), dirs, {opts[0], opts[1], "--optix-ir"}, "tc"));
-    EXPECT_NE(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc2"));
+    EXPECT_NE(key, shader_cache::ComputeKey(src.string(), dirs, {opts[0], opts[1], "--optix-ir"}, "tc"));
+    EXPECT_NE(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc2"));
+
+    // a header included with <...> and found in an include directory, keyed by size and time
+    WriteText(inc_dir / "sys" / "s.h", "int s;\n");
+    WriteText(src, "#include \"lib/a.cuh\"\n#include <sys/s.h>\n__global__ void k() {}\n");
+    const std::string key_sys = shader_cache::ComputeKey(src.string(), dirs, opts, "tc");
+    EXPECT_NE(key, key_sys);
+    EXPECT_EQ(key_sys, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
+    WriteText(inc_dir / "sys" / "s.h", "int s_longer;\n");
+    EXPECT_NE(key_sys, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
+    WriteText(src, "#include \"lib/a.cuh\"\n__global__ void k() {}\n");
+    EXPECT_EQ(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
 
     // a file that is not included does not matter
     WriteText(inc_dir / "lib" / "unrelated.cuh", "int u2;\n");
-    EXPECT_EQ(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc"));
+    EXPECT_EQ(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
 
     // nor does the working directory
     fs::create_directories(tmp.path / "elsewhere" / "deeper");
     fs::current_path(tmp.path / "elsewhere" / "deeper");
-    EXPECT_EQ(key, ComputeShaderCacheKey(src.string(), dirs, opts, "tc"));
+    EXPECT_EQ(key, shader_cache::ComputeKey(src.string(), dirs, opts, "tc"));
 }
 
 TEST(ChShaderCache, CachedModuleMatchesFreshCompile) {
@@ -131,16 +143,16 @@ TEST(ChShaderCache, CachedModuleMatchesFreshCompile) {
 
         // reference: cache disabled, always compiled
         SetEnv("CHRONO_SENSOR_SHADER_CACHE", "0");
-        EXPECT_EQ(GetShaderCacheDir(), "");
-        const std::string fresh = CompileShader("box", optixir, &hit);
+        EXPECT_EQ(shader_cache::GetDirectory(), "");
+        const std::string fresh = shader_cache::Compile("box", optixir, &hit);
         EXPECT_FALSE(hit);
         ASSERT_FALSE(fresh.empty());
 
         // first compile with the cache on: miss, and an entry is written to disk
         SetEnv("CHRONO_SENSOR_SHADER_CACHE", nullptr);
-        EXPECT_EQ(GetShaderCacheDir(), cache_dir.string());
-        ClearShaderCache(true);
-        EXPECT_EQ(CompileShader("box", optixir, &hit), fresh);
+        EXPECT_EQ(shader_cache::GetDirectory(), cache_dir.string());
+        shader_cache::Clear(true);
+        EXPECT_EQ(shader_cache::Compile("box", optixir, &hit), fresh);
         EXPECT_FALSE(hit);
         std::vector<fs::path> entries;
         for (const auto& e : fs::directory_iterator(cache_dir))
@@ -148,39 +160,65 @@ TEST(ChShaderCache, CachedModuleMatchesFreshCompile) {
         ASSERT_EQ(entries.size(), 1u);
 
         // in-process hit
-        auto before = GetShaderCacheStats();
-        EXPECT_EQ(CompileShader("box", optixir, &hit), fresh);
+        auto before = shader_cache::GetStats();
+        EXPECT_EQ(shader_cache::Compile("box", optixir, &hit), fresh);
         EXPECT_TRUE(hit);
-        EXPECT_EQ(GetShaderCacheStats().memory_hits, before.memory_hits + 1);
+        EXPECT_EQ(shader_cache::GetStats().memory_hits, before.memory_hits + 1);
 
         // on-disk hit, from a different working directory
-        ClearShaderCache(false);
+        shader_cache::Clear(false);
         fs::create_directories(tmp.path / "other_cwd");
         fs::current_path(tmp.path / "other_cwd");
-        before = GetShaderCacheStats();
-        EXPECT_EQ(CompileShader("box", optixir, &hit), fresh);
+        before = shader_cache::GetStats();
+        EXPECT_EQ(shader_cache::Compile("box", optixir, &hit), fresh);
         EXPECT_TRUE(hit);
-        EXPECT_EQ(GetShaderCacheStats().disk_hits, before.disk_hits + 1);
+        EXPECT_EQ(shader_cache::GetStats().disk_hits, before.disk_hits + 1);
         fs::current_path(tmp.old_cwd);
 
         // a truncated entry is ignored and rewritten
-        ClearShaderCache(false);
+        shader_cache::Clear(false);
         fs::resize_file(entries[0], fs::file_size(entries[0]) / 2);
-        before = GetShaderCacheStats();
-        EXPECT_EQ(CompileShader("box", optixir, &hit), fresh);
+        before = shader_cache::GetStats();
+        EXPECT_EQ(shader_cache::Compile("box", optixir, &hit), fresh);
         EXPECT_FALSE(hit);
-        EXPECT_EQ(GetShaderCacheStats().compiles, before.compiles + 1);
-        ClearShaderCache(false);
-        EXPECT_EQ(CompileShader("box", optixir, &hit), fresh);
+        EXPECT_EQ(shader_cache::GetStats().compiles, before.compiles + 1);
+        shader_cache::Clear(false);
+        EXPECT_EQ(shader_cache::Compile("box", optixir, &hit), fresh);
         EXPECT_TRUE(hit);
 
-        ClearShaderCache(true);
+        shader_cache::Clear(true);
     }
 
     // no NVRTC program outlives its compile
-    const auto stats = GetShaderCacheStats();
+    const auto stats = shader_cache::GetStats();
     EXPECT_GT(stats.programs_created, 0u);
     EXPECT_EQ(stats.programs_created, stats.programs_destroyed);
+
+    SetEnv("CHRONO_SENSOR_SHADER_CACHE_DIR", nullptr);
+}
+
+TEST(ChShaderCache, ClearDeletesOnlyCacheEntries) {
+    TempDir tmp("clear");
+    const fs::path dir = tmp.path / "cache";
+    SetEnv("CHRONO_SENSOR_SHADER_CACHE", nullptr);
+    SetEnv("CHRONO_SENSOR_SHADER_CACHE_DIR", dir.string().c_str());
+    ASSERT_EQ(shader_cache::GetDirectory(), dir.string());
+
+    const std::string hex = "0123456789abcdef0123456789abcdef";
+    const std::vector<std::string> cache_files = {"box-" + hex + ".nvrtc", "material_shaders-" + hex + ".nvrtc.tmp.4242.140.123456789"};
+    const std::vector<std::string> other_files = {"notes.txt",      "results.nvrtc.csv", "old.nvrtc", "box-" + hex + ".nvrtc.bak", "box-0123456789ABCDEF0123456789ABCDEF.nvrtc",
+                                                  "box-0123.nvrtc", "-" + hex + ".nvrtc"};
+    for (const auto& name : cache_files)
+        WriteText(dir / name, "x");
+    for (const auto& name : other_files)
+        WriteText(dir / name, "x");
+
+    shader_cache::Clear(true);
+
+    for (const auto& name : cache_files)
+        EXPECT_FALSE(fs::exists(dir / name)) << name;
+    for (const auto& name : other_files)
+        EXPECT_TRUE(fs::exists(dir / name)) << name;
 
     SetEnv("CHRONO_SENSOR_SHADER_CACHE_DIR", nullptr);
 }

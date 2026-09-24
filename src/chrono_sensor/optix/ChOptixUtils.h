@@ -114,21 +114,34 @@ CH_SENSOR_API void GetShaderFromFile(OptixDeviceContext context,
 // every ChOptixEngine. The compiled PTX or OptiX-IR is therefore cached in memory for the life of the
 // process and on disk across processes. The key hashes the shader source, the contents of every file
 // it includes with #include "..." (recursively), the NVRTC options including the include directories,
-// the NVRTC and OptiX versions and the device compute capability. Angle-bracket includes (CUDA and
-// OptiX headers) are covered by those version numbers and include paths rather than by their contents.
+// the NVRTC, CUDA and OptiX versions, and the path, size and modification time of the loaded NVRTC
+// library (so an in-place patch update of NVRTC is detected). Headers included with #include <...>
+// from the include directories (OptiX, CUDA, NanoVDB) are keyed by path, size and modification time,
+// not by contents, and their own includes are not followed.
 //
 // Serving the cached bytes also makes the OptiX-IR independent of the current working directory,
 // which NVRTC embeds in the IR; otherwise the OptiX disk cache misses whenever the cwd changes.
+//
+// Cached modules are loaded as GPU code with only an integrity check (length and a non-cryptographic
+// checksum), not a provenance check. The default location is private to the user; do not point
+// CHRONO_SENSOR_SHADER_CACHE_DIR at a directory that other users can write.
 //
 // Environment variables:
 //   CHRONO_SENSOR_SHADER_CACHE      "0", "off" or "false" disables both caches; "clear" deletes the
 //                                   on-disk entries once, at the first compile in the process.
 //   CHRONO_SENSOR_SHADER_CACHE_DIR  on-disk cache location. Default: $XDG_CACHE_HOME or ~/.cache
 //                                   (%LOCALAPPDATA% on Windows), subdirectory chrono/sensor_shaders.
+//                                   Only files named <module>-<key>.nvrtc (and their temporary
+//                                   files) are ever deleted from it.
+//
+// These functions are used by GetShaderFromFile and exposed for tests and diagnostics only.
 // -----------------------------------------------------------------------------
 
+#ifndef SWIG
+namespace shader_cache {
+
 /// Counters for the shader cache, accumulated over the life of the process.
-struct ShaderCacheStats {
+struct Stats {
     unsigned long long memory_hits = 0;         ///< modules served from the in-process cache
     unsigned long long disk_hits = 0;           ///< modules served from the on-disk cache
     unsigned long long compiles = 0;            ///< modules compiled with NVRTC
@@ -139,25 +152,30 @@ struct ShaderCacheStats {
 /// Return the compiled PTX (emit_optixir = false) or OptiX-IR (emit_optixir = true) for the named shader
 /// in the shader directory, compiling it with NVRTC only on a cache miss. If 'cache_hit' is given, it is
 /// set to true when the result came from either cache. Throws if Chrono::Sensor was built without NVRTC.
-CH_SENSOR_API std::string CompileShader(const std::string& file_name, bool emit_optixir, bool* cache_hit = nullptr);
+CH_SENSOR_API std::string Compile(const std::string& file_name, bool emit_optixir, bool* cache_hit = nullptr);
 
 /// Cache key for a shader source file: a hash of its contents, the contents of its transitive
 /// #include "..." files (resolved relative to the including file, then against 'include_dirs'), the
-/// compiler 'options' and the free-form 'toolchain' description. Independent of the working directory
-/// when the paths passed in are absolute.
-CH_SENSOR_API std::string ComputeShaderCacheKey(const std::string& source_file,
-                                                const std::vector<std::string>& include_dirs,
-                                                const std::vector<std::string>& options,
-                                                const std::string& toolchain);
+/// path, size and modification time of #include <...> files found in 'include_dirs', the compiler
+/// 'options' and the free-form 'toolchain' description. Independent of the working directory when
+/// the paths passed in are absolute.
+CH_SENSOR_API std::string ComputeKey(const std::string& source_file,
+                                     const std::vector<std::string>& include_dirs,
+                                     const std::vector<std::string>& options,
+                                     const std::string& toolchain);
 
 /// Directory of the on-disk shader cache, or an empty string if the cache is disabled.
-CH_SENSOR_API std::string GetShaderCacheDir();
+CH_SENSOR_API std::string GetDirectory();
 
-/// Empty the in-process shader cache and, if 'disk' is true, delete the on-disk entries.
-CH_SENSOR_API void ClearShaderCache(bool disk = true);
+/// Empty the in-process shader cache and, if 'disk' is true, delete the on-disk entries
+/// (only files named <module>-<32 hex digits>.nvrtc and their temporary files).
+CH_SENSOR_API void Clear(bool disk = true);
 
 /// Shader cache counters for this process.
-CH_SENSOR_API ShaderCacheStats GetShaderCacheStats();
+CH_SENSOR_API Stats GetStats();
+
+}  // namespace shader_cache
+#endif  // SWIG
 
 CH_SENSOR_API void optix_log_callback(unsigned int level, const char* tag, const char* message, void*);
 
