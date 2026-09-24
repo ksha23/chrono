@@ -61,6 +61,7 @@ if(CH_USE_SENSOR_OPTIX)
   # compiled to PTX at build time and nothing is staged for this test to compare against.
   if(CH_USE_SENSOR_NVRTC)
     set(TESTS ${TESTS} utest_SEN_shader_staging)
+    set(TESTS ${TESTS} utest_SEN_shader_cache)  # NVRTC shader cache key and round trip
   endif()
 endif()
 

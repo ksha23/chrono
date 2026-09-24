@@ -24,6 +24,7 @@
 #include <nvrtc.h>
 #include <chrono>
 #include <string>
+#include <vector>
 
 #include "chrono_sensor/ChApiSensor.h"
 
@@ -105,6 +106,58 @@ CH_SENSOR_API void GetShaderFromFile(OptixDeviceContext context,
                                      const std::string& file_name,
                                      OptixModuleCompileOptions& module_compile_options,
                                      OptixPipelineCompileOptions& pipeline_compile_options);
+
+// -----------------------------------------------------------------------------
+// Run-time shader compilation cache (used when shaders are compiled with NVRTC).
+//
+// Compiling the shader modules with NVRTC takes several seconds per process and was repeated for
+// every ChOptixEngine. The compiled PTX or OptiX-IR is therefore cached in memory for the life of the
+// process and on disk across processes. The key hashes the shader source, the contents of every file
+// it includes with #include "..." (recursively), the NVRTC options including the include directories,
+// the NVRTC and OptiX versions and the device compute capability. Angle-bracket includes (CUDA and
+// OptiX headers) are covered by those version numbers and include paths rather than by their contents.
+//
+// Serving the cached bytes also makes the OptiX-IR independent of the current working directory,
+// which NVRTC embeds in the IR; otherwise the OptiX disk cache misses whenever the cwd changes.
+//
+// Environment variables:
+//   CHRONO_SENSOR_SHADER_CACHE      "0", "off" or "false" disables both caches; "clear" deletes the
+//                                   on-disk entries once, at the first compile in the process.
+//   CHRONO_SENSOR_SHADER_CACHE_DIR  on-disk cache location. Default: $XDG_CACHE_HOME or ~/.cache
+//                                   (%LOCALAPPDATA% on Windows), subdirectory chrono/sensor_shaders.
+// -----------------------------------------------------------------------------
+
+/// Counters for the shader cache, accumulated over the life of the process.
+struct ShaderCacheStats {
+    unsigned long long memory_hits = 0;         ///< modules served from the in-process cache
+    unsigned long long disk_hits = 0;           ///< modules served from the on-disk cache
+    unsigned long long compiles = 0;            ///< modules compiled with NVRTC
+    unsigned long long programs_created = 0;    ///< nvrtcCreateProgram calls
+    unsigned long long programs_destroyed = 0;  ///< nvrtcDestroyProgram calls
+};
+
+/// Return the compiled PTX (emit_optixir = false) or OptiX-IR (emit_optixir = true) for the named shader
+/// in the shader directory, compiling it with NVRTC only on a cache miss. If 'cache_hit' is given, it is
+/// set to true when the result came from either cache. Throws if Chrono::Sensor was built without NVRTC.
+CH_SENSOR_API std::string CompileShader(const std::string& file_name, bool emit_optixir, bool* cache_hit = nullptr);
+
+/// Cache key for a shader source file: a hash of its contents, the contents of its transitive
+/// #include "..." files (resolved relative to the including file, then against 'include_dirs'), the
+/// compiler 'options' and the free-form 'toolchain' description. Independent of the working directory
+/// when the paths passed in are absolute.
+CH_SENSOR_API std::string ComputeShaderCacheKey(const std::string& source_file,
+                                                const std::vector<std::string>& include_dirs,
+                                                const std::vector<std::string>& options,
+                                                const std::string& toolchain);
+
+/// Directory of the on-disk shader cache, or an empty string if the cache is disabled.
+CH_SENSOR_API std::string GetShaderCacheDir();
+
+/// Empty the in-process shader cache and, if 'disk' is true, delete the on-disk entries.
+CH_SENSOR_API void ClearShaderCache(bool disk = true);
+
+/// Shader cache counters for this process.
+CH_SENSOR_API ShaderCacheStats GetShaderCacheStats();
 
 CH_SENSOR_API void optix_log_callback(unsigned int level, const char* tag, const char* message, void*);
 
