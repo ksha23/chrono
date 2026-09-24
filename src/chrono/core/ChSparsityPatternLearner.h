@@ -15,6 +15,9 @@
 #ifndef CHSPARSITYPATTERNLEARNER_H
 #define CHSPARSITYPATTERNLEARNER_H
 
+#include <algorithm>
+#include <vector>
+
 #include "chrono/core/ChMatrix.h"
 
 namespace chrono {
@@ -62,8 +65,8 @@ class ChSparsityPatternLearner : public Eigen::SparseMatrix<double, Eigen::RowMa
     void process() {
         // Find the unique indices of non-zero elements in each inner vector
         for (auto vec = innerVectors.begin(); vec != innerVectors.end(); ++vec) {
-            vec->sort();
-            vec->unique();
+            std::sort(vec->begin(), vec->end());
+            vec->erase(std::unique(vec->begin(), vec->end()), vec->end());
         }
 
         // Cache the number of non-zero elements in each inner vector
@@ -78,7 +81,7 @@ class ChSparsityPatternLearner : public Eigen::SparseMatrix<double, Eigen::RowMa
 
     // RowMajor:  innerVectors[i] contains the column indices of non-zero elements in row i
     // ColMajor:  innerVectors[i] contains the row indices of non-zero elements in column i
-    std::vector<std::list<int>> innerVectors;
+    std::vector<std::vector<int>> innerVectors;
 
     // RowMajor: innerVectors_size[i] contains the number of non-zero elements in row i
     // ColMajor: innerVectors_size[i] contains the number of non-zero elements in column i
