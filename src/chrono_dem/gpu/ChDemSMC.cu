@@ -15,6 +15,7 @@
 #include <cmath>
 #include <numeric>
 #include <fstream>
+#include <type_traits>
 
 #include "chrono_dem/gpu/ChDemSMC.cuh"
 #include "chrono_dem/utils/ChDemUtilities.h"
@@ -117,20 +118,42 @@ void ChSystemDem_impl::resetBroadphaseInformation() {
     demErrchk(gpuDeviceSynchronize());
 }
 
+// Swap the current and previous acceleration arrays in the sphere data structure. This runs on the device, in stream
+// order with the kernels that use these pointers.
+static __global__ void swapSphereAccelerations(ChSystemDem_impl::GranSphereDataPtr sphere_data_ptr, bool angular) {
+    auto sphere_data = const_cast<std::remove_const_t<std::remove_pointer_t<ChSystemDem_impl::GranSphereDataPtr>>*>(sphere_data_ptr);
+    auto swap = [](float*& a, float*& b) {
+        float* tmp = a;
+        a = b;
+        b = tmp;
+    };
+    swap(sphere_data->sphere_acc_X, sphere_data->sphere_acc_X_old);
+    swap(sphere_data->sphere_acc_Y, sphere_data->sphere_acc_Y_old);
+    swap(sphere_data->sphere_acc_Z, sphere_data->sphere_acc_Z_old);
+    if (angular) {
+        swap(sphere_data->sphere_ang_acc_X, sphere_data->sphere_ang_acc_X_old);
+        swap(sphere_data->sphere_ang_acc_Y, sphere_data->sphere_ang_acc_Y_old);
+        swap(sphere_data->sphere_ang_acc_Z, sphere_data->sphere_ang_acc_Z_old);
+    }
+}
+
 // Reset sphere acceleration data structures
 void ChSystemDem_impl::resetSphereAccelerations() {
-    // cache past acceleration data
+    // cache past acceleration data: the current accelerations become the old ones, and the old arrays (no longer
+    // needed) are reused for the current accelerations
     if (time_integrator == CHDEM_TIME_INTEGRATOR::CHUNG) {
-        demErrchk(gpuMemcpy(sphere_acc_X_old.data(), sphere_acc_X.data(), nSpheres * sizeof(float), gpuMemcpyDeviceToDevice));
-        demErrchk(gpuMemcpy(sphere_acc_Y_old.data(), sphere_acc_Y.data(), nSpheres * sizeof(float), gpuMemcpyDeviceToDevice));
-        demErrchk(gpuMemcpy(sphere_acc_Z_old.data(), sphere_acc_Z.data(), nSpheres * sizeof(float), gpuMemcpyDeviceToDevice));
         // if we have multistep AND friction, cache old alphas
-        if (gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS) {
-            demErrchk(gpuMemcpy(sphere_ang_acc_X_old.data(), sphere_ang_acc_X.data(), nSpheres * sizeof(float), gpuMemcpyDeviceToDevice));
-            demErrchk(gpuMemcpy(sphere_ang_acc_Y_old.data(), sphere_ang_acc_Y.data(), nSpheres * sizeof(float), gpuMemcpyDeviceToDevice));
-            demErrchk(gpuMemcpy(sphere_ang_acc_Z_old.data(), sphere_ang_acc_Z.data(), nSpheres * sizeof(float), gpuMemcpyDeviceToDevice));
+        bool angular = gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS;
+        sphere_acc_X.swap(sphere_acc_X_old);
+        sphere_acc_Y.swap(sphere_acc_Y_old);
+        sphere_acc_Z.swap(sphere_acc_Z_old);
+        if (angular) {
+            sphere_ang_acc_X.swap(sphere_ang_acc_X_old);
+            sphere_ang_acc_Y.swap(sphere_ang_acc_Y_old);
+            sphere_ang_acc_Z.swap(sphere_ang_acc_Z_old);
         }
-        demErrchk(gpuDeviceSynchronize());
+        swapSphereAccelerations<<<1, 1>>>(sphere_data, angular);
+        demErrchk(gpuPeekAtLastError());
     }
 
     // reset current accelerations to zero to zero
@@ -675,10 +698,6 @@ __host__ double ChSystemDem_impl::AdvanceSimulation(float duration) {
 
             updateFrictionData<<<nBlocksFricHistoryPostProcess, nThreadsUpdateHist>>>(fricMapSize, sphere_data, gran_params);
 
-            demErrchk(gpuPeekAtLastError());
-            demErrchk(gpuDeviceSynchronize());
-            METRICS_PRINTF("Update angular velocity.\n");
-            updateAngVels<<<nBlocks, GPU_THREADS_PER_BLOCK>>>(stepSize_SU, sphere_data, nSpheres, gran_params);
             demErrchk(gpuPeekAtLastError());
             demErrchk(gpuDeviceSynchronize());
         }
