@@ -10,14 +10,18 @@
 //
 // =============================================================================
 //
-// Tests for ChConvexHull2D: the monotone chain method must give the same area and perimeter as the Jarvis method,
-// both on the full point set and on the per-column extremes of grid patches (as used by SCM contact patches).
+// Tests for ChConvexHull2D: the monotone chain method, on the full point set and on the per-column extremes of grid
+// patches (as used by SCM contact patches), must give the area and perimeter of an exact reference hull. The reference
+// hull is computed by brute force in integer grid coordinates, so it does not depend on the Jarvis method, on the
+// input point order, or on floating point round-off.
 //
 // =============================================================================
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <map>
 #include <random>
 #include <set>
 #include <vector>
@@ -104,37 +108,104 @@ static std::vector<ChVector2d> ColumnExtremes(const GridPatch& p, double delta, 
     return pts;
 }
 
+// Portable shuffle (std::shuffle is implementation-defined; std::mt19937 output is not).
 static std::vector<ChVector2d> AllPoints(const GridPatch& p, double delta, const ChVector2d& offset, unsigned seed) {
     std::vector<ChVector2d> pts;
     for (const auto& ij : p)
         pts.push_back(offset + ChVector2d(delta * ij.first, delta * ij.second));
     std::mt19937 rng(seed);
-    std::shuffle(pts.begin(), pts.end(), rng);  // SCM patch order follows hash-map iteration
+    for (size_t i = pts.size(); i > 1; i--)
+        std::swap(pts[i - 1], pts[rng() % i]);  // SCM patch order follows hash-map iteration
     return pts;
 }
 
-static void Check(const GridPatch& patch, double delta, const ChVector2d& offset) {
-    auto pts = AllPoints(patch, delta, offset, 7);
-    ChConvexHull2D jarvis(pts, ChConvexHull2D::JARVIS);
+// Exact reference hull of a grid patch, in integer grid coordinates.
+struct RefHull {
+    long long area2;      // twice the hull area, in grid units
+    double perimeter;     // hull perimeter, in grid units
+    size_t num_vertices;  // number of strictly convex hull vertices
+};
 
-    auto pts_m = pts;
-    ChConvexHull2D monotone(pts_m, ChConvexHull2D::MONOTONE);
+static long long Cross(const std::pair<int, int>& o, const std::pair<int, int>& a, const std::pair<int, int>& b) {
+    return (long long)(a.first - o.first) * (b.second - o.second) - (long long)(a.second - o.second) * (b.first - o.first);
+}
+
+// Brute force: (a,b) is a hull edge if every point lies to its left or on the segment [a,b]. On each side of the hull
+// only the edge between the two extreme collinear points qualifies, so the edges are exactly the hull sides.
+// The candidates are the column extremes; the test separately checks that every patch node lies inside the result,
+// which shows that the hull of the column extremes is the hull of the whole patch.
+static RefHull ReferenceHull(const GridPatch& patch) {
+    std::map<int, std::pair<int, int>> col;  // column -> (jmin, jmax)
+    for (const auto& ij : patch) {
+        auto it = col.find(ij.first);
+        if (it == col.end())
+            col[ij.first] = {ij.second, ij.second};
+        else
+            it->second = {std::min(it->second.first, ij.second), std::max(it->second.second, ij.second)};
+    }
+    GridPatch c;
+    for (const auto& e : col) {
+        c.push_back({e.first, e.second.first});
+        if (e.second.second != e.second.first)
+            c.push_back({e.first, e.second.second});
+    }
+
+    RefHull ref = {0, 0.0, 0};
+    std::vector<std::pair<std::pair<int, int>, std::pair<int, int>>> edges;
+    for (const auto& a : c) {
+        for (const auto& b : c) {
+            if (a == b)
+                continue;
+            long long ex = b.first - a.first, ey = b.second - a.second;
+            bool is_edge = true;
+            for (const auto& q : c) {
+                long long cr = Cross(a, b, q);
+                long long dt = (q.first - a.first) * ex + (q.second - a.second) * ey;
+                if (cr < 0 || (cr == 0 && (dt < 0 || dt > ex * ex + ey * ey))) {
+                    is_edge = false;
+                    break;
+                }
+            }
+            if (is_edge)
+                edges.push_back({a, b});
+        }
+    }
+    for (const auto& e : edges) {
+        ref.area2 += (long long)e.first.first * e.second.second - (long long)e.first.second * e.second.first;
+        ref.perimeter += std::hypot(double(e.second.first - e.first.first), double(e.second.second - e.first.second));
+    }
+    ref.num_vertices = edges.size();
+
+    // Every patch node must be inside (or on) the hull of the column extremes.
+    for (const auto& q : patch)
+        for (const auto& e : edges)
+            EXPECT_GE(Cross(e.first, e.second, q), 0);
+
+    return ref;
+}
+
+static void Check(const GridPatch& patch, double delta, const ChVector2d& offset) {
+    RefHull ref = ReferenceHull(patch);
+    ASSERT_GT(ref.area2, 0);
+    double A = 0.5 * ref.area2 * delta * delta;
+    double P = ref.perimeter * delta;
+
+    auto pts = AllPoints(patch, delta, offset, 7);
+    ChConvexHull2D monotone(pts, ChConvexHull2D::MONOTONE);
 
     auto red = ColumnExtremes(patch, delta, offset);
     ChConvexHull2D reduced(red, ChConvexHull2D::MONOTONE);
 
-    double A = jarvis.GetArea();
-    double P = jarvis.GetPerimeter();
-    ASSERT_GT(A, 0);
-    ASSERT_GT(P, 0);
     EXPECT_NEAR(monotone.GetArea(), A, 1e-12 * A);
     EXPECT_NEAR(monotone.GetPerimeter(), P, 1e-12 * P);
     EXPECT_NEAR(reduced.GetArea(), A, 1e-12 * A);
     EXPECT_NEAR(reduced.GetPerimeter(), P, 1e-12 * P);
 
-    // The monotone chain hull is closed and contains no collinear edge points.
+    // The monotone chain hull is closed and contains only the strictly convex vertices.
     const auto& h = reduced.GetHull();
     ASSERT_GE(h.size(), 4u);
+    EXPECT_EQ(h.size(), ref.num_vertices + 1);
+    EXPECT_EQ(monotone.GetHull().size(), ref.num_vertices + 1);
     EXPECT_EQ(h.front(), h.back());
     for (size_t i = 1; i + 1 < h.size(); i++) {
         ChVector2d e1 = h[i] - h[i - 1];
