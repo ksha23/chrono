@@ -163,7 +163,7 @@ State RunCouette(double atol, int check_interval) {
     ChSystemNSC sysMBS;
     ChFsiFluidSystemSPH sysSPH;
     ChFsiSystemSPH sysFSI(&sysMBS, &sysSPH);
-    sysFSI.SetVerbose(false);
+    sysFSI.SetVerbose(true);  // for the iteration counts; verbose output only prints, it does not change the computation
 
     const ChVector3d gravity(0, -g, 0);
     sysFSI.SetGravitationalAcceleration(gravity);
@@ -244,11 +244,9 @@ State RunCouette(double atol, int check_interval) {
     motor->Initialize(outer_cylinder, bottom_plate, ChFrame<>(VNULL, Q_ROTATE_Z_TO_Y));
     sysMBS.AddLink(motor);
 
-    sysFSI.Initialize();
-
-    // Verbose output only prints; it does not change the computation
-    sysFSI.SetVerbose(true);
+    // The solver components latch the verbose flag in Initialize, so capture from there on
     StdoutCapture capture;
+    sysFSI.Initialize();
     for (int step = 0; step < num_steps; step++)
         sysFSI.DoStepDynamics(step_size);
     std::string log = capture.Finish();
