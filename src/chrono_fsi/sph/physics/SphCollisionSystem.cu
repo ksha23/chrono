@@ -226,6 +226,15 @@ __global__ void reorderDataD(const uint* __restrict__ gridMarkerIndexD,
 
 // =============================================================================
 
+// Return true if the neighbor list of a marker with the given code should exclude other BCE markers.
+// With the explicit (WCSPH) schemes and the Adami boundary condition, no kernel that reads the neighbor list uses a
+// BCE-BCE pair: the boundary condition extrapolates from fluid neighbors only, and the right-hand side skips BCE-BCE
+// interactions. The Holmes boundary condition (kernel support of BCE markers) and the implicit (ISPH) solver do use
+// them, so the full list is kept in those cases. The marker itself always remains the first entry of its list.
+__device__ inline bool SkipBceNeighbors(Real codeA) {
+    return IsBceMarker(codeA) && paramsD.boundary_method == BoundaryMethod::ADAMI && paramsD.integration_scheme != IntegrationScheme::IMPLICIT_SPH;
+}
+
 __global__ void neighborSearchNum(const Real4* sortedPosRad,
                                   const Real4* sortedRhoPreMu,
                                   const uint* cellStart,
@@ -242,6 +251,7 @@ __global__ void neighborSearchNum(const Real4* sortedPosRad,
     Real SuppRadii = 2.0f * paramsD.h;
     Real SqRadii = SuppRadii * SuppRadii;
     uint j_num = 0;
+    bool skip_bce = SkipBceNeighbors(sortedRhoPreMu[index].w);
 
     for (int z = -1; z <= 1; z++) {
         for (int y = -1; y <= 1; y++) {
@@ -256,6 +266,8 @@ __global__ void neighborSearchNum(const Real4* sortedPosRad,
                 uint startIndex = cellStart[gridHash];
                 uint endIndex = cellEnd[gridHash];
                 for (uint j = startIndex; j < endIndex; j++) {
+                    if (skip_bce && j != index && IsBceMarker(sortedRhoPreMu[j].w))
+                        continue;
                     Real3 posRadB = mR3(sortedPosRad[j]);
                     Real3 dist3 = Distance(posRadA, posRadB);
                     Real dd = dist3.x * dist3.x + dist3.y * dist3.y + dist3.z * dist3.z;
@@ -286,6 +298,7 @@ __global__ void neighborSearchID(const Real4* sortedPosRad,
     Real SqRadii = SuppRadii * SuppRadii;
     uint j_num = 1;
     neighborList[numNeighborsPerPart[index]] = index;
+    bool skip_bce = SkipBceNeighbors(sortedRhoPreMu[index].w);
 
     for (int z = -1; z <= 1; z++) {
         for (int y = -1; y <= 1; y++) {
@@ -300,6 +313,8 @@ __global__ void neighborSearchID(const Real4* sortedPosRad,
                 uint startIndex = cellStart[gridHash];
                 uint endIndex = cellEnd[gridHash];
                 for (uint j = startIndex; j < endIndex; j++) {
+                    if (skip_bce && IsBceMarker(sortedRhoPreMu[j].w))
+                        continue;
                     if (j != index) {
                         Real3 posRadB = mR3(sortedPosRad[j]);
                         Real3 dist3 = Distance(posRadA, posRadB);
@@ -405,8 +420,8 @@ void SphCollisionSystem::NeighborSearch(std::shared_ptr<SphMarkerDataD> sortedSp
     // In-place exclusive scan for num of neighbors
     thrust::exclusive_scan(m_data_mgr.numNeighborsPerPart.begin(), m_data_mgr.numNeighborsPerPart.end(), m_data_mgr.numNeighborsPerPart.begin());
     if (m_data_mgr.numNeighborsPerPart.back() > 0) {
+        // No need to initialize the list: the second pass writes every entry
         m_data_mgr.neighborList.resize(m_data_mgr.numNeighborsPerPart.back());
-        thrust::fill(m_data_mgr.neighborList.begin(), m_data_mgr.neighborList.end(), 0);
 
         // second pass
         neighborSearchID<<<numBlocksShort, numThreadsShort>>>(mR4CAST(sortedSphMarkersD->posRadD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
