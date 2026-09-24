@@ -785,7 +785,7 @@ void SCMLoader::CreateVisualizationMesh(double sizeX, double sizeY) {
 
 void SCMLoader::SetupInitial() {
     // If no user-specified active domains, create one that will encompass all collision shapes in the system
-    if (!m_user_domains) {
+    if (!m_user_domains && m_active_domains.empty()) {
         SCMLoader::ActiveDomainInfo ad;
         ad.m_body = nullptr;
         ad.m_center = {0, 0, 0};
