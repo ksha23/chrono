@@ -362,8 +362,8 @@ void SphCollisionSystem::ArrangeData(std::shared_ptr<SphMarkerDataD> sphMarkersD
                         m_data_mgr.markersProximity_D->gridMarkerIndexD.begin());
 
     // Find the start index and the end index of the sorted array in each cell
-    thrust::fill(m_data_mgr.markersProximity_D->cellStartD.begin(), m_data_mgr.markersProximity_D->cellStartD.end(), 0);
-    thrust::fill(m_data_mgr.markersProximity_D->cellEndD.begin(), m_data_mgr.markersProximity_D->cellEndD.end(), 0);
+    thrust::fill(SPH_THRUST_NOSYNC, m_data_mgr.markersProximity_D->cellStartD.begin(), m_data_mgr.markersProximity_D->cellStartD.end(), 0);
+    thrust::fill(SPH_THRUST_NOSYNC, m_data_mgr.markersProximity_D->cellEndD.begin(), m_data_mgr.markersProximity_D->cellEndD.end(), 0);
 
     // TODO - Check if 256 is optimal here
     computeGridSize((uint)m_data_mgr.countersH->numExtendedParticles, 256, numBlocks, numThreads);
@@ -394,7 +394,7 @@ void SphCollisionSystem::NeighborSearch(std::shared_ptr<SphMarkerDataD> sortedSp
     computeGridSize(numActive, 1024, numBlocksShort, numThreadsShort);
 
     // Execute the kernel
-    thrust::fill(m_data_mgr.numNeighborsPerPart.begin(), m_data_mgr.numNeighborsPerPart.end(), 0);
+    thrust::fill(SPH_THRUST_NOSYNC, m_data_mgr.numNeighborsPerPart.begin(), m_data_mgr.numNeighborsPerPart.end(), 0);
 
     // start neighbor search
     // first pass
@@ -406,7 +406,7 @@ void SphCollisionSystem::NeighborSearch(std::shared_ptr<SphMarkerDataD> sortedSp
     thrust::exclusive_scan(m_data_mgr.numNeighborsPerPart.begin(), m_data_mgr.numNeighborsPerPart.end(), m_data_mgr.numNeighborsPerPart.begin());
     if (m_data_mgr.numNeighborsPerPart.back() > 0) {
         m_data_mgr.neighborList.resize(m_data_mgr.numNeighborsPerPart.back());
-        thrust::fill(m_data_mgr.neighborList.begin(), m_data_mgr.neighborList.end(), 0);
+        thrust::fill(SPH_THRUST_NOSYNC, m_data_mgr.neighborList.begin(), m_data_mgr.neighborList.end(), 0);
 
         // second pass
         neighborSearchID<<<numBlocksShort, numThreadsShort>>>(mR4CAST(sortedSphMarkersD->posRadD), mR4CAST(sortedSphMarkersD->rhoPresMuD),

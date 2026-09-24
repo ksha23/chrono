@@ -25,6 +25,7 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
+#include <thrust/execution_policy.h>
 
 #include "chrono/core/ChTypes.h"
 
@@ -78,6 +79,14 @@ namespace sph {
 #define mR4CAST(x) (Real4*)thrust::raw_pointer_cast(&x[0])
 #define TCAST(x) thrust::raw_pointer_cast(x.data())
 #define mR3BY3CAST(x) (Real3By3*)thrust::raw_pointer_cast(&x[0])
+
+// Thrust execution policy for algorithms whose result is only consumed by later device work. Unlike the default
+// policy, it does not synchronize the host with the device before returning.
+#if defined(CHRONO_USE_HIP) && !defined(__HIP_PLATFORM_NVIDIA__)
+    #define SPH_THRUST_NOSYNC thrust::hip::par_nosync
+#else
+    #define SPH_THRUST_NOSYNC thrust::cuda::par_nosync
+#endif
 
 // ----------------------------------------------------------------------------
 
