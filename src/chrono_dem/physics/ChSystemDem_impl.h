@@ -76,6 +76,8 @@ class ChSolverStateData {
     /// return raw pointer to swath of device memory that is at least "sizeNeeded" large
     inline char* pDeviceMemoryScratchSpace(size_t sizeNeeded) {
         if (deviceScratchSpace.size() < sizeNeeded) {
+            // The old buffer may still be in use by work queued on the device
+            demErrchk(gpuDeviceSynchronize());
             deviceScratchSpace.resize(sizeNeeded, 0);
         }
         return deviceScratchSpace.data();

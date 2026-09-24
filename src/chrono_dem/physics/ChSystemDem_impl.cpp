@@ -1145,6 +1145,7 @@ void ChSystemDem_impl::initializeSpheres() {
     INFO_PRINTF("Doing initial broadphase!\n");
     INFO_PRINTF("max possible composite offset with 256 limit is %zu\n", (size_t)nSDs * MAX_COUNT_OF_SPHERES_PER_SD);
     runSphereBroadphase();
+    demErrchk(gpuDeviceSynchronize());
     INFO_PRINTF("Initial broadphase finished!\n");
 
     int dev_ID;
