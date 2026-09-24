@@ -84,6 +84,25 @@ void ChModalAssembly::FlagModelAsReduced() {
 void ChModalAssembly::SetModalSolver(std::shared_ptr<ChDirectSolverLS> newsolver) {
     m_solver_invKIIc = newsolver;
     m_solver_invKIIc->LockSparsityPattern(false);
+    m_modal_solver_is_default = false;
+}
+
+void ChModalAssembly::SetupModalSolver() {
+    if (m_solver_invKIIc->SetupCurrent())
+        return;
+
+    if (!m_modal_solver_is_default)
+        throw std::runtime_error("Error: ChModalAssembly: the modal solver failed to factorize K_IIc (see SetModalSolver()).");
+
+    // The default SparseLU is not rank revealing. Fall back to SparseQR, which also handles a rank-deficient K_IIc.
+    std::cerr << "ChModalAssembly: SparseLU failed to factorize K_IIc (rank deficient?). Falling back to SparseQR." << std::endl;
+    auto qr = chrono_types::make_shared<ChSolverSparseQR>();
+    qr->LockSparsityPattern(false);
+    qr->GetMatrix() = m_solver_invKIIc->GetMatrix();
+    m_solver_invKIIc = qr;
+    m_modal_solver_is_default = false;
+    if (!m_solver_invKIIc->SetupCurrent())
+        throw std::runtime_error("Error: ChModalAssembly: SparseQR failed to factorize K_IIc.");
 }
 
 std::shared_ptr<ChDirectSolverLS> ChModalAssembly::GetModalSolver() const {
@@ -583,11 +602,10 @@ void ChModalAssembly::ApplyModeAccelerationTransformation(const ChModalDamping& 
         //         [ Cq_II     0    ]
         util_sparse_assembly_2x2symm(H_II, K_II_loc, Cq_II_loc * m_scaling_factor_CqI);
         m_solver_invKIIc->GetMatrix() = H_II;
-        m_solver_invKIIc->SetupCurrent();
     } else {
         m_solver_invKIIc->GetMatrix() = K_II_loc;
-        m_solver_invKIIc->SetupCurrent();
     }
+    SetupModalSolver();
 
     // 1) Matrix of static modes (constrained, so use K_IIc instead of K_II,
     // the original unconstrained static reduction is: Psi_S = - K_II^{-1} * K_IB.
@@ -3140,7 +3158,7 @@ bool ChModalAssembly::LoadReducedModel(ChArchiveIn& archive_in) {
     archive_in >> CHNVP(Psi_Cor_LambdaI);
 
     archive_in >> CHNVP(m_solver_invKIIc->GetMatrix(), "m_solver_invKIIc_MATRIX");
-    m_solver_invKIIc->SetupCurrent();
+    SetupModalSolver();
 
     archive_in >> CHNVP(is_initialized);
     archive_in >> CHNVP(cog_frame);

@@ -14,6 +14,9 @@
 // verify that it gives the same reduced model and dynamics as SparseQR.
 // The model is a cantilever beam with an internal body attached through an
 // internal constraint, so that K_IIc is a saddle-point matrix.
+// A variant leaves the internal body free to spin about the beam axis (a
+// mechanism), which makes K_IIc singular: the default solver must then fall
+// back to SparseQR, and a user-provided SparseLU must throw.
 //
 // =============================================================================
 
@@ -44,13 +47,14 @@ struct ReducedResult {
     ChVectorDynamic<> eig;    // eigenvalues of the reduced pencil (modal_K, modal_M), sorted
     ChMatrixDynamic<> Psi_S;  // static modes (boundary columns of Psi); independent of eigenvector signs
     ChVectorDynamic<> tip;    // tip node position history
+    ChSolver::Type modal_solver_type;  // type of the K_IIc solver after the reduction
 };
 
 static double RelDiff(const ChMatrixDynamic<>& a, const ChMatrixDynamic<>& b) {
     return (a - b).lpNorm<Eigen::Infinity>() / std::max(1.0, b.lpNorm<Eigen::Infinity>());
 }
 
-static ReducedResult RunModel(ChModalAssembly::ReductionType type, std::shared_ptr<ChDirectSolverLS> modal_solver) {
+static ReducedResult RunModel(ChModalAssembly::ReductionType type, std::shared_ptr<ChDirectSolverLS> modal_solver, bool mechanism = false) {
     const int n_elements = 12;
     const double L = 6;
 
@@ -100,6 +104,8 @@ static ReducedResult RunModel(ChModalAssembly::ReductionType type, std::shared_p
     assembly->AddInternal(body_mid);
     auto mid_constr = chrono_types::make_shared<ChLinkMateGeneric>();
     mid_constr->Initialize(builder.GetLastBeamNodes()[n_elements / 2], body_mid, ChFrame<>(ChVector3d(L / 2, 0, 0), QUNIT));
+    if (mechanism)
+        mid_constr->SetConstrainedCoords(true, true, true, false, true, true);  // free spin about the beam axis
     assembly->AddInternal(mid_constr);
 
     auto eigen_solver = chrono_types::make_shared<ChUnsymGenEigenvalueSolverKrylovSchur>();
@@ -123,6 +129,7 @@ static ReducedResult RunModel(ChModalAssembly::ReductionType type, std::shared_p
     std::sort(res.eig.data(), res.eig.data() + res.eig.size());
     int nB = assembly->GetNumCoordinatesVelBoundary();
     res.Psi_S = assembly->GetModalReductionMatrix().leftCols(nB);
+    res.modal_solver_type = assembly->GetModalSolver()->GetType();
 
     node_B->SetForce(ChVector3d(0, -3, 2));
     const int num_steps = 50;
@@ -164,3 +171,31 @@ TEST_P(ModalSolverLUvsQR, reduced_model_and_dynamics) {
 }
 
 INSTANTIATE_TEST_SUITE_P(ChModalAssembly, ModalSolverLUvsQR, ::testing::Values(ChModalAssembly::ReductionType::HERTING, ChModalAssembly::ReductionType::CRAIG_BAMPTON));
+
+// K_IIc is singular (the internal body can spin freely). The default SparseLU cannot factorize it, so the reduction
+// must fall back to SparseQR and reproduce an explicit SparseQR run.
+TEST_P(ModalSolverLUvsQR, default_solver_rank_deficient_KIIc) {
+    auto type = GetParam();
+    auto def = RunModel(type, nullptr, true);
+    auto qr = RunModel(type, chrono_types::make_shared<ChSolverSparseQR>(), true);
+
+    double d_eig = RelDiff(def.eig, qr.eig);
+    double d_Psi = RelDiff(def.Psi_S, qr.Psi_S);
+    double d_tip = RelDiff(def.tip, qr.tip);
+    std::cout << "default vs QR relative differences (singular K_IIc): reduced eigenvalues " << d_eig << "  static modes " << d_Psi << "  tip history " << d_tip << std::endl;
+
+    EXPECT_EQ(def.modal_solver_type, ChSolver::Type::SPARSE_QR);
+    ASSERT_GT(def.eig.size(), 0);
+    EXPECT_TRUE(def.eig.allFinite());
+    EXPECT_TRUE(def.Psi_S.allFinite());
+    EXPECT_TRUE(def.tip.allFinite());
+    EXPECT_GT((def.tip.tail(3) - def.tip.head(3)).norm(), 1e-4);  // the tip does move
+    EXPECT_LT(d_eig, 1e-10);
+    EXPECT_LT(d_Psi, 1e-10);
+    EXPECT_LT(d_tip, 1e-10);
+}
+
+// A user-provided solver that fails to factorize K_IIc must not be used with an invalid factorization.
+TEST_P(ModalSolverLUvsQR, user_solver_rank_deficient_KIIc_throws) {
+    EXPECT_THROW(RunModel(GetParam(), chrono_types::make_shared<ChSolverSparseLU>(), true), std::runtime_error);
+}
