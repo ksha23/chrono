@@ -135,11 +135,16 @@ class gpudevicevector {
         if (n > 0) {
             if (gpuMalloc((void**)&ptr, n * sizeof(T)) != gpuSuccess)
                 throw std::bad_alloc();
-            std::size_t keep = n < m_size ? n : m_size;
-            if (keep > 0)
-                demErrchk(gpuMemcpy(ptr, m_data, keep * sizeof(T), gpuMemcpyDeviceToDevice));
-            if (n > keep)
-                Fill(ptr + keep, n - keep, val);
+            try {
+                std::size_t keep = n < m_size ? n : m_size;
+                if (keep > 0)
+                    demErrchk(gpuMemcpy(ptr, m_data, keep * sizeof(T), gpuMemcpyDeviceToDevice));
+                if (n > keep)
+                    Fill(ptr + keep, n - keep, val);
+            } catch (...) {
+                gpuFree(ptr);  // the array keeps its old contents
+                throw;
+            }
         }
         if (m_data)
             demErrchk(gpuFree(m_data));

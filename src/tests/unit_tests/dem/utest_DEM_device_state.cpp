@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <fstream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -65,12 +66,14 @@ void SetupSystem(ChSystemDem& sys, CHDEM_TIME_INTEGRATOR integrator) {
 }
 
 // Count the contact partner entries in a contact history file ("partners 12 history 12" header, then one line per
-// sphere with 12 partner IDs followed by 12 history vectors). Also return the largest history magnitude.
-void ReadHistoryFile(const std::string& filename, unsigned int& num_entries, double& max_history) {
+// sphere with 12 partner IDs followed by 12 history vectors), and among them the entries whose partner is a sphere
+// (ID below n). Also return the largest history magnitude.
+void ReadHistoryFile(const std::string& filename, unsigned int n, unsigned int& num_entries, unsigned int& num_sphere_entries, double& max_history) {
     std::ifstream f(filename);
     std::string line;
     std::getline(f, line);
     num_entries = 0;
+    num_sphere_entries = 0;
     max_history = 0;
     while (std::getline(f, line)) {
         std::istringstream ls(line);
@@ -78,6 +81,8 @@ void ReadHistoryFile(const std::string& filename, unsigned int& num_entries, dou
         for (int i = 0; i < 12 && (ls >> id); i++) {
             if (id != (unsigned int)-1)
                 num_entries++;
+            if (id < n)
+                num_sphere_entries++;
         }
         float x, y, z;
         while (ls >> x >> y >> z)
@@ -92,25 +97,44 @@ std::string ReadFile(const std::string& filename) {
     return ss.str();
 }
 
-void RunSettledBed(CHDEM_TIME_INTEGRATOR integrator, const std::string& tag) {
-    ChSystemDem sys(radius, density, ChVector3f(box, box, box));
-    SetupSystem(sys, integrator);
+const float plane_z = -box / 2 + 2 * radius;
 
-    // plane just above the bottom wall, tracking the reaction force
-    float plane_z = -box / 2 + 2 * radius;
-    size_t plane = sys.CreateBCPlane(ChVector3f(0, 0, plane_z), ChVector3f(0, 0, 1), true);
+// Add a plane just above the bottom wall (tracking its reaction force) and an HCP lattice a little above it, then let
+// the lattice settle under gravity. Return the number of particles.
+unsigned int SettleBed(ChSystemDem& sys, size_t& plane) {
+    plane = sys.CreateBCPlane(ChVector3f(0, 0, plane_z), ChVector3f(0, 0, 1), true);
 
-    // HCP lattice a little above the plane, left to settle under gravity
     chrono::utils::ChHCPSampler<float> sampler(2.1f * radius);
     ChVector3f hdims(box / 2 - 2 * radius, box / 2 - 2 * radius, box / 8);
     ChVector3f center(0.f, 0.f, plane_z + 1.5f * radius + hdims.z());
     std::vector<ChVector3f> points = sampler.SampleBox(center, hdims);
     sys.SetParticles(points);
-    unsigned int n = (unsigned int)points.size();
 
     sys.Initialize();
     for (int frame = 0; frame < 10; frame++)
         sys.AdvanceSimulation(0.05f);
+    return (unsigned int)points.size();
+}
+
+// Rows of a contact history file after the header line, sorted (to compare two files up to a particle permutation).
+std::vector<std::string> SortedHistoryRows(const std::string& filename) {
+    std::ifstream f(filename);
+    std::string line;
+    std::getline(f, line);
+    std::vector<std::string> rows;
+    while (std::getline(f, line)) {
+        if (line.find_first_not_of(' ') != std::string::npos)
+            rows.push_back(line);
+    }
+    std::sort(rows.begin(), rows.end());
+    return rows;
+}
+
+void RunSettledBed(CHDEM_TIME_INTEGRATOR integrator, const std::string& tag) {
+    ChSystemDem sys(radius, density, ChVector3f(box, box, box));
+    SetupSystem(sys, integrator);
+    size_t plane;
+    unsigned int n = SettleBed(sys, plane);
 
     // 1. The plane carries the weight of the bed (the reaction force is reported with the sign of gravity). Friction
     // on the side walls carries about 1% of it.
@@ -153,12 +177,29 @@ void RunSettledBed(CHDEM_TIME_INTEGRATOR integrator, const std::string& tag) {
 
     std::string hst = "DEM_device_state_" + tag + ".hst";
     sys.WriteContactHistoryFile(hst);
-    unsigned int num_entries;
+    unsigned int num_entries, num_sphere_entries;
     double max_history;
-    ReadHistoryFile(hst, num_entries, max_history);
+    ReadHistoryFile(hst, n, num_entries, num_sphere_entries, max_history);
     EXPECT_EQ(num_entries / 2, nc) << tag;
     EXPECT_GT(max_history, 0) << tag;  // tangential history is carried between steps
     EXPECT_LT(max_history, radius) << tag;
+
+    // The sphere-sphere entries, counted independently from the particle positions: every overlapping pair appears
+    // once for each of its two spheres. The contact list is built at the start of the last step and the positions
+    // are read at its end, so a pair that is just touching may be counted on one side only.
+    std::vector<ChVector3f> pos(n);
+    for (unsigned int i = 0; i < n; i++)
+        pos[i] = sys.GetParticlePosition(i);
+    unsigned int num_overlaps = 0;
+    for (unsigned int i = 0; i < n; i++) {
+        for (unsigned int j = i + 1; j < n; j++) {
+            if ((pos[i] - pos[j]).Length() < 2 * radius)
+                num_overlaps++;
+        }
+    }
+    EXPECT_GT(num_overlaps, n) << tag;
+    EXPECT_EQ(num_sphere_entries % 2, 0u) << tag;
+    EXPECT_LE(std::abs((double)num_sphere_entries / 2 - num_overlaps), 0.01 * num_overlaps) << tag;
 
     // 5. Checkpoint round trip: a system restored from a checkpoint writes the same checkpoint.
     std::string cp1 = "DEM_device_state_" + tag + "_1.dat";
@@ -205,12 +246,131 @@ void RunSettledBed(CHDEM_TIME_INTEGRATOR integrator, const std::string& tag) {
     EXPECT_EQ(rows, n) << tag;
     EXPECT_LT(max_dev, 1e-5) << tag;
 
+    // 6. Restart with defragmentation (particles reordered by subdomain): the partner and history maps are permuted
+    // row by row, so the file has the same rows, possibly in another order.
+    std::string hst_defrag = "DEM_device_state_" + tag + "_defrag.hst";
+    {
+        ChSystemDem restored(cp1);
+        restored.SetVerbosity(CHDEM_VERBOSITY::QUIET);
+        restored.SetDefragmentOnInitialize(true);
+        restored.Initialize();
+        EXPECT_EQ(restored.GetNumContacts(), nc) << tag;
+        restored.WriteContactHistoryFile(hst_defrag);
+    }
+    std::vector<std::string> rows_ref = SortedHistoryRows(hst);
+    std::vector<std::string> rows_defrag = SortedHistoryRows(hst_defrag);
+    EXPECT_EQ(rows_ref.size(), n) << tag;
+    EXPECT_TRUE(rows_ref == rows_defrag) << tag << ": contact history rows changed by defragmentation";
+
     if (::testing::Test::HasFailure())
         return;  // keep the files for inspection
     std::remove(csv.c_str());
     std::remove(hst.c_str());
+    std::remove(hst_defrag.c_str());
     std::remove(cp1.c_str());
     std::remove(cp2.c_str());
+}
+
+// Pairwise contact queries and the contact info file, on a settled bed with rolling resistance and contact recording.
+void RunContactQueries() {
+    ChSystemDem sys(radius, density, ChVector3f(box, box, box));
+    SetupSystem(sys, CHDEM_TIME_INTEGRATOR::CENTERED_DIFFERENCE);
+    sys.SetRollingMode(CHDEM_ROLLING_MODE::SCHWARTZ);
+    sys.SetRollingCoeff_SPH2SPH(0.05f);
+    sys.SetRollingCoeff_SPH2WALL(0.05f);
+    sys.SetRecordingContactInfo(true);
+    size_t plane;
+    unsigned int n = SettleBed(sys, plane);
+
+    double m = SphereMass();
+    std::vector<ChVector3f> pos(n);
+    for (unsigned int i = 0; i < n; i++)
+        pos[i] = sys.GetParticlePosition(i);
+
+    unsigned int num_pairs = 0;     // sphere-sphere pairs (i < j) listed by getNeighbors
+    unsigned int num_balanced = 0;  // interior spheres used in the force balance
+    double max_newton = 0;          // largest |N_ij + N_ji| relative to |N_ij|
+    double min_align = 1;           // smallest cosine between N_ij and p_i - p_j
+    double max_balance = 0;         // largest |sum of contact forces - m (a + g)|
+    double max_torque = 0;
+    for (unsigned int i = 0; i < n; i++) {
+        std::vector<unsigned int> neighbors;
+        sys.getNeighbors(i, neighbors);
+        bool interior = std::abs(pos[i].x()) < box / 2 - 2 * radius && std::abs(pos[i].y()) < box / 2 - 2 * radius && pos[i].z() > plane_z + 2 * radius;
+        ChVector3d force_sum(0);
+        for (unsigned int j : neighbors) {
+            if (j >= n) {
+                interior = false;  // touches a wall or the plane
+                continue;
+            }
+            if (i < j)
+                num_pairs++;
+            ChVector3f N_ij = sys.getNormalForce(i, j);
+            ChVector3f N_ji = sys.getNormalForce(j, i);
+            ChVector3f F_ij = sys.getSlidingFrictionForce(i, j);
+            max_torque = std::max(max_torque, (double)sys.getRollingFrictionTorque(i, j).Length());
+            EXPECT_TRUE(std::isfinite(sys.getRollingVrot(i, j).Length()));
+            EXPECT_TRUE(std::isfinite(sys.getRollingCharContactTime(i, j)));
+            if (N_ij.Length() > 0) {
+                max_newton = std::max(max_newton, (double)(N_ij + N_ji).Length() / N_ij.Length());
+                ChVector3f d = pos[i] - pos[j];
+                min_align = std::min(min_align, (double)N_ij.Dot(d) / (N_ij.Length() * d.Length()));
+            }
+            force_sum += ChVector3d(N_ij + F_ij);
+        }
+        if (interior) {
+            ChVector3d acc(sys.GetParticleLinAcc(i));
+            ChVector3d contact_force = m * (acc + ChVector3d(0, 0, g));
+            max_balance = std::max(max_balance, (force_sum - contact_force).Length());
+            num_balanced++;
+        }
+    }
+
+    // Newton's third law, and normal forces along the line of centers.
+    EXPECT_GT(num_pairs, n);
+    EXPECT_LT(max_newton, 1e-4);
+    EXPECT_GT(min_align, 0.99);
+    // The net force on an interior sphere (from the accumulators) is the sum of its pairwise contact forces.
+    EXPECT_GT(num_balanced, n / 4);
+    EXPECT_LT(max_balance, 1e-3 * m * g);
+    EXPECT_GT(max_torque, 0);
+
+    // A sphere index outside the contact map is reported, not read out of bounds.
+    std::vector<unsigned int> neighbors;
+    EXPECT_THROW(sys.getNeighbors(n + 1, neighbors), std::out_of_range);
+
+    // The contact info file has one row per sphere-sphere pair (i < j) with the values of the pairwise queries.
+    std::string info = "DEM_device_state_contact_info.csv";
+    sys.WriteContactInfoFile(info);
+    std::ifstream f(info);
+    std::string line;
+    std::getline(f, line);
+    EXPECT_EQ(line, "bi, bj, n_mag, fx, fy, fz, mx, my, mz");
+    unsigned int rows = 0;
+    double max_err = 0;
+    while (std::getline(f, line)) {
+        std::istringstream ls(line);
+        std::string c;
+        std::vector<double> v;
+        while (std::getline(ls, c, ','))
+            v.push_back(std::stod(c));
+        ASSERT_EQ(v.size(), 9u);
+        unsigned int i = (unsigned int)v[0], j = (unsigned int)v[1];
+        ASSERT_LT(i, j);
+        ASSERT_LT(j, n);
+        ChVector3f F = sys.getSlidingFrictionForce(i, j);
+        ChVector3f M = sys.getRollingFrictionTorque(i, j);
+        double err = std::abs(v[2] - sys.getNormalForce(i, j).Length());
+        err = std::max(err, (ChVector3d(v[3], v[4], v[5]) - ChVector3d(F)).Length());
+        err = std::max(err, (ChVector3d(v[6], v[7], v[8]) - ChVector3d(M)).Length() / radius);
+        max_err = std::max(max_err, err);
+        rows++;
+    }
+    EXPECT_EQ(rows, num_pairs);
+    EXPECT_LT(max_err, 1e-4 * m * g);  // values are printed with 6 significant digits
+
+    if (!::testing::Test::HasFailure())
+        std::remove(info.c_str());
 }
 
 }  // namespace
@@ -221,4 +381,8 @@ TEST(demDeviceState, settledBedCenteredDifference) {
 
 TEST(demDeviceState, settledBedChung) {
     RunSettledBed(CHDEM_TIME_INTEGRATOR::CHUNG, "chung");
+}
+
+TEST(demDeviceState, contactPairQueries) {
+    RunContactQueries();
 }
