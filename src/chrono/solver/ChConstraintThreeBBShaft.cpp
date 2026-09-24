@@ -111,11 +111,11 @@ double ChConstraintThreeBBShaft::ComputeJacobianTimesState() {
     double ret = 0;
 
     if (variables_a->IsActive()) {
-        ret += Cq_a * variables_a->State();
+        ret += Cq_a * variables_a->State().head<6>();
     }
 
     if (variables_b->IsActive()) {
-        ret += Cq_b * variables_b->State();
+        ret += Cq_b * variables_b->State().head<6>();
     }
 
     if (variables_c->IsActive()) {
@@ -127,11 +127,11 @@ double ChConstraintThreeBBShaft::ComputeJacobianTimesState() {
 
 void ChConstraintThreeBBShaft::IncrementState(double deltal) {
     if (variables_a->IsActive()) {
-        variables_a->State() += Eq_a * deltal;
+        variables_a->State().head<6>() += Eq_a * deltal;
     }
 
     if (variables_b->IsActive()) {
-        variables_b->State() += Eq_b * deltal;
+        variables_b->State().head<6>() += Eq_b * deltal;
     }
 
     if (variables_c->IsActive()) {
