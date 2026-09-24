@@ -16,6 +16,7 @@
 
 #include "chrono/utils/ChConstants.h"
 #include "chrono/solver/ChSystemDescriptor.h"
+#include "chrono/utils/ChOpenMP.h"
 
 namespace chrono {
 
@@ -25,7 +26,7 @@ CH_FACTORY_REGISTER(ChSystemDescriptor)
 
 #define CH_SPINLOCK_HASHSIZE 203
 
-ChSystemDescriptor::ChSystemDescriptor() : n_q(0), n_c(0), c_a(1.0), freeze_count(false), m_use_Minv(false) {
+ChSystemDescriptor::ChSystemDescriptor() : c_a(1.0), m_num_threads(1), n_q(0), n_c(0), freeze_count(false), m_use_Minv(false) {
     m_constraints.clear();
     m_variables.clear();
     m_KRMblocks.clear();
@@ -645,6 +646,59 @@ void ChSystemDescriptor::SchurComplementRHS(ChVectorDynamic<>& result, ChVectorD
     result -= b;
 }
 
+// Minimum total number of entries in the KRM block matrices for which the KRM product is done in parallel.
+// Below this, the cost of the parallel region and of the reduction outweighs the gain.
+static const size_t KRM_PARALLEL_MIN_ENTRIES = 20000;
+
+void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const ChVectorDynamic<>& x) {
+    const int nblocks = (int)m_KRMblocks.size();
+    const int nthreads = std::min(m_num_threads, nblocks);
+
+    size_t num_entries = 0;
+    if (nthreads > 1) {
+        for (const auto& krm_block : m_KRMblocks)
+            num_entries += krm_block->GetMatrix().size();
+    }
+
+    if (nthreads <= 1 || num_entries < KRM_PARALLEL_MIN_ENTRIES) {
+        for (const auto& krm_block : m_KRMblocks)
+            krm_block->AddMatrixTimesVectorInto(result, x);
+        return;
+    }
+
+    // KRM blocks share variables, so they cannot write directly into 'result' concurrently.
+    // Each thread accumulates a fixed, contiguous range of blocks into its own buffer; the buffers are then summed in
+    // thread order. For a given number of threads, the result is therefore deterministic.
+    const Eigen::Index n = result.size();
+    if ((int)m_thread_results.size() < nthreads)
+        m_thread_results.resize(nthreads);
+
+#pragma omp parallel num_threads(nthreads)
+    {
+        const int nt = ChOMP::GetNumThreads();
+        const int t = ChOMP::GetThreadNum();
+
+        // Partial products over a contiguous range of blocks
+        auto& buffer = m_thread_results[t];
+        buffer.setZero(n);
+        const int b_start = (int)((long long)nblocks * t / nt);
+        const int b_end = (int)((long long)nblocks * (t + 1) / nt);
+        for (int ib = b_start; ib < b_end; ib++)
+            m_KRMblocks[ib]->AddMatrixTimesVectorInto(buffer, x);
+
+#pragma omp barrier
+
+        // Ordered reduction of the per-thread buffers, parallel over rows
+#pragma omp for schedule(static)
+        for (Eigen::Index i = 0; i < n; i++) {
+            double sum = 0;
+            for (int k = 0; k < nt; k++)
+                sum += m_thread_results[k](i);
+            result(i) += sum;
+        }
+    }
+}
+
 void ChSystemDescriptor::SystemProduct(ChVectorDynamic<>& result, const ChVectorDynamic<>& x) {
     n_q = CountActiveVariables();
     n_c = CountActiveConstraints();
@@ -660,10 +714,8 @@ void ChSystemDescriptor::SystemProduct(ChVectorDynamic<>& result, const ChVector
         }
     }
 
-    // 1.2)  add also K*x.q  (NOT straight parallelizable - risk of concurrency in writing)
-    for (const auto& krm_block : m_KRMblocks) {
-        krm_block->AddMatrixTimesVectorInto(result, x);
-    }
+    // 1.2)  add also K*x.q
+    AddKRMTimesVectorInto(result, x);
 
     // 1.3)  add also [Cq]'*x.l  (NOT straight parallelizable - risk of concurrency in writing)
     for (const auto& constr : m_constraints) {
@@ -701,10 +753,8 @@ void ChSystemDescriptor::SystemProductUpper(ChVectorDynamic<>& result,
         }
     }
 
-    // 2. add also K*x.q  (NON straight parallelizable - risk of concurrency in writing)
-    for (const auto& krm_block : m_KRMblocks) {
-        krm_block->AddMatrixTimesVectorInto(result, v);
-    }
+    // 2. add also K*x.q
+    AddKRMTimesVectorInto(result, v);
 
     // 3. add also [Cq]'*x.l  (NON straight parallelizable - risk of concurrency in writing)
     for (const auto& constr : m_constraints) {

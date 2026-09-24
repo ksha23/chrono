@@ -116,6 +116,7 @@ ChSystem::ChSystem(const ChSystem& other) : m_RTF(0), collision_system(nullptr),
     collision_callbacks = other.collision_callbacks;
 
     descriptor = chrono_types::make_shared<ChSystemDescriptor>();
+    descriptor->SetNumThreads(nthreads_chrono);
 
     is_initialized = false;
     is_updated = false;
@@ -346,6 +347,7 @@ void ChSystem::UnregisterCustomCollisionCallback(std::shared_ptr<CustomCollision
 void ChSystem::SetSystemDescriptor(std::shared_ptr<ChSystemDescriptor> newdescriptor) {
     assert(newdescriptor);
     descriptor = newdescriptor;
+    descriptor->SetNumThreads(nthreads_chrono);
 }
 
 void ChSystem::SetSolver(std::shared_ptr<ChSolver> newsolver) {
@@ -406,6 +408,9 @@ void ChSystem::SetNumThreads(int num_threads_chrono, int num_threads_collision, 
     nthreads_chrono = std::max(1, num_threads_chrono);
     nthreads_collision = (num_threads_collision <= 0) ? num_threads_chrono : num_threads_collision;
     nthreads_eigen = (num_threads_eigen <= 0) ? num_threads_chrono : num_threads_eigen;
+
+    if (descriptor)
+        descriptor->SetNumThreads(nthreads_chrono);
 
     if (collision_system)
         collision_system->SetNumThreads(nthreads_collision);
