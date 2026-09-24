@@ -313,6 +313,7 @@ class ChSystemDem_impl {
         BC_offset_function_list.at(BC_id) = offset_function;
         BC_params_list_UU.at(BC_id).fixed = false;
         BC_params_list_SU.at(BC_id).fixed = false;
+        BC_updated_each_step.at(BC_id) = true;
         return true;
     }
 
@@ -325,6 +326,9 @@ class ChSystemDem_impl {
         BC_offset_function_list.at(BD_WALL_ID_Y_TOP) = pos_fn;
         BC_offset_function_list.at(BD_WALL_ID_Z_BOT) = pos_fn;
         BC_offset_function_list.at(BD_WALL_ID_Z_TOP) = pos_fn;
+        // the walls now move (before initialization, there is nothing to flag: partitionBD resets the wall motion)
+        for (size_t i = 0; i < NUM_RESERVED_BC_IDS && i < BC_updated_each_step.size(); i++)
+            BC_updated_each_step[i] = true;
     }
 
     // Copy back the subdomain device data and save it to a file for error checking on the priming kernel
@@ -532,6 +536,11 @@ class ChSystemDem_impl {
     /// Holds system degrees of freedom.
     SphereData* sphere_data;
 
+    /// Host copy of the pointers in sphere_data. The managed structure is written only when a pointer changes, so that
+    /// the host does not pull the page that the device reads at every step back to the CPU.
+    SphereData sphere_data_host{};
+    bool sphere_data_host_valid = false;
+
     /// Contains information about the status of the granular simulator (solver).
     ChSolverStateData stateOfSolver_resources;
 
@@ -736,6 +745,12 @@ class ChSystemDem_impl {
     std::vector<BC_params_t<float, float3>, gpuallocator<BC_params_t<float, float3>>> BC_params_list_UU;
     /// Offset motions functions for boundary conditions -- used for moving walls, wavetanks, etc.
     std::vector<GranPositionFunction> BC_offset_function_list;
+
+    /// Host copies of the BC types and flags that the host needs at every step (set in convertBCUnits), so that the
+    /// host does not read the managed BC lists, which the device uses, at every step.
+    std::vector<BC_type> BC_type_list_host;
+    std::vector<char> BC_track_forces_host;
+    std::vector<char> BC_updated_each_step;  ///< BC position (or state) updated at every step
 
     /// User defined radius of the sphere
     float sphere_radius_UU;
