@@ -866,7 +866,7 @@ __global__ void CrmHolmesBC_D(const uint* numNeighborsPerPart,
     Real chi_BCE = kernelSupport.x / kernelSupport.y;
     Real dBCE = SuppRadii * (2 * chi_BCE - 1);
     int predicateBCE = (dBCE < 0);
-    dBCE = predicateBCE ? 0.01 * SuppRadii : dBCE;
+    dBCE = predicateBCE ? Real(0.01) * SuppRadii : dBCE;
     Real3 prescribedVel = (IsBceSolidMarker(sortedRhoPresMuD[index].w)) ? (sortedVelMasD[index]) : mR3(0);
     Real3 velMasB_new = mR3(0);
 
@@ -893,7 +893,7 @@ __global__ void CrmHolmesBC_D(const uint* numNeighborsPerPart,
         Real chi_Fluid = sortedKernelSupport[j].x / sortedKernelSupport[j].y;
         Real dFluid = SuppRadii * (2 * chi_Fluid - 1);
         int predicateFluid = (dFluid < 0);
-        dFluid = predicateFluid ? 0.01 * SuppRadii : dFluid;
+        dFluid = predicateFluid ? Real(0.01) * SuppRadii : dFluid;
 
         Real dFluidBCE = dBCE / dFluid;
         // Use predication to avoid branching
@@ -950,7 +950,7 @@ __global__ void CfdHolmesBC_D(const uint* numNeighborsPerPart,
     Real chi_BCE = kernelSupport.x / kernelSupport.y;
     Real dBCE = SuppRadii * (2 * chi_BCE - 1);
     int predicateBCE = (dBCE < 0);
-    dBCE = predicateBCE ? 0.01 * SuppRadii : dBCE;
+    dBCE = predicateBCE ? Real(0.01) * SuppRadii : dBCE;
     Real3 prescribedVel = (IsBceSolidMarker(sortedRhoPresMuD[index].w)) ? (sortedVelMasD[index]) : mR3(0);
     Real3 velMasB_new = mR3(0);
 
@@ -975,7 +975,7 @@ __global__ void CfdHolmesBC_D(const uint* numNeighborsPerPart,
         Real chi_Fluid = sortedKernelSupport[j].x / sortedKernelSupport[j].y;
         Real dFluid = SuppRadii * (2 * chi_Fluid - 1);
         int predicateFluid = (dFluid < 0);
-        dFluid = predicateFluid ? 0.01 * SuppRadii : dFluid;
+        dFluid = predicateFluid ? Real(0.01) * SuppRadii : dFluid;
 
         Real dFluidBCE = dBCE / dFluid;
         // Use predication to avoid branching
@@ -1069,7 +1069,7 @@ __device__ inline Real4 CrmCalcDvDt_D(const Real W_ini_inv,
         // diffusion term in continuity equation, this helps smoothing out the large oscillation in pressure
         // field see S. Marrone et al., "delta-SPH model for simulating violent impact flows", Computer Methods in
         // Applied Mechanics and Engineering, 200(2011), pp 1526 --1542.
-        Real Psi = paramsD.density_delta * paramsD.h * paramsD.Cs * paramsD.markerMass / rhoPresMuB.x * 2. * (rhoPresMuA.x - rhoPresMuB.x) /
+        Real Psi = paramsD.density_delta * paramsD.h * paramsD.Cs * paramsD.markerMass / rhoPresMuB.x * Real(2) * (rhoPresMuA.x - rhoPresMuB.x) /
                    (d * d + paramsD.epsMinMarkersDis * paramsD.h * paramsD.h);
         derivRho += Psi * dot(dist3, gradW);
     }
@@ -1109,7 +1109,7 @@ __device__ inline Real4 CrmCalcDvDt_D(const Real W_ini_inv,
             // Artificial Viscosity from Monaghan 1997
             // This has no viscous forces in the separation phase - used in SPH codes simulating fluids
             if (vAB_rAB < 0) {
-                Real nu = -paramsD.artificial_viscosity * paramsD.h * paramsD.Cs * 2. / (rhoPresMuA.x + rhoPresMuB.x);
+                Real nu = -paramsD.artificial_viscosity * paramsD.h * paramsD.Cs * Real(2) / (rhoPresMuA.x + rhoPresMuB.x);
                 // Real nu = -paramsD.artificial_viscosity * paramsD.h * paramsD.Cs * paramsD.invrho0;
                 derivM1 = -Mass * (nu * intermediate);
             }
@@ -1119,7 +1119,7 @@ __device__ inline Real4 CrmCalcDvDt_D(const Real W_ini_inv,
         case ViscosityMethod::ARTIFICIAL_BILATERAL: {
             // Artificial viscosity treatment from J J Monaghan (2005) "Smoothed particle hydrodynamics"
             // Here there is viscous force added even during the separation phase - makes the simulation more stable
-            Real nu = -paramsD.artificial_viscosity * paramsD.h * paramsD.Cs * 2. / (rhoPresMuA.x + rhoPresMuB.x);
+            Real nu = -paramsD.artificial_viscosity * paramsD.h * paramsD.Cs * Real(2) / (rhoPresMuA.x + rhoPresMuB.x);
             // Real nu = -paramsD.artificial_viscosity * paramsD.h * paramsD.Cs * paramsD.invrho0;
             derivM1 = -Mass * (nu * intermediate);
             break;
@@ -1143,7 +1143,7 @@ __device__ inline Real4 CrmCalcDvDt_D(const Real W_ini_inv,
         Real Ra = Pa * epsi * invRhoASq;
         Real Rb = Pb * epsi * invRhoBSq;
         Real fAB = W_AB * W_ini_inv;
-        Real small_F = Mass * pow(fAB, 2.55) * (Ra + Rb);
+        Real small_F = Mass * pow(fAB, Real(2.55)) * (Ra + Rb);
         derivVx += small_F * gradW.x;
         derivVy += small_F * gradW.y;
         derivVz += small_F * gradW.z;
@@ -1277,12 +1277,12 @@ __global__ void CrmCalcRHS_D(const Real4* __restrict__ sortedPosRad,
     Real Dxx = Lxx;
     Real Dyy = Lyy;
     Real Dzz = Lzz;
-    Real Dxy = 0.5 * (Lxy + Lyx);
-    Real Dxz = 0.5 * (Lxz + Lzx);
-    Real Dyz = 0.5 * (Lyz + Lzy);
-    Real Wxy = 0.5 * (Lxy - Lyx);
-    Real Wxz = 0.5 * (Lxz - Lzx);
-    Real Wyz = 0.5 * (Lyz - Lzy);
+    Real Dxy = Real(0.5) * (Lxy + Lyx);
+    Real Dxz = Real(0.5) * (Lxz + Lzx);
+    Real Dyz = Real(0.5) * (Lyz + Lzy);
+    Real Wxy = Real(0.5) * (Lxy - Lyx);
+    Real Wxz = Real(0.5) * (Lxz - Lzx);
+    Real Wyz = Real(0.5) * (Lyz - Lzy);
 
     Real trD = Dxx + Dyy + Dzz;
     Real edia = 1.0f / 3.0f * trD;
@@ -1303,7 +1303,7 @@ __global__ void CrmCalcRHS_D(const Real4* __restrict__ sortedPosRad,
         Real K_clamped = fmin(fmax(K_cand, Real(0.1) * paramsD.K_bulk), Real(1.0) * paramsD.K_bulk);
 
         // Shear
-        Real G_cand = (3.0 * K_clamped * (1.0 - 2.0 * paramsD.Nu_poisson)) / (2.0 * (1.0 + paramsD.Nu_poisson));
+        Real G_cand = (3 * K_clamped * (1 - 2 * paramsD.Nu_poisson)) / (2 * (1 + paramsD.Nu_poisson));
         Real G_clamped = fmin(fmax(G_cand, Real(0.1) * paramsD.G_shear), Real(1.0) * paramsD.G_shear);
 
         twoG = 2 * G_clamped;
@@ -1314,9 +1314,9 @@ __global__ void CrmCalcRHS_D(const Real4* __restrict__ sortedPosRad,
     }
 
     // Final stress rate using isotropic elasticity
-    Real dTauxx = twoG * (Dxx - edia) + 2.0 * (tauxy * Wxy + tauxz * Wxz) + threeK * edia;
-    Real dTauyy = twoG * (Dyy - edia) - 2.0 * (tauxy * Wxy - tauyz * Wyz) + threeK * edia;
-    Real dTauzz = twoG * (Dzz - edia) - 2.0 * (tauxz * Wxz + tauyz * Wyz) + threeK * edia;
+    Real dTauxx = twoG * (Dxx - edia) + 2 * (tauxy * Wxy + tauxz * Wxz) + threeK * edia;
+    Real dTauyy = twoG * (Dyy - edia) - 2 * (tauxy * Wxy - tauyz * Wyz) + threeK * edia;
+    Real dTauzz = twoG * (Dzz - edia) - 2 * (tauxz * Wxz + tauyz * Wyz) + threeK * edia;
 
     // off-diagonals
     Real dTauxy = twoG * Dxy - (tauxx * Wxy - tauxz * Wyz) + (Wxy * tauyy + Wxz * tauyz);
@@ -1383,7 +1383,7 @@ CfdCalcDvDt_D(Real3 gradW, Real3 dist3, Real d, Real4 posRadA, Real4 posRadB, Re
         // diffusion term in continuity equation, this helps smoothing out the large oscillation in pressure
         // field see S. Marrone et al., "delta-SPH model for simulating violent impact flows", Computer Methods in
         // Applied Mechanics and Engineering, 200(2011), pp 1526 --1542.
-        Real Psi = paramsD.density_delta * paramsD.h * paramsD.Cs * paramsD.markerMass / rhoPresMuB.x * 2. * (rhoPresMuA.x - rhoPresMuB.x) /
+        Real Psi = paramsD.density_delta * paramsD.h * paramsD.Cs * paramsD.markerMass / rhoPresMuB.x * Real(2) * (rhoPresMuA.x - rhoPresMuB.x) /
                    (d * d + paramsD.epsMinMarkersDis * paramsD.h * paramsD.h);
         derivRho += Psi * dot(dist3, gradW);
     }
@@ -1402,7 +1402,7 @@ CfdCalcDvDt_D(Real3 gradW, Real3 dist3, Real d, Real4 posRadA, Real4 posRadB, Re
             // artificial viscosity part, see Monaghan 1997, mainly for water
             if (vAB_dot_rAB < 0) {
                 Real mu_ab = paramsD.h * vAB_dot_rAB / (d * d + paramsD.epsMinMarkersDis * paramsD.h * paramsD.h);
-                Real Pi_ab = -paramsD.artificial_viscosity * paramsD.Cs * 2. / (rhoPresMuA.x + rhoPresMuB.x) * paramsD.markerMass * mu_ab;
+                Real Pi_ab = -paramsD.artificial_viscosity * paramsD.Cs * Real(2) / (rhoPresMuA.x + rhoPresMuB.x) * paramsD.markerMass * mu_ab;
                 derivV.x -= Pi_ab * gradW.x;
                 derivV.y -= Pi_ab * gradW.y;
                 derivV.z -= Pi_ab * gradW.z;
@@ -1545,7 +1545,7 @@ __global__ void CfdCalcRHS_D(Real4* __restrict__ sortedDerivVelRho,
             velxLap += LaplacianOperator(Gi, Li, dist3, sortedPosRad[index], sortedPosRad[j], velMasA.x, velMasB.x, rhoPresMuA, rhoPresMuB);
             velyLap += LaplacianOperator(Gi, Li, dist3, sortedPosRad[index], sortedPosRad[j], velMasA.y, velMasB.y, rhoPresMuA, rhoPresMuB);
             velzLap += LaplacianOperator(Gi, Li, dist3, sortedPosRad[index], sortedPosRad[j], velMasA.z, velMasB.z, rhoPresMuA, rhoPresMuB);
-            if (d > paramsD.h * 1.0e-9)
+            if (d > paramsD.h * Real(1.0e-9))
                 sum_w_i += W3h(paramsD.kernel_type, d, paramsD.ooh) * paramsD.volume0;
         }
     }
@@ -1561,7 +1561,7 @@ __global__ void CfdCalcRHS_D(Real4* __restrict__ sortedDerivVelRho,
         Real Det_L = (Li[0] * Li[4] * Li[8] - Li[0] * Li[5] * Li[7] - Li[1] * Li[3] * Li[8] + Li[1] * Li[5] * Li[6] + Li[2] * Li[3] * Li[7] - Li[2] * Li[4] * Li[6]);
 
         if (is_sph_particle) {
-            if (Det_G > 0.9 && Det_G < 1.1 && Det_L > 0.9 && Det_L < 1.1 && sum_w_i > 0.9) {
+            if (Det_G > Real(0.9) && Det_G < Real(1.1) && Det_L > Real(0.9) && Det_L < Real(1.1) && sum_w_i > Real(0.9)) {
                 derivVelRho = mR4(dvxdt, dvydt, dvzdt, drhodt);
             }
         }
