@@ -35,11 +35,13 @@ namespace utils {
 class ChApi ChConvexHull2D {
   public:
     enum Method {
-        JARVIS,  ///< Jarvis algorithm (wrapping)
-        GRAHAM   ///< Graham scan algorithm
+        JARVIS,   ///< Jarvis algorithm (wrapping)
+        GRAHAM,   ///< Graham scan algorithm
+        MONOTONE  ///< Andrew's monotone chain algorithm
     };
 
     /// Construct the convex hull of the specified points, using the given method.
+    /// Note that the MONOTONE method sorts (permutes) the input points.
     ChConvexHull2D(std::vector<ChVector2d>& points, Method method = JARVIS);
 
     ~ChConvexHull2D() {}
@@ -63,6 +65,11 @@ class ChApi ChConvexHull2D {
     /// Convex hull by Graham scan.
     /// Note that this algorithm will modify (permute) the input points.
     void ComputeGraham(std::vector<ChVector2d>& points, size_t n);
+
+    /// Convex hull by Andrew's monotone chain algorithm, O(n log n).
+    /// The hull contains only the vertices of the convex hull (points on its edges are discarded), in counter clock
+    /// wise order starting from the bottom-left point. This algorithm will modify (sort) the input points.
+    void ComputeMonotone(std::vector<ChVector2d>& points, size_t n);
 
     std::vector<ChVector2d> m_hull;  ///< points in convex hull
     double m_perimeter;              ///< perimeter of convex hull

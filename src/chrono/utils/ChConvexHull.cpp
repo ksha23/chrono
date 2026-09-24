@@ -87,6 +87,10 @@ ChConvexHull2D::ChConvexHull2D(std::vector<ChVector2d>& points, Method method) :
         case GRAHAM:
             ////ComputeGraham(points, n);
             break;
+        case MONOTONE:
+            ComputeMonotone(points, n);
+            m_area *= 0.5;
+            break;
     }
 }
 
@@ -150,6 +154,39 @@ void ChConvexHull2D::ComputeJarvis(const std::vector<ChVector2d>& points, size_t
 
         crt = next;
     } while (crt != first);
+}
+
+// -----------------------------------------------------------------------------
+
+void ChConvexHull2D::ComputeMonotone(std::vector<ChVector2d>& points, size_t n) {
+    // Sort points by x, with ties broken for lowest y.
+    auto less_xy = [](const ChVector2d& a, const ChVector2d& b) { return a.x() < b.x() || (a.x() == b.x() && a.y() < b.y()); };
+    std::sort(points.begin(), points.end(), less_xy);
+
+    // Build the lower hull (left to right), then the upper hull (right to left).
+    // A point is kept only if it makes a strict counterclockwise turn, so collinear points are discarded.
+    std::vector<ChVector2d> hull(2 * n);
+    size_t k = 0;
+    for (size_t i = 0; i < n; i++) {
+        while (k >= 2 && Orientation(hull[k - 2], hull[k - 1], points[i]) != -1)
+            k--;
+        hull[k++] = points[i];
+    }
+    for (size_t i = n - 1, lower = k + 1; i > 0; i--) {
+        while (k >= lower && Orientation(hull[k - 2], hull[k - 1], points[i - 1]) != -1)
+            k--;
+        hull[k++] = points[i - 1];
+    }
+
+    // The last hull point repeats the first one (closed loop).
+    hull.resize(k);
+    m_hull = hull;
+
+    // Accumulate perimeter and (twice the) area, as in ComputeJarvis.
+    for (size_t i = 1; i < k; i++) {
+        m_perimeter += (hull[i] - hull[i - 1]).Length();
+        m_area += SignedArea(hull[i], hull[i - 1], ChVector2d(0, 0));
+    }
 }
 
 // -----------------------------------------------------------------------------
