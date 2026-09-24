@@ -703,7 +703,12 @@ vec4 trace_camera(vec3 origin, vec3 dir, uint camera_sample_index) {
                                  (4.0 * PI);
             if ((pc.flags & FLAG_USE_GI) != 0u)
                 mirror_scale *= 0.5;
-            vec3 mirror_contrib = clamp(mirror_scale * reflect_f, vec3(0.0), vec3(1.0));
+            // Cap the weight at 1 without changing its colour; see camera_legacy_shader.cuh.
+            vec3 mirror_contrib = mirror_scale * reflect_f;
+            float mirror_max = max(mirror_contrib.r, max(mirror_contrib.g, mirror_contrib.b));
+            if (mirror_max > 1.0)
+                mirror_contrib /= mirror_max;
+            mirror_contrib = clamp(mirror_contrib, vec3(0.0), vec3(1.0));
             if (max_component(mirror_contrib) > 1e-4) {
                 vec3 reflected = trace_lit_once(hit_pos + reflect_dir * TRACE_EPS, reflect_dir, false,
                                                 bounce_seed ^ 0xa511e9b3u);

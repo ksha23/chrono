@@ -659,7 +659,11 @@ kernel void computeMain(uint2 tid [[thread_position_in_grid]], constant Uniforms
         else       { F = rr_metal*h.albedo + (1.0-rr_metal)*float3(0.04); }
         float3 f_ct = F * NormalDist(NdH,rr_rough) * HammonSmith(NdV,NdL,rr_rough);
         float mirrorCorr = (1.0-h.rough)*(1.0-h.rough) * h.metallic*h.metallic;
-        float3 w = clamp(mirrorCorr * f_ct * NdL / (4.0*3.14159265), 0.0, 1.0);
+        // Cap the weight at 1 without changing its colour; see camera_legacy_shader.cuh.
+        float3 w = mirrorCorr * f_ct * NdL / (4.0*3.14159265);
+        float wmax = max(w.x, max(w.y, w.z));
+        if(wmax > 1.0) w /= wmax;
+        w = clamp(w, 0.0, 1.0);
         if(dot(w, float3(0.30,0.59,0.11)) > 0.01){   // OptiX importance_cutoff
           // Single sharp mirror ray, exactly like OptiX legacy CalculateContributionToPixel. NB: on curved
           // low-roughness panels this reflects the car's own silhouette against the sky as a hard boundary
