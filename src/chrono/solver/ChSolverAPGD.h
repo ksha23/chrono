@@ -43,7 +43,7 @@ class ChApi ChSolverAPGD : public ChIterativeSolverVI {
   private:
     double residual;
     int nc;
-    ChVectorDynamic<> gamma_hat, gammaNew, g, y, gamma, yNew, r, tmp;
+    ChVectorDynamic<> gamma_hat, gammaNew, g, y, gamma, yNew, r, tmp, Ngamma;
 };
 
 /// @} chrono_solver

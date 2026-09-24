@@ -53,6 +53,7 @@ double ChSolverAPGD::Solve(ChSystemDescriptor& sysd) {
     yNew.resize(nc);
     r.resize(nc);
     tmp.resize(nc);
+    Ngamma.resize(nc);
 
     residual = 10e30;
 
@@ -99,29 +100,35 @@ double ChSolverAPGD::Solve(ChSystemDescriptor& sysd) {
     // (6) t_k = 1 / L_k
     t = 1.0 / L;
 
-    //// RADU
-    //// Check consistency (e.g. sign of 'r' in comments vs. code)
-
     std::fill(violation_history.begin(), violation_history.end(), 0.0);
     std::fill(dlambda_history.begin(), dlambda_history.end(), 0.0);
 
+    // Cap on the number of step halvings in the backtracking line search (L grows by 2^max_backtracks at most).
+    // With a consistent gradient the sufficient decrease test is satisfied once L exceeds the largest eigenvalue of N;
+    // the cap only protects against round-off or non-finite data.
+    const int max_backtracks = 60;
+
+    // The problem is  min f(gamma) = 0.5 * gamma' * N * gamma - gamma' * r  over the feasible set,
+    // with gradient  g = N * gamma - r.  Each iteration uses two Schur complement products (N * y and N * gamma_(k+1)),
+    // plus one more per backtracking step; N * gamma_(k+1) is reused for the residual.
+
     // (7) for k := 0 to N_max
     for (m_iterations = 0; m_iterations < m_max_iterations; m_iterations++) {
-        // (8) g = N * y_k + r
+        // (8) g = N * y_k - r
+        sysd.SchurComplementProduct(tmp, y);  // tmp = N * y
+        g = tmp - r;
+        double obj_y = y.dot(0.5 * tmp - r);  // f(y_k)
+
         // (9) gamma_(k+1) = ProjectionOperator(y_k - t_k * g)
-        sysd.SchurComplementProduct(g, y);  // g = N * y
-        gammaNew = y - t * (g - r);
+        gammaNew = y - t * g;
         sysd.ConstraintsProject(gammaNew);
 
-        // (10) while 0.5 * gamma_(k+1)' * N * gamma_(k+1) + gamma_(k+1)' * r >=
-        //            0.5 * y_k' * N * y_k + y_k' * r + g' * (gamma_(k+1) - y_k) + 0.5 * L_k * norm(gamma_(k+1) - y_k)^2
-        sysd.SchurComplementProduct(tmp, gammaNew);  // tmp = N * gammaNew;
-        obj1 = gammaNew.dot(0.5 * tmp - r);
+        // (10) while f(gamma_(k+1)) > f(y_k) + g' * (gamma_(k+1) - y_k) + 0.5 * L_k * norm(gamma_(k+1) - y_k)^2
+        sysd.SchurComplementProduct(Ngamma, gammaNew);  // Ngamma = N * gammaNew
+        obj1 = gammaNew.dot(0.5 * Ngamma - r);
+        obj2 = obj_y + (gammaNew - y).dot(g + 0.5 * L * (gammaNew - y));
 
-        sysd.SchurComplementProduct(tmp, y);  // tmp = N * y;
-        obj2 = y.dot(0.5 * tmp - r) + (gammaNew - y).dot(g + 0.5 * L * (gammaNew - y));
-
-        while (obj1 >= obj2) {
+        for (int n_backtracks = 0; obj1 > obj2 && n_backtracks < max_backtracks; n_backtracks++) {
             // (11) L_k = 2 * L_k
             L = 2.0 * L;
 
@@ -132,13 +139,16 @@ double ChSolverAPGD::Solve(ChSystemDescriptor& sysd) {
             gammaNew = y - t * g;
             sysd.ConstraintsProject(gammaNew);
 
-            // Update obj1 and obj2
-            sysd.SchurComplementProduct(tmp, gammaNew);  // tmp = N * gammaNew;
-            obj1 = gammaNew.dot(0.5 * tmp - r);
-
-            sysd.SchurComplementProduct(tmp, y);  // tmp = N * y;
-            obj2 = y.dot(0.5 * tmp - r) + (gammaNew - y).dot(g + 0.5 * L * (gammaNew - y));
+            // Update obj1 and obj2 (f(y_k) and g do not change)
+            sysd.SchurComplementProduct(Ngamma, gammaNew);  // Ngamma = N * gammaNew
+            obj1 = gammaNew.dot(0.5 * Ngamma - r);
+            obj2 = obj_y + (gammaNew - y).dot(g + 0.5 * L * (gammaNew - y));
         }  // (14) endwhile
+
+        // The loop can only exit with obj1 > obj2 when the cap was hit
+        if (verbose && obj1 > obj2)
+            std::cout << "APGD: backtracking cap (" << max_backtracks << ") reached at iteration " << m_iterations << ", accepting a step that fails the sufficient decrease test"
+                      << std::endl;
 
         // (15) theta_(k+1) = (-theta_k^2 + theta_k * sqrt(theta_k^2 + 4)) / 2
         thetaNew = (-theta * theta + theta * std::sqrt(theta * theta + 4.0)) / 2.0;
@@ -153,8 +163,7 @@ double ChSolverAPGD::Solve(ChSystemDescriptor& sysd) {
         // Project the gradient (for rollback strategy)
         // g_proj = (l-project_orthogonal(l - gdiff*g, fric))/gdiff;
         double gdiff = 1.0 / (nc * nc);
-        sysd.SchurComplementProduct(tmp, gammaNew);  // tmp = N * gammaNew
-        tmp = gammaNew - gdiff * (tmp - r);          // Note: no aliasing issues here
+        tmp = gammaNew - gdiff * (Ngamma - r);       // Ngamma = N * gammaNew from the line search
         sysd.ConstraintsProject(tmp);                // tmp = ProjectionOperator(gammaNew - gdiff * g)
         tmp = (gammaNew - tmp) / gdiff;              // Note: no aliasing issues here
         double res = tmp.norm();
