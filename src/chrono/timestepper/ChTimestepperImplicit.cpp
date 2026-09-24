@@ -411,7 +411,7 @@ void ChTimestepperEulerImplicit::OnAdvance(double dt) {
             false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
             UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
             true,                               // always call the solver's Setup
-            true                                // always call the solver's Setup analyze phase
+            integrable->StateModified()         // analyze only if the system was modified
         );
 
         num_step_iters++;
@@ -507,7 +507,7 @@ void ChTimestepperEulerImplicitLinearized::OnAdvance(double dt) {
         false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
         UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
         true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+        integrable->StateModified()         // analyze only if the system was modified
     );
 
     L *= (1.0 / dt);  // Note it is not -(1.0/dt) because we assume StateSolveCorrection already flips sign of Dl
@@ -583,7 +583,7 @@ void ChTimestepperEulerImplicitProjected::OnAdvance(double dt) {
         false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
         UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
         true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+        integrable->StateModified()         // analyze only if the system was modified
     );
 
     L *= (1.0 / dt);  // Note it is not -(1.0/dt) because we assume StateSolveCorrection already flips sign of Dl
@@ -620,7 +620,7 @@ void ChTimestepperEulerImplicitProjected::OnAdvance(double dt) {
         false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
         UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
         true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+        integrable->StateModified()         // analyze only if the system was modified
     );
 
     X += Vold;  // here we used 'Vold' as 'dpos' to recycle Vold and avoid allocating a new vector dpos
@@ -718,7 +718,7 @@ void ChTimestepperTrapezoidal::OnAdvance(double dt) {
             false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
             UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
             true,                               // always call the solver's Setup
-            true                                // always call the solver's Setup analyze phase
+            integrable->StateModified()         // analyze only if the system was modified
         );
 
         num_step_iters++;
@@ -819,7 +819,7 @@ void ChTimestepperTrapezoidalLinearized::OnAdvance(double dt) {
         false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
         UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
         true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+        integrable->StateModified()         // analyze only if the system was modified
     );
 
     num_step_iters = 1;
@@ -915,7 +915,7 @@ void ChTimestepperNewmark::OnAdvance(double dt) {
     // [ Cq                                      0   ] [ -Dl  ] = [ -1/(beta*dt^2)*C              ]
     //
     call_setup = true;
-    call_analyze = true;
+    call_analyze = integrable->StateModified();
 
     unsigned int iteration;
     for (iteration = 0; iteration < max_iters; ++iteration) {
