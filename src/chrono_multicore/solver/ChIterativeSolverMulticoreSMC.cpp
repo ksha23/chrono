@@ -81,6 +81,8 @@ void function_CalcContactForces(int index,                                      
                                 real* eff_radius,                                     // effective contact radius (per contact)
                                 vec3* shear_neigh,                                    // neighbor list of contacting bodies and shapes (per body)
                                 char* shear_touch,                                    // flag if contact in neighbor list is persistent (per body)
+                                int* shear_slot,                                      // history slot of this contact, -1 if none (per contact)
+                                char* shear_new,                                      // flag if the history slot was just claimed (per contact)
                                 real3* shear_disp,                                    // accumulated shear displacement for each neighbor (per body)
                                 real* contact_relvel_init,                            // initial relative normal velocity per contact pair
                                 real* contact_duration,                               // duration of persistent contact between contact pairs
@@ -174,77 +176,44 @@ void function_CalcContactForces(int index,                                      
     real delta_n = -depth[index];
     real3 delta_t = real3(0);
 
-    int i;
     int contact_id = -1;
     int shear_body1 = -1;
-    int shear_body2;
-    int shear_shape1;
-    int shear_shape2;
-    bool newcontact = true;
 
     if (displ_mode == ChSystemSMC::TangentialDisplacementModel::OneStep) {
         delta_t = relvel_t * dT;
     } else if (displ_mode == ChSystemSMC::TangentialDisplacementModel::MultiStep) {
         delta_t = relvel_t * dT;
 
-        // Identify the two shapes in contact (global shape IDs).
-        int s1 = shape_pairs[index].x;
-        int s2 = shape_pairs[index].y;
-
-        // Contact history information stored on the body with the smaller shape or else the body with larger index.
-        // Currently, it is assumed that the smaller shape is on the body with larger ID. We call this body shear_body1.
+        // Contact history information is stored on the body with larger index (see AssignShearSlots).
         shear_body1 = std::max(b1, b2);
-        shear_body2 = std::min(b1, b2);
-        shear_shape1 = std::max(s1, s2);
-        shear_shape2 = std::min(s1, s2);
 
-        // Check if contact history already exists. If not, initialize new contact history.
-        for (i = 0; i < max_shear; i++) {
-            int ctIdUnrolled = max_shear * shear_body1 + i;
-            if (shear_neigh[ctIdUnrolled].x == shear_body2 && shear_neigh[ctIdUnrolled].y == shear_shape1 && shear_neigh[ctIdUnrolled].z == shear_shape2) {
-                contact_duration[ctIdUnrolled] += dT;
-                contact_id = i;
-                newcontact = false;
-                break;
+        // The contact history slot was found or claimed in AssignShearSlots. If the body has no free slot left, the
+        // contact is processed without history.
+        contact_id = shear_slot[index];
+
+        if (contact_id >= 0) {
+            // Record that these two bodies are really in contact at this time.
+            int ctSaveId = max_shear * shear_body1 + contact_id;
+            shear_touch[ctSaveId] = true;
+            if (shear_new[index])
+                contact_relvel_init[ctSaveId] = relvel_init;
+
+            // Increment stored contact history tangential (shear) displacement vector and project it onto the current
+            // contact plane.
+            if (shear_body1 == b1) {
+                shear_disp[ctSaveId] += delta_t;
+                shear_disp[ctSaveId] -= Dot(shear_disp[ctSaveId], normal[index]) * normal[index];
+                delta_t = shear_disp[ctSaveId];
+            } else {
+                shear_disp[ctSaveId] -= delta_t;
+                shear_disp[ctSaveId] -= Dot(shear_disp[ctSaveId], normal[index]) * normal[index];
+                delta_t = -shear_disp[ctSaveId];
             }
-        }
-        if (newcontact == true) {
-            for (i = 0; i < max_shear; i++) {
-                int ctIdUnrolled = max_shear * shear_body1 + i;
-                if (shear_neigh[ctIdUnrolled].x == -1) {
-                    contact_id = i;
-                    shear_neigh[ctIdUnrolled].x = shear_body2;
-                    shear_neigh[ctIdUnrolled].y = shear_shape1;
-                    shear_neigh[ctIdUnrolled].z = shear_shape2;
-                    shear_disp[ctIdUnrolled].x = 0;
-                    shear_disp[ctIdUnrolled].y = 0;
-                    shear_disp[ctIdUnrolled].z = 0;
-                    contact_relvel_init[ctIdUnrolled] = relvel_init;
-                    contact_duration[ctIdUnrolled] = 0;
-                    break;
-                }
-            }
-        }
 
-        // Record that these two bodies are really in contact at this time.
-        int ctSaveId = max_shear * shear_body1 + contact_id;
-        shear_touch[ctSaveId] = true;
-
-        // Increment stored contact history tangential (shear) displacement vector and project it onto the current
-        // contact plane.
-        if (shear_body1 == b1) {
-            shear_disp[ctSaveId] += delta_t;
-            shear_disp[ctSaveId] -= Dot(shear_disp[ctSaveId], normal[index]) * normal[index];
-            delta_t = shear_disp[ctSaveId];
-        } else {
-            shear_disp[ctSaveId] -= delta_t;
-            shear_disp[ctSaveId] -= Dot(shear_disp[ctSaveId], normal[index]) * normal[index];
-            delta_t = -shear_disp[ctSaveId];
+            // Load the initial collision velocity and accumulated contact duration from the contact history.
+            relvel_init = (contact_relvel_init[ctSaveId] < char_vel) ? char_vel : contact_relvel_init[ctSaveId];
+            t_contact = contact_duration[ctSaveId];
         }
-
-        // Load the initial collision velocity and accumulated contact duration from the contact history.
-        relvel_init = (contact_relvel_init[ctSaveId] < char_vel) ? char_vel : contact_relvel_init[ctSaveId];
-        t_contact = contact_duration[ctSaveId];
     }
 
     auto eps = std::numeric_limits<double>::epsilon();
@@ -454,7 +423,7 @@ void function_CalcContactForces(int index,                                      
         if (delta_t_mag > eps) {
             real ratio = forceT_slide / forceT_mag;
             forceT *= ratio;
-            if (displ_mode == ChSystemSMC::TangentialDisplacementModel::MultiStep) {
+            if (displ_mode == ChSystemSMC::TangentialDisplacementModel::MultiStep && contact_id >= 0) {
                 delta_t = (forceT - forceT_damp) / kt;
                 if (shear_body1 == b1) {
                     shear_disp[max_shear * shear_body1 + contact_id] = delta_t;
@@ -546,6 +515,88 @@ void function_CalcContactForces(int index,                                      
 }
 
 // -----------------------------------------------------------------------------
+// Find or claim the contact history slot of each contact (MultiStep tangential
+// displacement model only). The history of a contact is stored with the body of
+// larger index (shear_body1), in one of its max_shear slots, identified by the
+// other body and the two shape IDs.
+// Existing slots are looked up in parallel. New slots are then claimed serially,
+// in contact order: two new contacts on the same shear_body1 processed by
+// different threads would otherwise claim the same free slot, and the history
+// of one of them would be lost. A contact is left without a slot (-1) if its
+// shear_body1 has no free slot.
+// -----------------------------------------------------------------------------
+static void AssignShearSlots(ChMulticoreDataManager* data_manager, const custom_vector<vec2>& shape_pairs, custom_vector<int>& shear_slot, custom_vector<char>& shear_new) {
+    const auto num_contacts = data_manager->cd_data->num_rigid_contacts;
+    const vec2* body_pairs = data_manager->cd_data->bids_rigid_rigid.data();
+    const real* depth = data_manager->cd_data->dpth_rigid_rigid.data();
+    vec3* shear_neigh = data_manager->host_data.shear_neigh.data();
+    real3* shear_disp = data_manager->host_data.shear_disp.data();
+    real* contact_duration = data_manager->host_data.contact_duration.data();
+    const real dT = data_manager->settings.step_size;
+
+    // Identify the history entry of a contact: owner body and (other body, larger shape ID, smaller shape ID).
+    auto entry = [&](int index, int& body1, vec3& key) {
+        int b1 = body_pairs[index].x;
+        int b2 = body_pairs[index].y;
+        int s1 = shape_pairs[index].x;
+        int s2 = shape_pairs[index].y;
+        body1 = std::max(b1, b2);
+        key = vec3(std::min(b1, b2), std::max(s1, s2), std::min(s1, s2));
+    };
+    auto find = [&](int body1, const vec3& key) {
+        for (int i = 0; i < max_shear; i++) {
+            const vec3& n = shear_neigh[max_shear * body1 + i];
+            if (n.x == key.x && n.y == key.y && n.z == key.z)
+                return i;
+        }
+        return -1;
+    };
+
+    // Look up existing contact history (read-only on the neighbor lists).
+#pragma omp parallel for
+    for (int index = 0; index < (signed)num_contacts; index++) {
+        shear_slot[index] = -1;
+        shear_new[index] = false;
+        if (depth[index] >= 0)
+            continue;
+        int body1;
+        vec3 key;
+        entry(index, body1, key);
+        int i = find(body1, key);
+        if (i >= 0) {
+            contact_duration[max_shear * body1 + i] += dT;
+            shear_slot[index] = i;
+        }
+    }
+
+    // Claim slots for new contacts.
+    for (int index = 0; index < (signed)num_contacts; index++) {
+        if (depth[index] >= 0 || shear_slot[index] >= 0)
+            continue;
+        int body1;
+        vec3 key;
+        entry(index, body1, key);
+        // A new contact on the same shape pair may have claimed a slot earlier in this loop.
+        int i = find(body1, key);
+        if (i >= 0) {
+            shear_slot[index] = i;
+            continue;
+        }
+        for (i = 0; i < max_shear; i++) {
+            int ctIdUnrolled = max_shear * body1 + i;
+            if (shear_neigh[ctIdUnrolled].x == -1) {
+                shear_neigh[ctIdUnrolled] = key;
+                shear_disp[ctIdUnrolled] = real3(0);
+                contact_duration[ctIdUnrolled] = 0;
+                shear_slot[index] = i;
+                shear_new[index] = true;
+                break;
+            }
+        }
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Calculate contact forces and torques for all contact pairs.
 // -----------------------------------------------------------------------------
 
@@ -554,6 +605,14 @@ void ChIterativeSolverMulticoreSMC::host_CalcContactForces(custom_vector<int>& c
                                                            custom_vector<real3>& ct_torque,
                                                            custom_vector<vec2>& shape_pairs,
                                                            custom_vector<char>& shear_touch) {
+    custom_vector<int> shear_slot;
+    custom_vector<char> shear_new;
+    if (data_manager->settings.solver.tangential_displ_mode == ChSystemSMC::TangentialDisplacementModel::MultiStep) {
+        shear_slot.resize(data_manager->cd_data->num_rigid_contacts);
+        shear_new.resize(data_manager->cd_data->num_rigid_contacts);
+        AssignShearSlots(data_manager, shape_pairs, shear_slot, shear_new);
+    }
+
 #pragma omp parallel for
     for (int index = 0; index < (signed)data_manager->cd_data->num_rigid_contacts; index++) {
         function_CalcContactForces(index,                                                  // index of this contact pair
@@ -584,6 +643,8 @@ void ChIterativeSolverMulticoreSMC::host_CalcContactForces(custom_vector<int>& c
                                    data_manager->cd_data->erad_rigid_rigid.data(),         // effective contact radius (per contact)
                                    data_manager->host_data.shear_neigh.data(),             // neighbor list of contacting bodies and shapes (per body)
                                    shear_touch.data(),                                     // flag if contact in neighbor list is persistent (per body)
+                                   shear_slot.data(),                                      // history slot of each contact (per contact)
+                                   shear_new.data(),                                       // flag if the history slot was just claimed (per contact)
                                    data_manager->host_data.shear_disp.data(),              // accumulated shear displacement for each neighbor (per body)
                                    data_manager->host_data.contact_relvel_init.data(),     // initial relative normal velocity per contact pair
                                    data_manager->host_data.contact_duration.data(),        // duration of persistent contact between contact pairs
