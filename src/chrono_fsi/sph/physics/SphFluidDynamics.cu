@@ -188,7 +188,10 @@ __device__ int32_t inAABB(const Real3& pos, const Real3& min, const Real3& max) 
 
 // Check if the specified point is within any object AABB (active=1) and within any extended object AABB (ext_active=1).
 // An inverted AABB does not change activity.
+// A point outside the union {union_min,union_max} of all active and extended AABBs is inside none of them.
 __device__ void checkActivityD(const Real3& pos,
+                               const Real3& union_min,
+                               const Real3& union_max,
                                const ActiveDomain* __restrict__ ad_body_D,
                                const ActiveDomain* __restrict__ ad_node1D_D,
                                const ActiveDomain* __restrict__ ad_node2D_D,
@@ -196,6 +199,9 @@ __device__ void checkActivityD(const Real3& pos,
                                int32_t& ext_active) {
     active = 0;
     ext_active = 0;
+
+    if (!inAABB(pos, union_min, union_max))
+        return;
 
     for (uint ib = 0; ib < countersD.numFsiBodies; ib++) {
         if (ad_body_D[ib].inverted)
@@ -231,6 +237,8 @@ __global__ void UpdateActivityD(const Real4* posRadD,
                                 const Real3* pos_nodes1D_D,
                                 const Real3* pos_nodes2D_D,
                                 bool has_ad,
+                                Real3 ad_union_min,
+                                Real3 ad_union_max,
                                 const ActiveDomain* __restrict__ ad_body_D,
                                 const ActiveDomain* __restrict__ ad_node1D_D,
                                 const ActiveDomain* __restrict__ ad_node2D_D,
@@ -251,7 +259,8 @@ __global__ void UpdateActivityD(const Real4* posRadD,
     activityIdentifierD[index] = 1;
     extendedActivityIdD[index] = 1;
     if (has_ad && time >= paramsD.free_flow_duration) {
-        checkActivityD(pos, ad_body_D, ad_node1D_D, ad_node2D_D, activityIdentifierD[index], extendedActivityIdD[index]);
+        checkActivityD(pos, ad_union_min, ad_union_max, ad_body_D, ad_node1D_D, ad_node2D_D, activityIdentifierD[index],
+                       extendedActivityIdD[index]);
         if (activityIdentifierD[index] == 0)
             velMasD[index] = mR3(0.0);
     }
@@ -298,7 +307,7 @@ void SphFluidDynamics::UpdateActivity(std::shared_ptr<SphMarkerDataD> sphMarkers
     UpdateActivityD<<<numBlocks, numThreads>>>(                                                                                         //
         mR4CAST(sphMarkersD->posRadD), mR3CAST(sphMarkersD->velMasD),                                                                   //
         mR3CAST(m_data_mgr.fsiBodyState_D->pos), mR3CAST(m_data_mgr.fsiMesh1DState_D->pos), mR3CAST(m_data_mgr.fsiMesh2DState_D->pos),  //
-        m_data_mgr.has_ad,
+        m_data_mgr.has_ad, m_data_mgr.ad_union_min, m_data_mgr.ad_union_max,                                             //
         thrust::raw_pointer_cast(m_data_mgr.ad_body_D.data()),                                                           //
         thrust::raw_pointer_cast(m_data_mgr.ad_node1D_D.data()),                                                         //
         thrust::raw_pointer_cast(m_data_mgr.ad_node2D_D.data()),                                                         //

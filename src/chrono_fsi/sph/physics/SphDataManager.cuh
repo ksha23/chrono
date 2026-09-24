@@ -376,6 +376,8 @@ struct FsiDataManager {
 
     // FSI solid activity domains
     bool has_ad;                                      ///< use solid active domains
+    Real3 ad_union_min;                               ///< min corner of union of all active and extended AABBs
+    Real3 ad_union_max;                               ///< max corner of union of all active and extended AABBs
     thrust::host_vector<ActiveDomain> ad_body_H;      ///< body active domains (on host, expressed in body frames)
     thrust::device_vector<ActiveDomain> ad_body_D;    ///< body active domains (on device, expressed in absolute frame)
     thrust::host_vector<ActiveDomain> ad_node1D_H;    ///< 1-D mesh node active domains (on host, expressed in node frames)
