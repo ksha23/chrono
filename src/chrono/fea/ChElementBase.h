@@ -115,6 +115,8 @@ class ChApi ChElementBase {
     /// Add the product of element mass M by a vector w (pasted at global nodes offsets) into
     /// a global vector R, multiplied by a scaling factor c, as
     ///   R += M * w * c
+    /// Note: this is called from within a parallel OMP for loop (see ChMesh::IntLoadResidual_Mv), so implementations
+    /// must use atomic updates when writing to R.
     virtual void EleIntLoadResidual_Mv(ChVectorDynamic<>& R, const ChVectorDynamic<>& w, const double c) {}
 
     /// Adds the lumped mass to a Md vector, representing a mass diagonal matrix. Used by lumped explicit integrators.
