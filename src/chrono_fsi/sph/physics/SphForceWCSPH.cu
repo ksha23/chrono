@@ -1423,7 +1423,11 @@ CfdCalcDvDt_D(Real3 gradW, Real3 dist3, Real d, Real4 posRadA, Real4 posRadB, Re
     return mR4(derivV, derivRho);
 }
 
-// Implementation of the Navier-Stokes equations for CFD
+// Implementation of the Navier-Stokes equations for CFD.
+// The consistent gradient and Laplacian discretization is used only if both options are enabled. It is a template
+// parameter, so that the default instantiation does not carry the per-thread correction matrices (G_i, L_i, A_i).
+// With runtime checks, these local arrays forced register spills to local memory (CUDA) or scratch (HIP) in every launch.
+template <bool CONSISTENT>
 __global__ void CfdCalcRHS_D(Real4* __restrict__ sortedDerivVelRho,
                              const Real4* __restrict__ sortedPosRad,
                              const Real3* __restrict__ sortedVelMas,
@@ -1462,10 +1466,10 @@ __global__ void CfdCalcRHS_D(Real4* __restrict__ sortedDerivVelRho,
 
     Real G_i[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
     Real L_i[9] = {1, 0, 0, 0, 1, 0, 0, 0, 1};
-    if (paramsD.use_consistent_gradient_discretization)
+    if (CONSISTENT)
         calc_G_Matrix(sortedPosRad, sortedRhoPreMu, G_i, numNeighborsPerPart, neighborList, numActive);
 
-    if (paramsD.use_consistent_laplacian_discretization) {
+    if (CONSISTENT) {
         Real A_i[27] = {0};
         calc_A_Matrix(sortedPosRad, sortedRhoPreMu, A_i, G_i, numNeighborsPerPart, neighborList, numActive);
         calc_L_Matrix(sortedPosRad, sortedRhoPreMu, A_i, L_i, G_i, numNeighborsPerPart, neighborList, numActive);
@@ -1537,7 +1541,7 @@ __global__ void CfdCalcRHS_D(Real4* __restrict__ sortedDerivVelRho,
 
         derivVelRho += CfdCalcDvDt_D(gradW, dist3, d, sortedPosRad[index], sortedPosRad[j], velMasA, velMasB, rhoPresMuA, rhoPresMuB, &max_vel_diff);
 
-        if (paramsD.use_consistent_gradient_discretization && paramsD.use_consistent_laplacian_discretization) {
+        if (CONSISTENT) {
             preGra += GradientOperator(Gi, dist3, sortedPosRad[index], sortedPosRad[j], -rhoPresMuA.y, rhoPresMuB.y, rhoPresMuA, rhoPresMuB);
             velxGra += GradientOperator(Gi, dist3, sortedPosRad[index], sortedPosRad[j], velMasA.x, velMasB.x, rhoPresMuA, rhoPresMuB);
             velyGra += GradientOperator(Gi, dist3, sortedPosRad[index], sortedPosRad[j], velMasA.y, velMasB.y, rhoPresMuA, rhoPresMuB);
@@ -1550,7 +1554,7 @@ __global__ void CfdCalcRHS_D(Real4* __restrict__ sortedDerivVelRho,
         }
     }
 
-    if (paramsD.use_consistent_gradient_discretization && paramsD.use_consistent_laplacian_discretization) {
+    if (CONSISTENT) {
         Real nu = paramsD.mu0 / paramsD.rho0;
         Real dvxdt = -preGra.x / rhoPresMuA.x + (velxLap.x + velxGra.x * velxLap.y + velxGra.y * velxLap.z + velxGra.z * velxLap.w) * nu;
         Real dvydt = -preGra.y / rhoPresMuA.x + (velyLap.x + velyGra.x * velyLap.y + velyGra.y * velyLap.z + velyGra.z * velyLap.w) * nu;
@@ -1598,10 +1602,17 @@ void SphForceWCSPH::CfdCalcRHS(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD
     gpuResetErrorFlag(m_errflagD);
 
     computeGridSize(numActive, 256, numBlocks, numThreads);
-    CfdCalcRHS_D<<<numBlocks, numThreads>>>(mR4CAST(m_data_mgr.derivVelRhoD), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD),
-                                            mR4CAST(sortedSphMarkersD->rhoPresMuD), U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
-                                            U1CAST(m_data_mgr.freeSurfaceIdD), R1CAST(m_data_mgr.posDivergenceD), R1CAST(m_data_mgr.courantViscousTimeStepD),
-                                            R1CAST(m_data_mgr.accelerationTimeStepD), m_errflagD);
+    if (m_data_mgr.paramsH->use_consistent_gradient_discretization && m_data_mgr.paramsH->use_consistent_laplacian_discretization) {
+        CfdCalcRHS_D<true><<<numBlocks, numThreads>>>(mR4CAST(m_data_mgr.derivVelRhoD), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD),
+                                                      mR4CAST(sortedSphMarkersD->rhoPresMuD), U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
+                                                      U1CAST(m_data_mgr.freeSurfaceIdD), R1CAST(m_data_mgr.posDivergenceD), R1CAST(m_data_mgr.courantViscousTimeStepD),
+                                                      R1CAST(m_data_mgr.accelerationTimeStepD), m_errflagD);
+    } else {
+        CfdCalcRHS_D<false><<<numBlocks, numThreads>>>(mR4CAST(m_data_mgr.derivVelRhoD), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD),
+                                                       mR4CAST(sortedSphMarkersD->rhoPresMuD), U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
+                                                       U1CAST(m_data_mgr.freeSurfaceIdD), R1CAST(m_data_mgr.posDivergenceD), R1CAST(m_data_mgr.courantViscousTimeStepD),
+                                                       R1CAST(m_data_mgr.accelerationTimeStepD), m_errflagD);
+    }
 
     if (m_check_errors)
         gpuCheckErrorFlag(m_errflagD, "CfdCalcRHS_D");
