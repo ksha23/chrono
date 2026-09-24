@@ -68,6 +68,11 @@ class CH_VEHICLE_API ChVehicleVisualSystemIrrlicht : public ChVehicleVisualSyste
     /// Enable/disable joystick debugging output (default: false).
     void SetJoystickDebug(bool val);
 
+    /// Set the number of joystick events to skip between driver updates (default: 0, process every event).
+    /// Irrlicht generates one joystick event per run() call, so the effective input rate equals the simulation
+    /// step rate divided by (1 + skip_frames).  Axis values are always sampled regardless of this setting.
+    void SetJoystickProcessFrequency(int skip_frames);
+
     /// Feed button number and callback function to implement a custom callback.
     void SetButtonCallback(int button, void (*cbfun)());
 

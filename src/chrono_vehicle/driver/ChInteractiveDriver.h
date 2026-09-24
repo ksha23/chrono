@@ -68,7 +68,10 @@ class CH_VEHICLE_API ChInteractiveDriver : public ChDriver {
     virtual ~ChInteractiveDriver() {}
 
     /// Check if joystick is supported.
-    virtual bool HasJoystick() const { return false; }
+    bool HasJoystick() const { return m_has_joystick; }
+
+    /// Inform the driver that a joystick was detected by the visual system.
+    void SetHasJoystick(bool val) { m_has_joystick = val; }
 
     /// Set the current functioning mode.
     void SetInputMode(InputMode mode);
@@ -152,7 +155,8 @@ class CH_VEHICLE_API ChInteractiveDriver : public ChDriver {
     /// Recompute the input targets from the set of keys currently held down (KeyboardMode::HELD).
     void UpdateTargetsFromHeldKeys();
 
-    InputMode m_mode;  ///< current mode of the driver
+    InputMode m_mode;          ///< current mode of the driver
+    bool m_has_joystick;       ///< whether a joystick was detected
 
     // Variables for mode=KEYBOARD
     KeyboardMode m_keyboard_mode;   ///< semantics of the keyboard driving controls

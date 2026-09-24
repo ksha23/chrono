@@ -36,6 +36,7 @@ namespace vehicle {
 ChInteractiveDriver::ChInteractiveDriver(ChVehicle& vehicle)
     : ChDriver(vehicle),
       m_mode(InputMode::KEYBOARD),
+      m_has_joystick(false),
       m_keyboard_mode(KeyboardMode::CUMULATIVE),
       m_keyboard_mode_user_set(false),
       m_key_throttle(false),
