@@ -54,8 +54,11 @@ See ChSystemDescriptor for more information about the problem formulation and th
 */
 class ChApiPardisoMKL ChSolverPardisoMKL : public ChDirectSolverLS {
   public:
-    /// Construct an MKL Pardiso sparse direct solver object and specify the number of OpenMP threads.
-    ChSolverPardisoMKL(unsigned int num_threads = 1);
+    /// Construct an MKL Pardiso sparse direct solver object and optionally specify the number of MKL threads.
+    /// If num_threads > 0, this value is passed to mkl_set_num_threads (note that this is a process-wide MKL setting).
+    /// With the default num_threads = 0, the MKL threading setting is not modified; MKL then uses its own default
+    /// (the MKL_NUM_THREADS or OMP_NUM_THREADS environment variables if set, otherwise the number of physical cores).
+    ChSolverPardisoMKL(unsigned int num_threads = 0);
 
     ~ChSolverPardisoMKL() {}
 
@@ -82,7 +85,9 @@ class ChApiPardisoMKL ChSolverPardisoMKL : public ChDirectSolverLS {
 /// Sparse complex Pardiso direct solver.
 class ChApiPardisoMKL ChSolverComplexPardisoMKL : public ChDirectSolverLScomplex {
   public:
-    ChSolverComplexPardisoMKL(unsigned int num_threads = 1);
+    /// Construct a complex MKL Pardiso solver and optionally specify the number of MKL threads.
+    /// See ChSolverPardisoMKL for the meaning of num_threads (0: do not modify the MKL threading setting).
+    ChSolverComplexPardisoMKL(unsigned int num_threads = 0);
     ~ChSolverComplexPardisoMKL() {}
 
     /// Get a handle to the underlying MKL engine.
