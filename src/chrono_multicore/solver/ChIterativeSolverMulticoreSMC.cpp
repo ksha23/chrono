@@ -649,13 +649,12 @@ void ChIterativeSolverMulticoreSMC::ProcessContacts() {
     //    IDs of the two corresponding bodies and the resulting contact forces and
     //    torques on the two bodies.
 
-    custom_vector<int> ct_bid(2 * num_rigid_contacts);
-    custom_vector<real3> ct_force(2 * num_rigid_contacts);
-    custom_vector<real3> ct_torque(2 * num_rigid_contacts);
+    // All entries are overwritten by host_CalcContactForces.
+    ct_bid.resize(2 * num_rigid_contacts);
+    ct_force.resize(2 * num_rigid_contacts);
+    ct_torque.resize(2 * num_rigid_contacts);
 
     // Set up additional vectors for multi-step tangential model
-    custom_vector<vec2> shape_pairs;
-    custom_vector<char> shear_touch;
     if (data_manager->settings.solver.tangential_displ_mode == ChSystemSMC::TangentialDisplacementModel::MultiStep) {
         shape_pairs.resize(num_rigid_contacts);
         shear_touch.resize(max_shear * data_manager->num_rigid_bodies);
@@ -691,7 +690,8 @@ void ChIterativeSolverMulticoreSMC::ProcessContacts() {
     //    bodies that experience at least one contact is 'ct_body_count'.
     thrust::sort_by_key(THRUST_PAR ct_bid.begin(), ct_bid.end(), thrust::make_zip_iterator(thrust::make_tuple(ct_force.begin(), ct_torque.begin())));
 
-    custom_vector<int> ct_body_id(data_manager->num_rigid_bodies);
+    // Only the first ct_body_count entries are written and used.
+    ct_body_id.resize(data_manager->num_rigid_bodies);
     custom_vector<real3>& ct_body_force = data_manager->host_data.ct_body_force;
     custom_vector<real3>& ct_body_torque = data_manager->host_data.ct_body_torque;
 

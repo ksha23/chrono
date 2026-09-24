@@ -121,6 +121,14 @@ class CH_MULTICORE_API ChIterativeSolverMulticoreSMC : public ChIterativeSolverM
     void host_AddContactForces(uint ct_body_count, const custom_vector<int>& ct_body_id);
 
     void host_SetContactForcesMap(uint ct_body_count, const custom_vector<int>& ct_body_id);
+
+    // Work arrays for ProcessContacts, kept across steps to avoid reallocating and zero-filling them at every step.
+    custom_vector<int> ct_bid;          ///< body IDs (two per contact)
+    custom_vector<real3> ct_force;      ///< body forces (two per contact)
+    custom_vector<real3> ct_torque;     ///< body torques (two per contact)
+    custom_vector<vec2> shape_pairs;    ///< shape IDs (per contact)
+    custom_vector<char> shear_touch;    ///< flag if contact history slot is persistent (per body)
+    custom_vector<int> ct_body_id;      ///< IDs of bodies in contact
 };
 
 /// @} multicore_solver
