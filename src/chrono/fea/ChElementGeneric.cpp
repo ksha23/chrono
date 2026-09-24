@@ -58,11 +58,17 @@ void ChElementGeneric::EleIntLoadResidual_Mv(ChVectorDynamic<>& R, const ChVecto
 
     ChVectorDynamic<> Fi = c * Mi * mqi;
 
+    //// Attention: this is called from within a parallel OMP for loop.
+    //// Must use atomic increment when updating the global vector R.
+
     stride = 0;
     for (unsigned int in = 0; in < GetNumNodes(); in++) {
         unsigned int node_dofs = GetNodeNumCoordsPosLevelActive(in);
-        if (!GetNode(in)->IsFixed())
-            R.segment(GetNode(in)->NodeGetOffsetVelLevel(), node_dofs) += Fi.segment(stride, node_dofs);
+        if (!GetNode(in)->IsFixed()) {
+            for (unsigned int j = 0; j < node_dofs; j++)
+#pragma omp atomic
+                R(GetNode(in)->NodeGetOffsetVelLevel() + j) += Fi(stride + j);
+        }
         stride += GetNodeNumCoordsPosLevel(in);
     }
 }

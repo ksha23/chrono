@@ -196,44 +196,6 @@ void ChElementTetraCorot_4::ComputeKRMmatricesGlobal(ChMatrixRef H, double Kfact
         for (int col = row + 1; col < CKCt.cols(); ++col)
             CKCt(row, col) = CKCt(col, row);
 
-    //// DEBUG
-    double max_err = 0;
-    int err_r = -1;
-    int err_c = -1;
-    for (int row = 0; row < StiffnessMatrix.rows(); ++row)
-        for (int col = 0; col < StiffnessMatrix.cols(); ++col) {
-            double diff = fabs(StiffnessMatrix(row, col) - StiffnessMatrix(col, row));
-            if (diff > max_err) {
-                max_err = diff;
-                err_r = row;
-                err_c = col;
-            }
-        }
-
-    if (max_err > 1e-10)
-        std::cerr << "NONSYMMETRIC local stiffness matrix! err " << max_err << " at " << err_r << "," << err_c
-                  << std::endl;
-
-    max_err = 0;
-    err_r = -1;
-    err_c = -1;
-    double maxval = 0;
-    for (int row = 0; row < CKCt.rows(); ++row)
-        for (int col = 0; col < CKCt.cols(); ++col) {
-            double diff = fabs(CKCt(row, col) - CKCt(col, row));
-            if (diff > max_err) {
-                max_err = diff;
-                err_r = row;
-                err_c = col;
-            }
-            if (CKCt(row, col) > maxval)
-                maxval = CKCt(row, col);
-        }
-
-    if (max_err > 1e-10)
-        std::cerr << "NONSYMMETRIC corotated matrix! err " << max_err << " at " << err_r << "," << err_c
-                  << ",   maxval=" << maxval << std::endl;
-
     // For K stiffness matrix and R damping matrix:
     double mkfactor = Kfactor + Rfactor * this->GetMaterial()->GetRayleighDampingBeta();
     H = mkfactor * CKCt;
@@ -247,6 +209,16 @@ void ChElementTetraCorot_4::ComputeKRMmatricesGlobal(ChMatrixRef H, double Kfact
         }
     }
     //// TODO  better per-node lumping, or 12x12 consistent mass matrix.
+}
+
+void ChElementTetraCorot_4::ComputeMmatrixGlobal(ChMatrixRef M) {
+    assert((M.rows() == 12) && (M.cols() == 12));
+
+    // Lumped mass matrix, identical to the mass part of ComputeKRMmatricesGlobal
+    M.setZero();
+    double lumped_node_mass = (this->GetVolume() * this->Material->GetDensity()) / 4.0;
+    for (int id = 0; id < 12; id++)
+        M(id, id) = lumped_node_mass;
 }
 
 void ChElementTetraCorot_4::ComputeInternalForces(ChVectorDynamic<>& Fi) {

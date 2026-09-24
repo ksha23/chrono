@@ -429,8 +429,12 @@ void ChMesh::IntLoadResidual_Mv(const unsigned int off,      ///< offset in R re
         }
     }
 
+    int nthreads = GetSystem()->nthreads_chrono;
+
     // internal masses
-    for (unsigned int ie = 0; ie < velements.size(); ie++) {
+    //// PARALLEL FOR, must use omp atomic to avoid race condition in writing to R
+#pragma omp parallel for schedule(dynamic, 4) num_threads(nthreads)
+    for (int ie = 0; ie < velements.size(); ie++) {
         velements[ie]->EleIntLoadResidual_Mv(R, w, c);
     }
 }

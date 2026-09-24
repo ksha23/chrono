@@ -20,6 +20,7 @@ set(TESTS
 	utest_FEA_ANCFshell_3833_Formulation
 	utest_FEA_ANCFhexa_3843_Formulation
     utest_FEA_ANCFhexa_3813_9
+    utest_FEA_mass_matrix
 )
 
 if(CH_ENABLE_MODULE_FEA_MULTIPHYSICS)

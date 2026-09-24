@@ -579,6 +579,16 @@ void ChElementHexaCorot_20::ComputeKRMmatricesGlobal(ChMatrixRef H, double Kfact
     //// TODO  better per-node lumping, or 12x12 consistent mass matrix.
 }
 
+void ChElementHexaCorot_20::ComputeMmatrixGlobal(ChMatrixRef M) {
+    assert((M.rows() == GetNumCoordsPosLevel()) && (M.cols() == GetNumCoordsPosLevel()));
+
+    // Lumped mass matrix, identical to the mass part of ComputeKRMmatricesGlobal
+    M.setZero();
+    double lumped_node_mass = (this->Volume * this->Material->GetDensity()) / 20.0;
+    for (unsigned int id = 0; id < GetNumCoordsPosLevel(); id++)
+        M(id, id) = lumped_node_mass;
+}
+
 void ChElementHexaCorot_20::ComputeInternalForces(ChVectorDynamic<>& Fi) {
     assert(Fi.size() == GetNumCoordsPosLevel());
 
