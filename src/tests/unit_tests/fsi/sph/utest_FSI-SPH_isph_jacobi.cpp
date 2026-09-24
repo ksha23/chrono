@@ -26,6 +26,12 @@
 // intervals. The tolerances must also give different states (so the early exit is exercised), and the flow must
 // stay finite with speeds below twice the free-fall speed over the simulated time plus the wall speed.
 //
+// The per-step iteration counts are read from the verbose solver output and pinned independently of the check
+// interval: every pressure solve takes exactly max_num_iters iterations with atol = 0 and exactly 3 with the huge
+// atol (the same counts as the host-side loop that the device-side test replaced), the intermediate atol stops
+// at least once at a count that is not a multiple of the check interval, and the count sequences for all check
+// intervals equal those for check_interval = 1.
+//
 // Only fluid and fixed-boundary markers are compared: the BCE markers of the rotating cylinder carry a ~1e-14
 // out-of-plane velocity from the multibody side that is not reproducible from run to run.
 //
@@ -34,10 +40,17 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+    #include <io.h>
+#else
+    #include <unistd.h>
+#endif
 
 #include "chrono/physics/ChSystemNSC.h"
 #include "chrono/physics/ChLinkMotorRotationSpeed.h"
@@ -76,11 +89,69 @@ struct State {
     std::vector<Record> records;
     double vmax = 0;
     bool finite = true;
+    std::vector<int> vstar_iters;     // V* Jacobi iterations, one per step
+    std::vector<int> pressure_iters;  // pressure Jacobi iterations, one per step
 
     bool operator==(const State& other) const {
         return records.size() == other.records.size() && std::memcmp(records.data(), other.records.data(), records.size() * sizeof(Record)) == 0;
     }
 };
+
+// Redirect stdout (file descriptor level, so that printf output is included) to a temporary file.
+class StdoutCapture {
+  public:
+    StdoutCapture() {
+        std::fflush(stdout);
+        cout.flush();
+        m_file = std::tmpfile();
+#ifdef _WIN32
+        m_saved = _dup(_fileno(stdout));
+        _dup2(_fileno(m_file), _fileno(stdout));
+#else
+        m_saved = dup(fileno(stdout));
+        dup2(fileno(m_file), fileno(stdout));
+#endif
+    }
+
+    // Restore stdout and return the captured text.
+    std::string Finish() {
+        std::fflush(stdout);
+        cout.flush();
+#ifdef _WIN32
+        _dup2(m_saved, _fileno(stdout));
+        _close(m_saved);
+#else
+        dup2(m_saved, fileno(stdout));
+        close(m_saved);
+#endif
+        std::string text;
+        std::rewind(m_file);
+        char buf[4096];
+        size_t len;
+        while ((len = std::fread(buf, 1, sizeof(buf), m_file)) > 0)
+            text.append(buf, len);
+        std::fclose(m_file);
+        return text;
+    }
+
+  private:
+    FILE* m_file;
+    int m_saved;
+};
+
+// Iteration counts ("#Iter=N") of all verbose output lines that contain the given label.
+std::vector<int> ParseIterations(const std::string& text, const std::string& label) {
+    std::vector<int> iters;
+    size_t pos = 0;
+    while ((pos = text.find(label, pos)) != std::string::npos) {
+        size_t eol = text.find('\n', pos);
+        size_t it = text.find("#Iter=", pos);
+        if (it != std::string::npos && it < eol)
+            iters.push_back(std::stoi(text.substr(it + 6)));
+        pos = (eol == std::string::npos) ? text.size() : eol;
+    }
+    return iters;
+}
 
 State RunCouette(double atol, int check_interval) {
     double density = 0.001;    // g/mm3
@@ -175,8 +246,12 @@ State RunCouette(double atol, int check_interval) {
 
     sysFSI.Initialize();
 
+    // Verbose output only prints; it does not change the computation
+    sysFSI.SetVerbose(true);
+    StdoutCapture capture;
     for (int step = 0; step < num_steps; step++)
         sysFSI.DoStepDynamics(step_size);
+    std::string log = capture.Finish();
 
     auto pos = sysSPH.GetParticlePositions();
     auto vel = sysSPH.GetParticleVelocities();
@@ -191,6 +266,8 @@ State RunCouette(double atol, int check_interval) {
         state.vmax = std::max(state.vmax, vel[i].Length());
     }
     std::sort(state.records.begin(), state.records.end());
+    state.vstar_iters = ParseIterations(log, "V_star_Predictor Equation");
+    state.pressure_iters = ParseIterations(log, "Pressure Poisson Equation");
     return state;
 }
 
@@ -206,6 +283,26 @@ int main(int argc, char* argv[]) {
         for (size_t i = 1; i < intervals.size(); i++) {
             State other = RunCouette(atol, intervals[i]);
             check(other == ref, "check_interval " + std::to_string(intervals[i]) + " matches check_interval 1 bitwise");
+            check(other.vstar_iters == ref.vstar_iters && other.pressure_iters == ref.pressure_iters,
+                  "check_interval " + std::to_string(intervals[i]) + " gives the same iteration counts as check_interval 1");
+        }
+
+        auto& vi = ref.vstar_iters;
+        auto& pi = ref.pressure_iters;
+        cout << "  pressure iterations:";
+        for (int k : pi)
+            cout << " " << k;
+        cout << endl;
+        check(vi.size() == (size_t)num_steps && pi.size() == (size_t)num_steps, "one V* and one pressure solve reported per step");
+        check(std::all_of(vi.begin(), vi.end(), [](int k) { return k >= 3 && k <= max_num_iters; }), "V* iterations within [3, max_num_iters]");
+        if (atol == 0) {
+            check(!pi.empty() && std::all_of(pi.begin(), pi.end(), [](int k) { return k == max_num_iters; }), "every pressure solve runs max_num_iters iterations");
+        } else if (atol > 1) {
+            check(!pi.empty() && std::all_of(pi.begin(), pi.end(), [](int k) { return k == 3; }), "every pressure solve stops after exactly 3 iterations");
+        } else {
+            check(std::all_of(pi.begin(), pi.end(), [](int k) { return k >= 3 && k <= max_num_iters; }), "pressure iterations within [3, max_num_iters]");
+            check(std::any_of(pi.begin(), pi.end(), [&](int k) { return k < max_num_iters && k % intervals[1] != 0 && k % intervals[2] != 0; }),
+                  "some pressure solve stops early between two host checks");
         }
 
         double vbound = 2 * gravity * num_steps * step_size + omega * outer_radius;

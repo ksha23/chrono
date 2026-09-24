@@ -897,8 +897,8 @@ __global__ void Shifting(Real4* sortedPosRad,
 //--------------------------------------------------------------------------------------------------------------------------------
 // Device-side convergence test for the Jacobi solves
 
-#define RESIDUAL_MAX_THREADS 256
-#define RESIDUAL_MAX_BLOCKS 256
+constexpr uint RESIDUAL_MAX_THREADS = 256;  // threads per block of the residual reductions (power of 2)
+constexpr uint RESIDUAL_MAX_BLOCKS = 256;   // maximum number of blocks of the first reduction pass
 
 // Maximum of two residuals; a NaN operand wins, so a NaN residual anywhere gives a NaN maximum.
 __device__ __forceinline__ Real ResidualMax(Real a, Real b) {
@@ -1278,6 +1278,8 @@ void SphForceISPH::SolveJacobi(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD
 
     // Iterations launched after the device-side test is met do nothing, so the result does not depend on how
     // often the host checks; checking every iteration would add a device synchronization per iteration.
+    // Ordering relies on the upload of JacobiStateD above and all four kernels below using the same (default)
+    // stream. If ISPH moves to another stream, all of them must move with it.
     int interval = pH->Verbose_monitoring ? 1 : std::max(pH->LinearSolver_Check_Interval, 1);
 
     for (int k = iteration + 1;; k++) {
