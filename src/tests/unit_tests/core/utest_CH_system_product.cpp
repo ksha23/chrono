@@ -15,6 +15,7 @@
 // The product is compared against the assembled system matrix (BuildSystemMatrix)
 // multiplied by the same vector, with 1 and several threads, for a model with
 // many KRM blocks and constraints on 1, 2, and 3 variable objects.
+// With more than 1 thread, the test also checks that the parallel KRM path was taken.
 //
 // =============================================================================
 
@@ -36,7 +37,8 @@ using namespace chrono;
 class SystemProductTest : public ::testing::Test {
   protected:
     // Build a chain of 3-DOF variables coupled by 6x6 KRM blocks, plus constraints of various types.
-    void Build(int num_vars) {
+    // KRM blocks couple the variables in [krm_begin, krm_end) (all variables if krm_end < 0).
+    void Build(int num_vars, bool with_tuples = true, int krm_begin = 0, int krm_end = -1) {
         std::mt19937 rng(42);
         std::uniform_real_distribution<double> U(-1.0, 1.0);
 
@@ -49,7 +51,9 @@ class SystemProductTest : public ::testing::Test {
         }
 
         // KRM blocks between consecutive variables (these share variables, as FEA elements share nodes)
-        for (int i = 0; i + 1 < num_vars; i++) {
+        if (krm_end < 0)
+            krm_end = num_vars;
+        for (int i = krm_begin; i + 1 < krm_end; i++) {
             auto b = std::make_unique<ChKRMBlock>();
             b->SetVariables({vars[i].get(), vars[i + 1].get()});
             for (int r = 0; r < 6; r++)
@@ -71,7 +75,7 @@ class SystemProductTest : public ::testing::Test {
 
         // Constraints between a 3-variable tuple (e.g., a mesh triangle) and a 1-variable tuple (e.g., a node).
         // The 3 variables are not consecutive, so their offsets differ.
-        for (int i = 0; i + 30 < num_vars; i += 97) {
+        for (int i = 0; with_tuples && i + 30 < num_vars; i += 97) {
             auto ta = new ChConstraintTuple_3vars<3, 3, 3>(vars[i].get(), vars[i + 10].get(), vars[i + 20].get());
             auto tb = new ChConstraintTuple_1vars<3>(vars[i + 30].get());
             for (int k = 0; k < 3; k++) {
@@ -107,6 +111,39 @@ class SystemProductTest : public ::testing::Test {
         Zx = Z * x;
     }
 
+    // Check the matrix-free products against the assembled product for several thread counts. The results must be identical
+    // between repeated calls with a given number of threads. With more than 1 thread, the parallel KRM path sums the KRM
+    // terms in a different order than the serial loop, so a result bitwise equal to the serial one means the parallel path
+    // was not taken (only checked when this test is compiled with OpenMP).
+    void CheckThreads() {
+        ChVectorDynamic<> r_serial;
+
+        for (int nthreads : {1, 2, 3, 4, 8}) {
+            sd.SetNumThreads(nthreads);
+            ASSERT_EQ(sd.GetNumThreads(), nthreads);
+
+            ChVectorDynamic<> r1, r2;
+            sd.SystemProduct(r1, x);
+            sd.SystemProduct(r2, x);
+            EXPECT_LT(RelativeError(r1), 1e-14) << "threads = " << nthreads;
+            EXPECT_TRUE(r1 == r2) << "threads = " << nthreads;
+
+            if (nthreads == 1)
+                r_serial = r1;
+#ifdef _OPENMP
+            else
+                EXPECT_FALSE(r1 == r_serial) << "parallel KRM path not taken, threads = " << nthreads;
+#endif
+
+            // Upper part only: H*v + Cq'*l
+            int nq = sd.CountActiveVariables();
+            int nc = sd.CountActiveConstraints();
+            ChVectorDynamic<> ru;
+            sd.SystemProductUpper(ru, x.head(nq), x.tail(nc), false);
+            EXPECT_LT((ru - Zx.head(nq)).norm() / Zx.head(nq).norm(), 1e-14) << "threads = " << nthreads;
+        }
+    }
+
     // Relative difference between the matrix-free product and the assembled product
     double RelativeError(const ChVectorDynamic<>& r) const { return (r - Zx).norm() / Zx.norm(); }
 
@@ -131,25 +168,21 @@ TEST_F(SystemProductTest, tuple_3vars) {
     EXPECT_LT((r - Zx).cwiseAbs().maxCoeff(), 1e-12 * Zx.cwiseAbs().maxCoeff());
 }
 
-// Large system (enough KRM blocks for the parallel path): the result must match the assembled product for any number
-// of threads, and be identical between repeated calls with a given number of threads.
+// Large system (enough KRM blocks for the parallel path), with 3-variable tuples.
 TEST_F(SystemProductTest, krm_threads) {
     Build(1000);
+    CheckThreads();
+}
 
-    for (int nthreads : {1, 2, 3, 4, 8}) {
-        sd.SetNumThreads(nthreads);
+// Same, without 3-variable tuples, so that only the parallel KRM product is tested.
+TEST_F(SystemProductTest, krm_threads_no_tuples) {
+    Build(1000, false);
+    ASSERT_EQ(tuples.size(), 0);
+    CheckThreads();
+}
 
-        ChVectorDynamic<> r1, r2;
-        sd.SystemProduct(r1, x);
-        sd.SystemProduct(r2, x);
-        EXPECT_LT(RelativeError(r1), 1e-14) << "threads = " << nthreads;
-        EXPECT_TRUE(r1 == r2) << "threads = " << nthreads;
-
-        // Upper part only: H*v + Cq'*l
-        int nq = sd.CountActiveVariables();
-        int nc = sd.CountActiveConstraints();
-        ChVectorDynamic<> ru;
-        sd.SystemProductUpper(ru, x.head(nq), x.tail(nc), false);
-        EXPECT_LT((ru - Zx.head(nq)).norm() / Zx.head(nq).norm(), 1e-14) << "threads = " << nthreads;
-    }
+// KRM blocks on a subset of the variables only: rows outside the range touched by KRM blocks must be correct too.
+TEST_F(SystemProductTest, krm_threads_partial_range) {
+    Build(1500, true, 300, 1300);
+    CheckThreads();
 }

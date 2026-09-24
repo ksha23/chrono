@@ -122,6 +122,10 @@ class ChApi ChSystemDescriptor {
 
     /// Set the number of OpenMP threads used for the KRM part of SystemProduct() and SystemProductUpper().
     /// This is set automatically by ChSystem::SetNumThreads (number of Chrono threads). Default: 1.
+    /// Note that ChSystem::SetSystemDescriptor also overwrites this value with the ChSystem's number of Chrono threads,
+    /// so a custom value must be set after the descriptor is attached to the system.
+    /// The per-thread buffers used by the parallel product have the size of the system vector and are kept between
+    /// calls; they are released when the product falls back to the serial path.
     void SetNumThreads(int num_threads) { m_num_threads = std::max(1, num_threads); }
 
     /// Get the number of OpenMP threads used for the KRM part of SystemProduct() and SystemProductUpper().

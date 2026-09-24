@@ -654,13 +654,25 @@ void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const 
     const int nblocks = (int)m_KRMblocks.size();
     const int nthreads = std::min(m_num_threads, nblocks);
 
+    // Total number of KRM matrix entries, and the range of rows [row_begin, row_end) touched by the KRM blocks
     size_t num_entries = 0;
+    Eigen::Index row_begin = result.size();
+    Eigen::Index row_end = 0;
     if (nthreads > 1) {
-        for (const auto& krm_block : m_KRMblocks)
+        for (const auto& krm_block : m_KRMblocks) {
             num_entries += krm_block->GetMatrix().size();
+            for (unsigned int iv = 0; iv < krm_block->GetNumVariables(); iv++) {
+                const auto var = krm_block->GetVariable(iv);
+                if (var->IsActive()) {
+                    row_begin = std::min(row_begin, (Eigen::Index)var->GetOffset());
+                    row_end = std::max(row_end, (Eigen::Index)(var->GetOffset() + var->GetDOF()));
+                }
+            }
+        }
     }
 
-    if (nthreads <= 1 || num_entries < KRM_PARALLEL_MIN_ENTRIES) {
+    if (nthreads <= 1 || num_entries < KRM_PARALLEL_MIN_ENTRIES || row_end <= row_begin) {
+        m_thread_results.clear();  // release the per-thread buffers if the parallel path is no longer used
         for (const auto& krm_block : m_KRMblocks)
             krm_block->AddMatrixTimesVectorInto(result, x);
         return;
@@ -669,6 +681,8 @@ void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const 
     // KRM blocks share variables, so they cannot write directly into 'result' concurrently.
     // Each thread accumulates a fixed, contiguous range of blocks into its own buffer; the buffers are then summed in
     // thread order. For a given number of threads, the result is therefore deterministic.
+    // Only the rows touched by KRM blocks are cleared and reduced, so the overhead scales with that range and not with
+    // the size of the whole system.
     const Eigen::Index n = result.size();
     if ((int)m_thread_results.size() < nthreads)
         m_thread_results.resize(nthreads);
@@ -680,7 +694,8 @@ void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const 
 
         // Partial products over a contiguous range of blocks
         auto& buffer = m_thread_results[t];
-        buffer.setZero(n);
+        buffer.resize(n);
+        buffer.segment(row_begin, row_end - row_begin).setZero();
         const int b_start = (int)((long long)nblocks * t / nt);
         const int b_end = (int)((long long)nblocks * (t + 1) / nt);
         for (int ib = b_start; ib < b_end; ib++)
@@ -690,7 +705,7 @@ void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const 
 
         // Ordered reduction of the per-thread buffers, parallel over rows
 #pragma omp for schedule(static)
-        for (Eigen::Index i = 0; i < n; i++) {
+        for (Eigen::Index i = row_begin; i < row_end; i++) {
             double sum = 0;
             for (int k = 0; k < nt; k++)
                 sum += m_thread_results[k](i);
