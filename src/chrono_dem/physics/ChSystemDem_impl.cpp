@@ -16,6 +16,7 @@
 #include <vector>
 #include <algorithm>
 #include <climits>
+#include <cstring>
 
 #include "chrono/core/ChVector3.h"
 #include "chrono/utils/ChUtils.h"
@@ -78,6 +79,9 @@ ChSystemDem_impl::ChSystemDem_impl(float sphere_rad, float density, float3 boxDi
       spinning_coeff_s2w_UU(0.0) {
     demErrchk(gpuMallocManaged(&gran_params, sizeof(GranParams), gpuMemAttachGlobal));
     demErrchk(gpuMallocManaged(&sphere_data, sizeof(SphereData), gpuMemAttachGlobal));
+    // Managed allocations are not zeroed (and may reuse memory freed by a previous system)
+    std::memset(gran_params, 0, sizeof(GranParams));
+    std::memset(sphere_data, 0, sizeof(SphereData));
     psi_T = PSI_T_DEFAULT;
     psi_L = PSI_L_DEFAULT;
     psi_R = PSI_R_DEFAULT;
