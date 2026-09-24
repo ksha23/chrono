@@ -17,6 +17,8 @@
 // the generic FSI interface. Both interfaces obtain the nodal forces from the same SPH solver, so the
 // forces applied to the cable nodes and the resulting cable motion must agree. The comparison is made
 // shortly after the soil reaches the cable, before GPU round-off differences between runs grow.
+// A second test adds an ANCF shell plate (a 2-D FEA mesh) downstream of the cable, so that the FSI
+// system contains both 1-D and 2-D meshes.
 //
 // =============================================================================
 
@@ -29,6 +31,7 @@
 #include "chrono/physics/ChSystemSMC.h"
 #include "chrono/solver/ChDirectSolverLS.h"
 #include "chrono/fea/ChBuilderBeam.h"
+#include "chrono/fea/ChElementShellANCF_3423.h"
 #include "chrono/fea/ChLinkNodeFrame.h"
 #include "chrono/fea/ChLinkNodeSlopeFrame.h"
 #include "chrono/fea/ChMesh.h"
@@ -45,7 +48,7 @@ struct CableResult {
     ChVector3d tip_pos;                   // position of the free end of the cable
 };
 
-static CableResult RunCable(bool generic_interface, int num_steps) {
+static CableResult RunCable(bool generic_interface, bool with_plate, int num_steps) {
     const double spacing = 0.02;
     const double Lx = 1.6, Ly = 0.2, Hc = 1.0;  // container
     const double a = 0.6, H = 0.6;              // soil column
@@ -136,6 +139,38 @@ static CableResult RunCable(bool generic_interface, int num_steps) {
     auto fsi_mesh = sysFSI.AddFeaMesh1D(mesh, false);
     EXPECT_TRUE(fsi_mesh != nullptr);
 
+    // Optional ANCF shell plate in the y-z plane downstream of the cable, bottom edge fixed
+    if (with_plate) {
+        auto plate = chrono_types::make_shared<ChMesh>();
+        auto material = chrono_types::make_shared<ChMaterialShellANCF>(8000, 5e8, 0.3);
+        const int nyp = 2, nzp = 2;
+        const double width = 0.12, height = 0.3;
+        for (int k = 0; k <= nzp; k++) {
+            for (int j = 0; j <= nyp; j++) {
+                auto node = chrono_types::make_shared<ChNodeFEAxyzD>(ChVector3d(0.3, j * width / nyp - width / 2, 0.005 + k * height / nzp), ChVector3d(1, 0, 0));
+                node->SetMass(0);
+                node->SetFixed(k == 0);
+                plate->AddNode(node);
+            }
+        }
+        for (int k = 0; k < nzp; k++) {
+            for (int j = 0; j < nyp; j++) {
+                auto element = chrono_types::make_shared<ChElementShellANCF_3423>();
+                element->SetNodes(std::dynamic_pointer_cast<ChNodeFEAxyzD>(plate->GetNode(j + (nyp + 1) * k)),
+                                  std::dynamic_pointer_cast<ChNodeFEAxyzD>(plate->GetNode(j + 1 + (nyp + 1) * k)),
+                                  std::dynamic_pointer_cast<ChNodeFEAxyzD>(plate->GetNode(j + 1 + (nyp + 1) * (k + 1))),
+                                  std::dynamic_pointer_cast<ChNodeFEAxyzD>(plate->GetNode(j + (nyp + 1) * (k + 1))));
+                element->SetDimensions(width / nyp, height / nzp);
+                element->AddLayer(0.02, 0, material);
+                element->SetAlphaDamp(0.05);
+                plate->AddElement(element);
+            }
+        }
+        sysMBS.Add(plate);
+        auto fsi_plate = sysFSI.AddFeaMesh2D(plate, false);
+        EXPECT_TRUE(fsi_plate != nullptr);
+    }
+
     sysFSI.Initialize();
     for (int step = 0; step < num_steps; step++)
         sysFSI.DoStepDynamics(dt);
@@ -149,11 +184,11 @@ static CableResult RunCable(bool generic_interface, int num_steps) {
     return r;
 }
 
-TEST(SPH_generic_interface, mesh1D_forces) {
+static void CompareInterfaces(bool with_plate) {
     // The soil front reaches the cable at about t = 0.31 s; compare at t = 0.34 s
     const int num_steps = 1360;
-    auto custom = RunCable(false, num_steps);
-    auto generic = RunCable(true, num_steps);
+    auto custom = RunCable(false, with_plate, num_steps);
+    auto generic = RunCable(true, with_plate, num_steps);
 
     ASSERT_EQ(custom.node_forces.size(), generic.node_forces.size());
 
@@ -181,4 +216,12 @@ TEST(SPH_generic_interface, mesh1D_forces) {
     // Both interfaces apply the same fluid forces
     EXPECT_LE(max_diff, 1e-3 * max_force);
     EXPECT_LE((custom.tip_pos - generic.tip_pos).Length(), 1e-5);
+}
+
+TEST(SPH_generic_interface, mesh1D_forces) {
+    CompareInterfaces(false);
+}
+
+TEST(SPH_generic_interface, mesh1D_forces_with_mesh2D) {
+    CompareInterfaces(true);
 }
