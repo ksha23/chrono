@@ -46,7 +46,15 @@ float SphereMass() {
     return 4.f / 3.f * (float)CH_PI * radius * radius * radius * density;
 }
 
+// Choose the user-defined contact model explicitly: at the base commit the flag is read from uninitialized managed
+// memory, which can hold a stale "true" from an earlier system in the same process (then the time unit is NaN and
+// AdvanceSimulation does not advance). The checkpoint does not store the flag, so restored systems need it too.
+void UseUserDefinedModel(ChSystemDem& sys) {
+    sys.UseMaterialBasedModel(false);
+}
+
 void SetupSystem(ChSystemDem& sys, CHDEM_TIME_INTEGRATOR integrator) {
+    UseUserDefinedModel(sys);
     sys.SetGravitationalAcceleration(ChVector3f(0, 0, -g));
     sys.SetKn_SPH2SPH(5e7f);
     sys.SetKn_SPH2WALL(5e7f);
@@ -111,8 +119,10 @@ unsigned int SettleBed(ChSystemDem& sys, size_t& plane) {
     sys.SetParticles(points);
 
     sys.Initialize();
+    double elapsed = 0;
     for (int frame = 0; frame < 10; frame++)
-        sys.AdvanceSimulation(0.05f);
+        elapsed += sys.AdvanceSimulation(0.05f);
+    EXPECT_NEAR(elapsed, 0.5, 1e-3);
     return (unsigned int)points.size();
 }
 
@@ -208,6 +218,7 @@ void RunSettledBed(CHDEM_TIME_INTEGRATOR integrator, const std::string& tag) {
     {
         ChSystemDem restored(cp1);
         restored.SetVerbosity(CHDEM_VERBOSITY::QUIET);
+        UseUserDefinedModel(restored);
         restored.Initialize();
         EXPECT_EQ(restored.GetNumParticles(), n) << tag;
         EXPECT_EQ(restored.GetNumContacts(), nc) << tag;
@@ -252,6 +263,7 @@ void RunSettledBed(CHDEM_TIME_INTEGRATOR integrator, const std::string& tag) {
     {
         ChSystemDem restored(cp1);
         restored.SetVerbosity(CHDEM_VERBOSITY::QUIET);
+        UseUserDefinedModel(restored);
         restored.SetDefragmentOnInitialize(true);
         restored.Initialize();
         EXPECT_EQ(restored.GetNumContacts(), nc) << tag;
