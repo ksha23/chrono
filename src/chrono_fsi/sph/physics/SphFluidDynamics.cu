@@ -350,7 +350,7 @@ __device__ void PositionEulerStep(Real dT, const Real3& vel, Real4& pos) {
 
 __device__ void PositionMidpointStep(Real dT, const Real3& vel, const Real3& acc, Real4& pos) {
     Real3 p = mR3(pos);
-    p += dT * vel + 0.5 * dT * dT * acc;
+    p += dT * vel + Real(0.5) * dT * dT * acc;
     pos = mR4(p, pos.w);
 }
 
@@ -389,8 +389,8 @@ __device__ void TauEulerStep(Real dT,
                      2 * (square(tau_offdiag.x) + square(tau_offdiag.y) + square(tau_offdiag.z));               //
         Real tau_tr = square(new_tau_diag.x) + square(new_tau_diag.y) + square(new_tau_diag.z) +                //
                       2 * (square(new_tau_offdiag.x) + square(new_tau_offdiag.y) + square(new_tau_offdiag.z));  //
-        tau_n = sqrt(0.5 * tau_n);
-        tau_tr = sqrt(0.5 * tau_tr);
+        tau_n = sqrt(Real(0.5) * tau_n);
+        tau_tr = sqrt(Real(0.5) * tau_tr);
         Real Chi = abs(tau_tr - tau_n) * paramsD.INV_G_shear / dT;
 
         // Should use the positive magnitude according to "A constitutive law for dense granular flows" Nature 2006
@@ -413,7 +413,7 @@ __device__ void TauEulerStep(Real dT,
         if (p_tr < Real(0))
             p_tr = Real(0);
 
-        Real I = Chi * dia * sqrt(paramsD.rho0 / (p_tr + 1.0e-9));
+        Real I = Chi * dia * sqrt(paramsD.rho0 / (p_tr + Real(1.0e-9)));
 
         Real coh = paramsD.Coh_coeff;
         // Real Chi_cri = 0.1;
@@ -424,7 +424,7 @@ __device__ void TauEulerStep(Real dT,
         //     coh = 0.0;
         // }
 
-        Real mu = mu_s + (mu_2 - mu_s) * (I + 1.0e-9) / (I0 + I + 1.0e-9);
+        Real mu = mu_s + (mu_2 - mu_s) * (I + Real(1.0e-9)) / (I0 + I + Real(1.0e-9));
         // Real G0 = paramsD.G_shear;
         // Real alpha = xi*G0*I0*(dT)*sqrt(p_tr);
         // Real B0 = s_2 + tau_tr + alpha;
@@ -439,7 +439,7 @@ __device__ void TauEulerStep(Real dT,
         // should use tau_max instead of s_0 according to
         // "A constitutive law for dense granular flows" Nature 2006
         if (tau_tr > tau_max) {
-            Real coeff = tau_max / (tau_tr + 1e-9);
+            Real coeff = tau_max / (tau_tr + Real(1e-9));
             new_tau_diag *= coeff;
             new_tau_offdiag *= coeff;
         }
@@ -479,7 +479,7 @@ __device__ void TauEulerStep(Real dT,
         // Clamp K
         Real K_n = fmin(fmax(K_cand, Real(0.1) * paramsD.K_bulk), Real(1.0) * paramsD.K_bulk);
         // Shear
-        Real G_cand = (3.0 * K_n * (1.0 - 2.0 * paramsD.Nu_poisson)) / (2.0 * (1.0 + paramsD.Nu_poisson));
+        Real G_cand = (3 * K_n * (1 - 2 * paramsD.Nu_poisson)) / (2 * (1 + paramsD.Nu_poisson));
         Real G_n = fmin(fmax(G_cand, Real(0.1) * paramsD.G_shear), Real(1.0) * paramsD.G_shear);
         // Trial stress using convention N = n + 1
         Real3 sig_diag_N_tr = tau_diag + dT * deriv_tau_diag;
@@ -492,8 +492,8 @@ __device__ void TauEulerStep(Real dT,
         // Computing trial von misses stress (q_N_tr)
         Real inner_product = square(dev_diag_N_tr.x) + square(dev_diag_N_tr.y) + square(dev_diag_N_tr.z) +
                              2 * (square(dev_offdiag_N_tr.x) + square(dev_offdiag_N_tr.y) + square(dev_offdiag_N_tr.z));
-        Real J_2 = inner_product * 0.5;
-        Real q_N_tr = sqrt(3.0 * J_2);
+        Real J_2 = inner_product * Real(0.5);
+        Real q_N_tr = sqrt(3 * J_2);
 
         // Computing yield function (f_N)
         Real f_N = square(q_N_tr) + square(mcc_M) * p_N_tr * (p_N_tr - p_c);

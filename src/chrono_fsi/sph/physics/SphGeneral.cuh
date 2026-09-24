@@ -154,7 +154,7 @@ inline __host__ __device__ Real W3h_QuinticSpline(Real d, Real invh) {
 
 inline __host__ __device__ Real3 GradW3h_QuinticSpline(Real3 d, Real invh) {
     Real q = length(d) * invh;
-    if (fabs(q) < 1e-10)
+    if (fabs(q) < Real(1e-10))
         return mR3(0);
 
     // beta = -5 * alpha / h^2
@@ -187,7 +187,7 @@ inline __host__ __device__ Real W3h_Wendland(Real d, Real invh) {
 
 inline __host__ __device__ Real3 GradW3h_Wendland(Real3 d, Real invh) {
     Real q = length(d) * invh;
-    if (fabs(q) < 1e-10)
+    if (fabs(q) < Real(1e-10))
         return mR3(0);
 
     if (q < 2) {
@@ -258,8 +258,8 @@ inline __device__ Real InvEos(Real pw, EosType eos_type) {
         case EosType::TAIT: {
             Real gama = 7;
             Real B = paramsD.rho0 * paramsD.Cs * paramsD.Cs / gama;
-            Real powerComp = (pw - paramsD.base_pressure) / B + 1.0;
-            Real rho = (powerComp > 0) ? paramsD.rho0 * pow(powerComp, 1.0 / gama) : -paramsD.rho0 * pow(fabs(powerComp), 1.0 / gama);
+            Real powerComp = (pw - paramsD.base_pressure) / B + 1;
+            Real rho = (powerComp > 0) ? paramsD.rho0 * pow(powerComp, 1 / gama) : -paramsD.rho0 * pow(fabs(powerComp), 1 / gama);
             return rho;
         }
 
