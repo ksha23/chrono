@@ -1393,11 +1393,15 @@ static __global__ void updateFrictionData(unsigned int frictionHistoryMapSize, C
         //        contact_history[contact_id].x, contact_history[contact_id].y, contact_history[contact_id].z);
         // if the contact is not active, reset it
         if (sphere_data->contact_active_map[offsetInFrictionMap] == false) {
-            sphere_data->contact_partners_map[offsetInFrictionMap] = NULL_CHDEM_ID;
-            if (gran_params->friction_mode == chrono::dem::CHDEM_FRICTION_MODE::MULTI_STEP) {
-                constexpr float3 null_history = {0.f, 0.f, 0.f};
-                sphere_data->contact_history_map[offsetInFrictionMap] = null_history;
-                sphere_data->contact_duration[offsetInFrictionMap] = 0.f;
+            // a slot that is already free was zeroed when it was released, and nothing writes to a free slot,
+            // so only reset the slots released this step (most slots are free, this avoids rewriting them)
+            if (sphere_data->contact_partners_map[offsetInFrictionMap] != NULL_CHDEM_ID) {
+                sphere_data->contact_partners_map[offsetInFrictionMap] = NULL_CHDEM_ID;
+                if (gran_params->friction_mode == chrono::dem::CHDEM_FRICTION_MODE::MULTI_STEP) {
+                    constexpr float3 null_history = {0.f, 0.f, 0.f};
+                    sphere_data->contact_history_map[offsetInFrictionMap] = null_history;
+                    sphere_data->contact_duration[offsetInFrictionMap] = 0.f;
+                }
             }
         } else {
             // otherwise reset the active bit for the next step
