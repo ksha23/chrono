@@ -1276,6 +1276,36 @@ inline __device__ float integrateChung_pos(float stepsize_SU, float vel_old, flo
     return stepsize_SU * (vel_old + stepsize_SU * (acc * beta + acc_old * beta_hat));
 }
 
+/// Integrate the angular acceleration of one sphere. Called only when friction is on.
+inline __device__ void integrateAngVel(const float stepsize_SU,
+                                       ChSystemDem_impl::GranSphereDataPtr sphere_data,
+                                       unsigned int mySphereID,
+                                       ChSystemDem_impl::GranParamsPtr gran_params) {
+    // Write back velocity updates
+    float omega_update_X = 0.f;
+    float omega_update_Y = 0.f;
+    float omega_update_Z = 0.f;
+
+    // no divergence, same for every thread in block
+    if (gran_params->time_integrator != CHDEM_TIME_INTEGRATOR::CHUNG) {
+        // EXTENDED_TAYLOR:      has the same signature as forward Euler vels
+        // CENTERED_DIFFERENCE:  has the same signature as forward Euler vels
+        // FORWARD_EULER:
+        // tau = I alpha => alpha = tau / I; we already computed these alphas
+        omega_update_X = integrateForwardEuler(stepsize_SU, sphere_data->sphere_ang_acc_X[mySphereID]);
+        omega_update_Y = integrateForwardEuler(stepsize_SU, sphere_data->sphere_ang_acc_Y[mySphereID]);
+        omega_update_Z = integrateForwardEuler(stepsize_SU, sphere_data->sphere_ang_acc_Z[mySphereID]);
+    } else {
+        omega_update_X = integrateChung_vel(stepsize_SU, sphere_data->sphere_ang_acc_X[mySphereID], sphere_data->sphere_ang_acc_X_old[mySphereID]);
+        omega_update_Y = integrateChung_vel(stepsize_SU, sphere_data->sphere_ang_acc_Y[mySphereID], sphere_data->sphere_ang_acc_Y_old[mySphereID]);
+        omega_update_Z = integrateChung_vel(stepsize_SU, sphere_data->sphere_ang_acc_Z[mySphereID], sphere_data->sphere_ang_acc_Z_old[mySphereID]);
+    }
+
+    sphere_data->sphere_Omega_X[mySphereID] += omega_update_X;
+    sphere_data->sphere_Omega_Y[mySphereID] += omega_update_Y;
+    sphere_data->sphere_Omega_Z[mySphereID] += omega_update_Z;
+}
+
 /// Numerically integrates force to velocity and velocity to position
 static __global__ void integrateSpheres(const float stepsize_SU,
                                         ChSystemDem_impl::GranSphereDataPtr sphere_data,
@@ -1377,6 +1407,10 @@ static __global__ void integrateSpheres(const float stepsize_SU,
         int64_t3 sphPos_global = convertPosLocalToGlobal(sphere_data->sphere_owner_SDs[mySphereID], sphere_pos_local, gran_params);
 
         findNewLocalCoords(sphere_data, mySphereID, sphPos_global.x, sphPos_global.y, sphPos_global.z, gran_params);
+
+        // Integrate angular accelerations (only with friction)
+        if (gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS)
+            integrateAngVel(stepsize_SU, sphere_data, mySphereID, gran_params);
     }
 }
 
@@ -1404,41 +1438,6 @@ static __global__ void updateFrictionData(unsigned int frictionHistoryMapSize, C
             sphere_data->contact_active_map[offsetInFrictionMap] = false;
         }
     }
-}
-
-/**
- * Integrate angular accelerations. Called only when friction is on
- */
-static __global__ void updateAngVels(const float stepsize_SU, ChSystemDem_impl::GranSphereDataPtr sphere_data, unsigned int nSpheres, ChSystemDem_impl::GranParamsPtr gran_params) {
-    // Figure which sphereID this thread handles. We work with a 1D block structure and a 1D grid structure
-    unsigned int mySphereID = threadIdx.x + blockIdx.x * blockDim.x;
-
-    if (mySphereID >= nSpheres || sphere_data->sphere_fixed[mySphereID])
-        return;
-
-    // Write back velocity updates
-    float omega_update_X = 0.f;
-    float omega_update_Y = 0.f;
-    float omega_update_Z = 0.f;
-
-    // no divergence, same for every thread in block
-    if (gran_params->time_integrator != CHDEM_TIME_INTEGRATOR::CHUNG) {
-        // EXTENDED_TAYLOR:      has the same signature as forward Euler vels
-        // CENTERED_DIFFERENCE:  has the same signature as forward Euler vels
-        // FORWARD_EULER:
-        // tau = I alpha => alpha = tau / I; we already computed these alphas
-        omega_update_X = integrateForwardEuler(stepsize_SU, sphere_data->sphere_ang_acc_X[mySphereID]);
-        omega_update_Y = integrateForwardEuler(stepsize_SU, sphere_data->sphere_ang_acc_Y[mySphereID]);
-        omega_update_Z = integrateForwardEuler(stepsize_SU, sphere_data->sphere_ang_acc_Z[mySphereID]);
-    } else {
-        omega_update_X = integrateChung_vel(stepsize_SU, sphere_data->sphere_ang_acc_X[mySphereID], sphere_data->sphere_ang_acc_X_old[mySphereID]);
-        omega_update_Y = integrateChung_vel(stepsize_SU, sphere_data->sphere_ang_acc_Y[mySphereID], sphere_data->sphere_ang_acc_Y_old[mySphereID]);
-        omega_update_Z = integrateChung_vel(stepsize_SU, sphere_data->sphere_ang_acc_Z[mySphereID], sphere_data->sphere_ang_acc_Z_old[mySphereID]);
-    }
-
-    sphere_data->sphere_Omega_X[mySphereID] += omega_update_X;
-    sphere_data->sphere_Omega_Y[mySphereID] += omega_update_Y;
-    sphere_data->sphere_Omega_Z[mySphereID] += omega_update_Z;
 }
 
 /// @} dem_gpu
