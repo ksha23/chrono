@@ -241,6 +241,17 @@ struct Counters {
 
 // -----------------------------------------------------------------------------
 
+/// Indices of the per-step error flags (FsiDataManager::errorFlags).
+enum ErrorFlagIndex : int {
+    ERRFLAG_APPLY_BC,  ///< boundary condition kernels (CrmApplyBC, CfdApplyBC)
+    ERRFLAG_CALC_RHS,  ///< right-hand side kernels (CrmCalcRHS_D, CfdCalcRHS_D)
+    ERRFLAG_SHIFTING,  ///< particle shifting kernel (Calc_Shifting_D)
+    ERRFLAG_RHEOLOGY,  ///< non-finite stress state after the CRM rheology update (TauEulerStep)
+    ERRFLAG_POS_NAN,   ///< non-finite particle position after an integration step
+    ERRFLAG_RHO_NAN,   ///< non-finite particle density or pressure after an integration step
+    ERRFLAG_NUM
+};
+
 /// Data manager for the SPH-based FSI system.
 struct FsiDataManager {
   public:
@@ -438,6 +449,8 @@ struct FsiDataManager {
 
     thrust::device_vector<Real> courantViscousTimeStepD;  ///< Courant time step for viscosity
     thrust::device_vector<Real> accelerationTimeStepD;    ///< Courant time step for acceleration - unsorted
+
+    std::unique_ptr<GpuErrorFlags> errorFlags;  ///< error flags set by device kernels (see ErrorFlagIndex)
 
   private:
     // Memory management parameters

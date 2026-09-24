@@ -996,12 +996,12 @@ __global__ void CfdHolmesBC_D(const uint* numNeighborsPerPart,
 }
 
 void SphForceWCSPH::CrmApplyBC(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD) {
-    gpuResetErrorFlag(m_errflagD);
+    bool* error_flagD = m_data_mgr.errorFlags->Flag(ERRFLAG_APPLY_BC);
 
     if (m_data_mgr.paramsH->boundary_method == BoundaryMethod::ADAMI) {
         CrmAdamiBC_D<<<numBlocks, numThreads>>>(U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), mR4CAST(sortedSphMarkersD->posRadD), numActive,
                                                 mR3CAST(m_data_mgr.bceAcc), mR4CAST(sortedSphMarkersD->rhoPresMuD), mR3CAST(sortedSphMarkersD->velMasD),
-                                                mR3CAST(sortedSphMarkersD->tauXxYyZzD), mR3CAST(sortedSphMarkersD->tauXyXzYzD), m_errflagD);
+                                                mR3CAST(sortedSphMarkersD->tauXxYyZzD), mR3CAST(sortedSphMarkersD->tauXyXzYzD), error_flagD);
     } else {
         thrust::device_vector<Real2> sortedKernelSupport(numActive);
         // Calculate the kernel support of each particle
@@ -1010,19 +1010,19 @@ void SphForceWCSPH::CrmApplyBC(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD
         // https://onlinelibrary-wiley-com.ezproxy.library.wisc.edu/doi/pdfdirect/10.1002/nag.898
         CrmHolmesBC_D<<<numBlocks, numThreads>>>(U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), mR4CAST(sortedSphMarkersD->posRadD),
                                                  mR2CAST(sortedKernelSupport), numActive, mR3CAST(m_data_mgr.bceAcc), mR4CAST(sortedSphMarkersD->rhoPresMuD),
-                                                 mR3CAST(sortedSphMarkersD->velMasD), mR3CAST(sortedSphMarkersD->tauXxYyZzD), mR3CAST(sortedSphMarkersD->tauXyXzYzD), m_errflagD);
+                                                 mR3CAST(sortedSphMarkersD->velMasD), mR3CAST(sortedSphMarkersD->tauXxYyZzD), mR3CAST(sortedSphMarkersD->tauXyXzYzD), error_flagD);
     }
 
     if (m_check_errors)
-        gpuCheckErrorFlag(m_errflagD, "CrmApplyBC");
+        gpuCheckLaunchError();
 }
 
 void SphForceWCSPH::CfdApplyBC(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD) {
-    gpuResetErrorFlag(m_errflagD);
+    bool* error_flagD = m_data_mgr.errorFlags->Flag(ERRFLAG_APPLY_BC);
 
     if (m_data_mgr.paramsH->boundary_method == BoundaryMethod::ADAMI) {
         CfdAdamiBC_D<<<numBlocks, numThreads>>>(U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), mR4CAST(sortedSphMarkersD->posRadD), numActive,
-                                                mR3CAST(m_data_mgr.bceAcc), mR4CAST(sortedSphMarkersD->rhoPresMuD), mR3CAST(sortedSphMarkersD->velMasD), m_errflagD);
+                                                mR3CAST(m_data_mgr.bceAcc), mR4CAST(sortedSphMarkersD->rhoPresMuD), mR3CAST(sortedSphMarkersD->velMasD), error_flagD);
     } else {
         thrust::device_vector<Real2> sortedKernelSupport(m_data_mgr.countersH->numAllMarkers);
         // Calculate the kernel support of each particle
@@ -1031,11 +1031,11 @@ void SphForceWCSPH::CfdApplyBC(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD
         // https://onlinelibrary-wiley-com.ezproxy.library.wisc.edu/doi/pdfdirect/10.1002/nag.898
         CfdHolmesBC_D<<<numBlocks, numThreads>>>(U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), mR4CAST(sortedSphMarkersD->posRadD),
                                                  mR2CAST(sortedKernelSupport), numActive, mR3CAST(m_data_mgr.bceAcc), mR4CAST(sortedSphMarkersD->rhoPresMuD),
-                                                 mR3CAST(sortedSphMarkersD->velMasD), m_errflagD);
+                                                 mR3CAST(sortedSphMarkersD->velMasD), error_flagD);
     }
 
     if (m_check_errors)
-        gpuCheckErrorFlag(m_errflagD, "CfdApplyBC");
+        gpuCheckLaunchError();
 }
 
 // -----------------------------------------------------------------------------
@@ -1353,18 +1353,17 @@ __global__ void CrmCalcRHS_D(const Real4* __restrict__ sortedPosRad,
 }
 
 void SphForceWCSPH::CrmCalcRHS(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD) {
-    gpuResetErrorFlag(m_errflagD);
+    bool* error_flagD = m_data_mgr.errorFlags->Flag(ERRFLAG_CALC_RHS);
 
     computeGridSize(numActive, 256, numBlocks, numThreads);
     CrmCalcRHS_D<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
                                             mR3CAST(sortedSphMarkersD->tauXxYyZzD), mR3CAST(sortedSphMarkersD->tauXyXzYzD), U1CAST(m_data_mgr.numNeighborsPerPart),
                                             U1CAST(m_data_mgr.neighborList), numActive, mR4CAST(m_data_mgr.derivVelRhoD), mR3CAST(m_data_mgr.derivTauXxYyZzD),
                                             mR3CAST(m_data_mgr.derivTauXyXzYzD), mR3CAST(sortedSphMarkersD->pcEvSvD), U1CAST(m_data_mgr.freeSurfaceIdD),
-                                            R1CAST(m_data_mgr.posDivergenceD), R1CAST(m_data_mgr.courantViscousTimeStepD),
-                                            R1CAST(m_data_mgr.accelerationTimeStepD), m_errflagD);
+                                            R1CAST(m_data_mgr.posDivergenceD), R1CAST(m_data_mgr.courantViscousTimeStepD), R1CAST(m_data_mgr.accelerationTimeStepD), error_flagD);
 
     if (m_check_errors)
-        gpuCheckErrorFlag(m_errflagD, "CrmCalcRHS_D");
+        gpuCheckLaunchError();
 }
 
 // -----------------------------------------------------------------------------
@@ -1595,16 +1594,16 @@ __global__ void CfdCalcRHS_D(Real4* __restrict__ sortedDerivVelRho,
 }
 
 void SphForceWCSPH::CfdCalcRHS(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD) {
-    gpuResetErrorFlag(m_errflagD);
+    bool* error_flagD = m_data_mgr.errorFlags->Flag(ERRFLAG_CALC_RHS);
 
     computeGridSize(numActive, 256, numBlocks, numThreads);
     CfdCalcRHS_D<<<numBlocks, numThreads>>>(mR4CAST(m_data_mgr.derivVelRhoD), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD),
                                             mR4CAST(sortedSphMarkersD->rhoPresMuD), U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
                                             U1CAST(m_data_mgr.freeSurfaceIdD), R1CAST(m_data_mgr.posDivergenceD), R1CAST(m_data_mgr.courantViscousTimeStepD),
-                                            R1CAST(m_data_mgr.accelerationTimeStepD), m_errflagD);
+                                            R1CAST(m_data_mgr.accelerationTimeStepD), error_flagD);
 
     if (m_check_errors)
-        gpuCheckErrorFlag(m_errflagD, "CfdCalcRHS_D");
+        gpuCheckLaunchError();
 }
 
 // -----------------------------------------------------------------------------
@@ -1791,7 +1790,7 @@ __global__ void Calc_Shifting_D(Real3* vel_XSPH_Sorted_D,
 }
 
 void SphForceWCSPH::CalculateShifting(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD) {
-    gpuResetErrorFlag(m_errflagD);
+    bool* error_flagD = m_data_mgr.errorFlags->Flag(ERRFLAG_SHIFTING);
 
 #ifdef CHRONO_SPH_USE_DOUBLE
     uint blockSize = 256;
@@ -1804,39 +1803,34 @@ void SphForceWCSPH::CalculateShifting(std::shared_ptr<SphMarkerDataD> sortedSphM
 
     switch (m_data_mgr.paramsH->shifting_method) {
         case ShiftingMethod::XSPH:
-            Calc_Shifting_D<ShiftingMethod::XSPH><<<numBlocks, numThreads>>>(mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD),
-                                                                             mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
-                                                                             U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
-                                                                             R1CAST(m_data_mgr.posDivergenceD), m_errflagD);
+            Calc_Shifting_D<ShiftingMethod::XSPH><<<numBlocks, numThreads>>>(
+                mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
+                U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive, R1CAST(m_data_mgr.posDivergenceD), error_flagD);
             break;
         case ShiftingMethod::PPST:
-            Calc_Shifting_D<ShiftingMethod::PPST><<<numBlocks, numThreads>>>(mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD),
-                                                                             mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
-                                                                             U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
-                                                                             R1CAST(m_data_mgr.posDivergenceD), m_errflagD);
+            Calc_Shifting_D<ShiftingMethod::PPST><<<numBlocks, numThreads>>>(
+                mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
+                U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive, R1CAST(m_data_mgr.posDivergenceD), error_flagD);
             break;
         case ShiftingMethod::PPST_XSPH:
-            Calc_Shifting_D<ShiftingMethod::PPST_XSPH><<<numBlocks, numThreads>>>(mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD),
-                                                                                  mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
-                                                                                  U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
-                                                                                  R1CAST(m_data_mgr.posDivergenceD), m_errflagD);
+            Calc_Shifting_D<ShiftingMethod::PPST_XSPH><<<numBlocks, numThreads>>>(
+                mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
+                U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive, R1CAST(m_data_mgr.posDivergenceD), error_flagD);
             break;
         case ShiftingMethod::DIFFUSION:
-            Calc_Shifting_D<ShiftingMethod::DIFFUSION><<<numBlocks, numThreads>>>(mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD),
-                                                                                  mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
-                                                                                  U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
-                                                                                  R1CAST(m_data_mgr.posDivergenceD), m_errflagD);
+            Calc_Shifting_D<ShiftingMethod::DIFFUSION><<<numBlocks, numThreads>>>(
+                mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
+                U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive, R1CAST(m_data_mgr.posDivergenceD), error_flagD);
             break;
         case ShiftingMethod::DIFFUSION_XSPH:
-            Calc_Shifting_D<ShiftingMethod::DIFFUSION_XSPH>
-                <<<numBlocks, numThreads>>>(mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD),
-                                            mR4CAST(sortedSphMarkersD->rhoPresMuD), U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive,
-                                            R1CAST(m_data_mgr.posDivergenceD), m_errflagD);
+            Calc_Shifting_D<ShiftingMethod::DIFFUSION_XSPH><<<numBlocks, numThreads>>>(
+                mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(sortedSphMarkersD->posRadD), mR3CAST(sortedSphMarkersD->velMasD), mR4CAST(sortedSphMarkersD->rhoPresMuD),
+                U1CAST(m_data_mgr.numNeighborsPerPart), U1CAST(m_data_mgr.neighborList), numActive, R1CAST(m_data_mgr.posDivergenceD), error_flagD);
             break;
     }
 
     if (m_check_errors)
-        gpuCheckErrorFlag(m_errflagD, "Calc_Shifting_D");
+        gpuCheckLaunchError();
 }
 
 }  // namespace sph

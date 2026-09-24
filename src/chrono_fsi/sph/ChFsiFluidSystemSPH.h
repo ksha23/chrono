@@ -154,6 +154,8 @@ class CH_FSI_API ChFsiFluidSystemSPH : public ChFsiFluidSystem {
     ~ChFsiFluidSystemSPH();
 
     /// Enable/disable GPU error checks (default: enabled).
+    /// Errors flagged by the solver kernels (non-finite particle state, failed boundary condition, rheology
+    /// failure) are collected over a step and reported, by throwing, at the beginning of the next step.
     void EnableGPUErrorCheck(bool val) { m_check_errors = val; }
 
     /// Set initial spacing.

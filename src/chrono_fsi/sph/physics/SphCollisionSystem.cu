@@ -385,7 +385,7 @@ void SphCollisionSystem::ArrangeData(std::shared_ptr<SphMarkerDataD> sphMarkersD
         mR3CAST(sortedSphMarkersD->tauXxYyZzD), mR3CAST(sortedSphMarkersD->tauXyXzYzD), mR3CAST(sortedSphMarkersD->pcEvSvD), INT_32CAST(m_data_mgr.activityIdentifierSortedD),
         mR4CAST(m_sphMarkersD->posRadD), mR3CAST(m_sphMarkersD->velMasD), mR4CAST(m_sphMarkersD->rhoPresMuD), mR3CAST(m_sphMarkersD->tauXxYyZzD),
         mR3CAST(m_sphMarkersD->tauXyXzYzD), mR3CAST(m_sphMarkersD->pcEvSvD), INT_32CAST(m_data_mgr.activityIdentifierOriginalD), (uint)m_data_mgr.countersH->numExtendedParticles);
-    gpuCheckError();
+    gpuCheckLaunchError();
 }
 
 void SphCollisionSystem::NeighborSearch(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD) {

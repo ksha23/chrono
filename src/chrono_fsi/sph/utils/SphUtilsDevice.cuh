@@ -20,6 +20,8 @@
 #define CH_SPH_UTILS_DEVICE_H
 
 #include <iostream>
+#include <string>
+#include <vector>
 
 #include "chrono/gpu/ChGpuRuntime.h"
 
@@ -109,12 +111,13 @@ namespace sph {
         }                                                                               \
     }
 
-#define gpuResetErrorFlag(error_flag_D)                                                              \
-    {                                                                                                \
-        bool error_flag_H = false;                                                                   \
-        gpuError err_ = gpuMemcpy(error_flag_D, &error_flag_H, sizeof(bool), gpuMemcpyHostToDevice); \
-        if (err_ != gpuSuccess)                                                                      \
-            gpuThrowError(gpuGetErrorString(err_));                                                  \
+// Clear the flag on the default stream, ordered before the kernels that set it. The asynchronous memset
+// does not block the host (a synchronous copy from pageable host memory would).
+#define gpuResetErrorFlag(error_flag_D)                                   \
+    {                                                                     \
+        gpuError err_ = gpuMemsetAsync(error_flag_D, 0, sizeof(bool), 0); \
+        if (err_ != gpuSuccess)                                           \
+            gpuThrowError(gpuGetErrorString(err_));                       \
     }
 
 #define gpuCheckErrorFlag(error_flag_D, kernel_name)                                                         \
@@ -161,6 +164,19 @@ namespace sph {
         throw std::runtime_error(buffer);                                                 \
     }
 
+// Check for a kernel launch error without synchronizing with the device. Errors raised while a kernel
+// executes are reported by the next synchronizing call (see GpuErrorFlags::Check).
+#define gpuCheckLaunchError()                                                                              \
+    {                                                                                                      \
+        gpuError e = gpuGetLastError();                                                                    \
+        if (e != gpuSuccess) {                                                                             \
+            char buffer[256];                                                                              \
+            sprintf(buffer, "GPU failure in %s:%d Message: %s", __FILE__, __LINE__, gpuGetErrorString(e)); \
+            std::cerr << buffer << std::endl;                                                              \
+            throw std::runtime_error(buffer);                                                              \
+        }                                                                                                  \
+    }
+
 // ----------------------------------------------------------------------------
 
 /// Compute number of blocks and threads for calculation on GPU.
@@ -172,6 +188,42 @@ void computeGridSize(uint n,           ///< total number of elements
 );
 
 // ----------------------------------------------------------------------------
+
+/// Set of error flags raised by device kernels and checked without a per-kernel host-device synchronization.
+/// Each flag is one byte of device memory that kernels set to true. Reset clears all flags and Record queues
+/// a copy of them into pinned host memory, both asynchronously on the default stream. Check waits for the
+/// copy queued by the most recent Record (normally complete long before) and throws if any flag was set or
+/// if the device reported an error. A failure is thus reported at the first Check after the Record that
+/// follows the failing kernel, instead of immediately after the kernel.
+class GpuErrorFlags {
+  public:
+    /// Create a set of flags, one per name. The names are used in the exception messages.
+    GpuErrorFlags(const std::vector<std::string>& names);
+    ~GpuErrorFlags();
+
+    GpuErrorFlags(const GpuErrorFlags&) = delete;
+    GpuErrorFlags& operator=(const GpuErrorFlags&) = delete;
+
+    /// Return the device address of the flag with the given index.
+    bool* Flag(int i) const { return m_flagsD + i; }
+
+    /// Clear all flags (asynchronous).
+    void Reset();
+
+    /// Queue a copy of the flags to the host (asynchronous).
+    void Record();
+
+    /// Wait for the copy queued by the last Record and throw if a flag was set or the device reported an error.
+    /// Does nothing if Record was not called since the last Check.
+    void Check();
+
+  private:
+    std::vector<std::string> m_names;
+    bool* m_flagsD;
+    bool* m_flagsH;
+    gpuEvent m_event;
+    bool m_recorded;
+};
 
 /// Time recorder for GPU events.
 /// This utility class encapsulates a simple timer for recording the time between a start and stop event.

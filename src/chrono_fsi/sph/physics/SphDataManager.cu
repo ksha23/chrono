@@ -181,6 +181,15 @@ void ProximityDataD::resize(size_t s) {
 FsiDataManager::FsiDataManager(std::shared_ptr<ChFsiParamsSPH> params) : paramsH(params), has_ad(false) {
     countersH = chrono_types::make_shared<Counters>();
 
+    std::vector<std::string> error_flag_names(ERRFLAG_NUM);
+    error_flag_names[ERRFLAG_APPLY_BC] = "boundary condition kernel (ApplyBC)";
+    error_flag_names[ERRFLAG_CALC_RHS] = "right-hand side kernel (CalcRHS)";
+    error_flag_names[ERRFLAG_SHIFTING] = "Calc_Shifting_D";
+    error_flag_names[ERRFLAG_RHEOLOGY] = "TauEulerStep (rheology model failure)";
+    error_flag_names[ERRFLAG_POS_NAN] = "integration step (a particle position is NaN)";
+    error_flag_names[ERRFLAG_RHO_NAN] = "integration step (a particle density is NaN)";
+    errorFlags = chrono_types::make_unique<GpuErrorFlags>(error_flag_names);
+
     sphMarkers_D = chrono_types::make_shared<SphMarkerDataD>();
     sortedSphMarkers1_D = chrono_types::make_shared<SphMarkerDataD>();
     sortedSphMarkers2_D = chrono_types::make_shared<SphMarkerDataD>();

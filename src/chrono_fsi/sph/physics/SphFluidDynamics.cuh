@@ -118,7 +118,6 @@ class SphFluidDynamics {
 
     bool m_verbose;
     bool m_check_errors;
-    bool* m_errflagD;  ///< device-resident rheology failure flag
 
     gpuStream m_copy_stream;  ///< stream for async copy operations
 };

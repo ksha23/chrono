@@ -252,7 +252,7 @@ void SphBceManager::CalcRigidBodyBceAcceleration() {
         U1CAST(m_data_mgr.markersProximity_D->mapOriginalToSorted)                                 //
     );
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -269,7 +269,7 @@ void SphBceManager::CalcFeaMesh1DBceAcceleration() {
         U1CAST(m_data_mgr.markersProximity_D->mapOriginalToSorted)  //
     );
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -286,7 +286,7 @@ void SphBceManager::CalcFeaMesh2DBceAcceleration() {
         U1CAST(m_data_mgr.markersProximity_D->mapOriginalToSorted)  //
     );
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -550,7 +550,7 @@ void SphBceManager::CalcRigidBodyForces() {
         (uint)m_data_mgr.countersH->startRigidMarkers);
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -578,7 +578,7 @@ void SphBceManager::CalcFeaMesh1DForces() {
         m_data_mgr.paramsH->markerMass);
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -606,7 +606,7 @@ void SphBceManager::CalcFeaMesh2DForces() {
         m_data_mgr.paramsH->markerMass);
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -693,7 +693,7 @@ void SphBceManager::UpdateBodyMarkerState() {
                                                    mR3CAST(m_data_mgr.fsiBodyState_D->ang_vel), U1CAST(m_data_mgr.markersProximity_D->mapOriginalToSorted));
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -709,7 +709,7 @@ void SphBceManager::UpdateBodyMarkerStateInitial() {
         mR3CAST(m_data_mgr.fsiBodyState_D->pos), mR4CAST(m_data_mgr.fsiBodyState_D->rot), mR3CAST(m_data_mgr.fsiBodyState_D->lin_vel), mR3CAST(m_data_mgr.fsiBodyState_D->ang_vel));
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -968,7 +968,7 @@ void SphBceManager::UpdateMeshMarker1DState() {
     );
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -996,7 +996,7 @@ void SphBceManager::UpdateMeshMarker1DStateInitial() {
     );
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -1198,7 +1198,7 @@ void SphBceManager::UpdateMeshMarker2DState() {
     );
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -1226,7 +1226,7 @@ void SphBceManager::UpdateMeshMarker2DStateInitial() {
     );
 
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
