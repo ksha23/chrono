@@ -57,6 +57,11 @@ class SphCollisionSystem {
     bool* m_errflagD = nullptr;  ///< device error flag for the proximity kernels, allocated once
     // Note: this is cached on every call to ArrangeData()
     std::shared_ptr<SphMarkerDataD> m_sphMarkersD;  ///< Information of the particles in the original array
+
+    // Buffers for the radix sort of the cell hashes, kept between calls
+    thrust::device_vector<uint> m_hashAltD;   ///< alternate buffer for the sorted hashes
+    thrust::device_vector<uint> m_indexAltD;  ///< alternate buffer for the sorted marker indices
+    thrust::device_vector<char> m_sortTempD;  ///< temporary storage for the radix sort
 };
 
 /// @} fsisph_physics
