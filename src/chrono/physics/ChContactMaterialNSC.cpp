@@ -98,9 +98,7 @@ ChContactMaterialCompositeNSC::ChContactMaterialCompositeNSC(ChContactMaterialCo
                                                              std::shared_ptr<ChContactMaterialNSC> mat2)
     : ChContactMaterialCompositeNSC(strategy, mat1.get(), mat2.get()) {}
 
-ChContactMaterialCompositeNSC::ChContactMaterialCompositeNSC(ChContactMaterialCompositionStrategy* strategy,
-                                                             const ChContactMaterialNSC* mat1,
-                                                             const ChContactMaterialNSC* mat2) {
+ChContactMaterialCompositeNSC::ChContactMaterialCompositeNSC(ChContactMaterialCompositionStrategy* strategy, const ChContactMaterialNSC* mat1, const ChContactMaterialNSC* mat2) {
     static_friction = strategy->CombineFriction(mat1->static_friction, mat2->static_friction);
     sliding_friction = strategy->CombineFriction(mat1->sliding_friction, mat2->sliding_friction);
     restitution = strategy->CombineRestitution(mat1->restitution, mat2->restitution);

@@ -173,8 +173,7 @@ void CompositeMaterialTest::CheckContacts(bool with_callback) {
         float mu_callback = mat1->GetSlidingFriction() + mat2->GetSlidingFriction();
 
         if (GetParam() == ChContactMethod::SMC) {
-            ChContactMaterialCompositeSMC cmat(strategy, std::static_pointer_cast<ChContactMaterialSMC>(mat1),
-                                               std::static_pointer_cast<ChContactMaterialSMC>(mat2));
+            ChContactMaterialCompositeSMC cmat(strategy, std::static_pointer_cast<ChContactMaterialSMC>(mat1), std::static_pointer_cast<ChContactMaterialSMC>(mat2));
             ASSERT_EQ(host.fric_rigid_rigid[i].x, with_callback ? mu_callback : cmat.mu_eff);
             ASSERT_EQ(host.fric_rigid_rigid[i].y, cmat.muRoll_eff);
             ASSERT_EQ(host.fric_rigid_rigid[i].z, cmat.muSpin_eff);
@@ -189,8 +188,7 @@ void CompositeMaterialTest::CheckContacts(bool with_callback) {
             ASSERT_EQ(host.smc_rigid_rigid[i].z, cmat.gn);
             ASSERT_EQ(host.smc_rigid_rigid[i].w, cmat.gt);
         } else {
-            ChContactMaterialCompositeNSC cmat(strategy, std::static_pointer_cast<ChContactMaterialNSC>(mat1),
-                                               std::static_pointer_cast<ChContactMaterialNSC>(mat2));
+            ChContactMaterialCompositeNSC cmat(strategy, std::static_pointer_cast<ChContactMaterialNSC>(mat1), std::static_pointer_cast<ChContactMaterialNSC>(mat2));
             ASSERT_EQ(host.fric_rigid_rigid[i].x, with_callback ? mu_callback : cmat.sliding_friction);
             ASSERT_EQ(host.fric_rigid_rigid[i].y, cmat.rolling_friction);
             ASSERT_EQ(host.fric_rigid_rigid[i].z, cmat.spinning_friction);
@@ -211,9 +209,7 @@ TEST_P(CompositeMaterialTest, add_contact_callback) {
     CheckContacts(true);
 }
 
-INSTANTIATE_TEST_SUITE_P(ChronoMulticore,
-                         CompositeMaterialTest,
-                         ::testing::Values(ChContactMethod::NSC, ChContactMethod::SMC));
+INSTANTIATE_TEST_SUITE_P(ChronoMulticore, CompositeMaterialTest, ::testing::Values(ChContactMethod::NSC, ChContactMethod::SMC));
 
 // The composite material built from raw material pointers must match the one built from shared pointers.
 TEST(CompositeMaterial, raw_pointer_constructors) {
