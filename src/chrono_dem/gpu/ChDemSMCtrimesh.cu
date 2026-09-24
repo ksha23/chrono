@@ -101,21 +101,24 @@ __host__ void ChSystemDemMesh_impl::runTriangleBroadphase() {
     // "d_in" is SDsTouchedByEachTriangle_composite_out; contains the IDs of the SDs that have triangles in them; if an
     // SD is touched by "t" triangles, it'll show up "t" times in this array
     unsigned int* d_in = d_keys_out;
-    // d_unique_out stores a list of *unique* SDs with the following property: each SD in this list has at least one
-    // triangle touching it. In terms of memory, this is pretty wasteful since it's unlikely that all SDs are touched by
-    // at least one triangle; perhaps revisit later.
-    unsigned int* d_unique_out = (unsigned int*)stateOfSolver_resources.pDeviceMemoryScratchSpace(nSDs * sizeof(unsigned int));
     // squatting on SD_TrianglesCompositeOffsets device vector; its size is nSDs. Works in tandem with d_unique_out.
     // If d_unique_out[4]=72, d_counts_out[4] says how many triangles touch SD 72.
     unsigned int* d_counts_out = SD_TrianglesCompositeOffsets.data();
-    // squatting on TriangleIDS_ByMultiplicity, which is not needed anymore. We're using only *one* entry in this array.
-    // Output value represents the number of SDs that have at last one triangle touching the SD
+    // squatting on Triangle_SDsCompositeOffsets, which is not needed anymore. We're using only *one* entry in this
+    // array. Output value represents the number of SDs that have at last one triangle touching the SD
     unsigned int* d_num_runs_out = Triangle_SDsCompositeOffsets.data();
     // dry run, figure out the number of bytes that will be used in the actual run
-    demErrchk(cub::DeviceRunLengthEncode::Encode(NULL, temp_storage_bytes, d_in, d_unique_out, d_counts_out, d_num_runs_out, numOfTriangleTouchingSD_instances));
+    demErrchk(cub::DeviceRunLengthEncode::Encode(NULL, temp_storage_bytes, d_in, (unsigned int*)NULL, d_counts_out, d_num_runs_out, numOfTriangleTouchingSD_instances));
     demErrchk(gpuDeviceSynchronize());
 
-    d_scratch_space = TriangleIDS_ByMultiplicity.data();
+    // The scratch space holds d_unique_out followed by the temporary storage that CUB asked for.
+    // d_unique_out stores a list of *unique* SDs with the following property: each SD in this list has at least one
+    // triangle touching it. In terms of memory, this is pretty wasteful since it's unlikely that all SDs are touched by
+    // at least one triangle; perhaps revisit later.
+    size_t unique_out_bytes = ((size_t)nSDs * sizeof(unsigned int) + 255) / 256 * 256;  // keeps CUB's storage aligned
+    char* rle_scratch = stateOfSolver_resources.pDeviceMemoryScratchSpace(unique_out_bytes + temp_storage_bytes);
+    unsigned int* d_unique_out = (unsigned int*)rle_scratch;
+    d_scratch_space = (void*)(rle_scratch + unique_out_bytes);
     // Run the actual encoding operation
     demErrchk(cub::DeviceRunLengthEncode::Encode(d_scratch_space, temp_storage_bytes, d_in, d_unique_out, d_counts_out, d_num_runs_out, numOfTriangleTouchingSD_instances));
     demErrchk(gpuDeviceSynchronize());
