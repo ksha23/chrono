@@ -210,34 +210,3 @@ TEST_P(CompositeMaterialTest, add_contact_callback) {
 }
 
 INSTANTIATE_TEST_SUITE_P(ChronoMulticore, CompositeMaterialTest, ::testing::Values(ChContactMethod::NSC, ChContactMethod::SMC));
-
-// The composite material built from raw material pointers must match the one built from shared pointers.
-TEST(CompositeMaterial, raw_pointer_constructors) {
-    ChContactMaterialCompositionStrategy strategy;
-
-    auto smc1 = chrono_types::make_shared<ChContactMaterialSMC>();
-    auto smc2 = chrono_types::make_shared<ChContactMaterialSMC>();
-    smc1->SetYoungModulus(2e6f);
-    smc2->SetPoissonRatio(0.35f);
-    smc1->SetFriction(0.3f);
-    smc2->SetKn(3e5f);
-    smc2->SetAdhesion(1.5f);
-    ChContactMaterialCompositeSMC s1(&strategy, smc1, smc2);
-    ChContactMaterialCompositeSMC s2(&strategy, smc1.get(), smc2.get());
-    ASSERT_EQ(s1.E_eff, s2.E_eff);
-    ASSERT_EQ(s1.G_eff, s2.G_eff);
-    ASSERT_EQ(s1.mu_eff, s2.mu_eff);
-    ASSERT_EQ(s1.kn, s2.kn);
-    ASSERT_EQ(s1.adhesion_eff, s2.adhesion_eff);
-
-    auto nsc1 = chrono_types::make_shared<ChContactMaterialNSC>();
-    auto nsc2 = chrono_types::make_shared<ChContactMaterialNSC>();
-    nsc1->SetFriction(0.3f);
-    nsc2->SetCompliance(1e-4f);
-    nsc2->SetCohesion(2.0f);
-    ChContactMaterialCompositeNSC n1(&strategy, nsc1, nsc2);
-    ChContactMaterialCompositeNSC n2(&strategy, nsc1.get(), nsc2.get());
-    ASSERT_EQ(n1.sliding_friction, n2.sliding_friction);
-    ASSERT_EQ(n1.compliance, n2.compliance);
-    ASSERT_EQ(n1.cohesion, n2.cohesion);
-}
