@@ -18,10 +18,11 @@
 // Each case runs a small problem for a fixed number of steps and compares a few
 // aggregate quantities of the SPH particles (mean position, mean speed, mean
 // density and pressure, front position) against reference values recorded with
-// the single-precision build. The comparison uses a relative tolerance, not a
-// bitwise one: changes that only affect rounding (for example evaluating a
-// constant in float instead of double) move these aggregates by far less than
-// the tolerance, while a change to the discretization moves them by much more.
+// the default single-precision build (CUDA, RTX 5060 Ti). The comparison uses a
+// tolerance relative to a problem scale, not a bitwise one: changes that only
+// affect rounding (a different GPU, FMA contraction, evaluating a constant in
+// float instead of double) must stay inside it, while a change to the
+// discretization or the constitutive model should not.
 //
 // The reference values apply to the default single-precision build only. With
 // CH_USE_SPH_DOUBLE the values are printed but not checked.
@@ -317,29 +318,34 @@ int main(int argc, char* argv[]) {
 #else
     bool check = true;
 #endif
+    // Tolerances. Kinematic quantities are compared at 0.2% of their scale. Mean pressure in a weakly
+    // compressible fluid carries acoustic noise and is compared at 1% of its scale. Disabling FMA
+    // contraction in the SPH kernels (a rounding-only change) moves the dam-break mean pressure by 0.5%
+    // of its scale and every other quantity by less than 0.01%.
     const double rtol = 2e-3;
+    const double rtol_p = 1e-2;
 
     // Case 1
     auto c1 = RunColumnCollapse(1000);
     Print("column_collapse", c1);
     if (check) {
-        Check("n", (double)c1.n, 6280, 1, 0);
-        Check("mean_z", c1.mean_z, 0, 0.1, rtol);
-        Check("mean_r", c1.mean_r, 0, 0.05, rtol);
-        Check("mean_speed", c1.mean_speed, 0, 0.1, rtol);
-        Check("mean_p", c1.mean_p, 0, 700, rtol);
+        Check("n", (double)c1.n, 6657, 1, 0);
+        Check("mean_z", c1.mean_z, -0.0371872676, 0.1, rtol);
+        Check("mean_r", c1.mean_r, 0.0409302454, 0.05, rtol);
+        Check("mean_speed", c1.mean_speed, 0.299156503, 0.3, rtol);
+        Check("mean_p", c1.mean_p, 359.184975, 700, rtol_p);
     }
 
     // Case 2
     auto c2 = RunDamBreak(2000);
     Print("dam_break", c2);
     if (check) {
-        Check("n", (double)c2.n, 5220, 1, 0);
-        Check("mean_x", c2.mean_x, 0, 0.3, rtol);
-        Check("mean_z", c2.mean_z, 0, 0.15, rtol);
-        Check("max_x", c2.max_x, 0, 0.3, rtol);
-        Check("mean_speed", c2.mean_speed, 0, 1, rtol);
-        Check("mean_p", c2.mean_p, 0, 1500, rtol);
+        Check("n", (double)c2.n, 6061, 1, 0);
+        Check("mean_x", c2.mean_x, -0.132608381, 0.3, rtol);
+        Check("mean_z", c2.mean_z, 0.0809445538, 0.15, rtol);
+        Check("max_x", c2.max_x, 0.184732482, 0.3, rtol);
+        Check("mean_speed", c2.mean_speed, 0.885350075, 1, rtol);
+        Check("mean_p", c2.mean_p, 923.877871, 1500, rtol_p);
     }
 
     // Case 3
@@ -348,10 +354,10 @@ int main(int argc, char* argv[]) {
     Print("mcc_sphere_drop", c3);
     printf("mcc_sphere_drop: sphere_z=%.9g\n", sphere_z);
     if (check) {
-        Check("mean_z", c3.mean_z, 0, 0.05, rtol);
-        Check("mean_speed", c3.mean_speed, 0, 0.1, rtol);
-        Check("mean_p", c3.mean_p, 0, 800, rtol);
-        Check("sphere_z", sphere_z, 0, 0.05, rtol);
+        Check("mean_z", c3.mean_z, 0.0486123123, 0.05, rtol);
+        Check("mean_speed", c3.mean_speed, 0.0405264516, 0.05, rtol);
+        Check("mean_p", c3.mean_p, 1417.19448, 1700, rtol_p);
+        Check("sphere_z", sphere_z, 0.10387144, 0.05, rtol);
     }
 
     if (num_failures > 0) {
