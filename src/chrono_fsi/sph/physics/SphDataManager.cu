@@ -178,7 +178,8 @@ void ProximityDataD::resize(size_t s) {
 
 //---------------------------------------------------------------------------------------
 
-FsiDataManager::FsiDataManager(std::shared_ptr<ChFsiParamsSPH> params) : paramsH(params), has_ad(false) {
+FsiDataManager::FsiDataManager(std::shared_ptr<ChFsiParamsSPH> params)
+    : paramsH(params), has_ad(false), ad_union_min(mR3(-Real_max)), ad_union_max(mR3(+Real_max)) {
     countersH = chrono_types::make_shared<Counters>();
 
     sphMarkers_D = chrono_types::make_shared<SphMarkerDataD>();
@@ -662,6 +663,19 @@ void FsiDataManager::UpdateActiveDomains() {
     auto num_nodes1D = countersH->numFsiNodes1D;
     auto num_nodes2D = countersH->numFsiNodes2D;
 
+    // Union of all (non-inverted) active and extended AABBs, in the absolute frame. Particles outside this box are
+    // inactive and are culled in UpdateActivityD before looping over the individual domains.
+    ad_union_min = mR3(+Real_max);
+    ad_union_max = mR3(-Real_max);
+    auto grow_union = [this](const ActiveDomain& ad) {
+        if (ad.inverted)
+            return;
+        for (int i = 0; i < 3; i++) {
+            Get(ad_union_min, i) = std::min({Get(ad_union_min, i), Get(ad.a_min, i), Get(ad.e_min, i)});
+            Get(ad_union_max, i) = std::max({Get(ad_union_max, i), Get(ad.a_max, i), Get(ad.e_max, i)});
+        }
+    };
+
     // The host arrays (ad_body_H, ad_node1D_H, and ad_node2D_H) contain AABB, expressed in
     // the local frames for bodies and nodes. Re-express these AABBs in the absolute frame
     // (shifting by the current position of the associated object) and copy to device vectors.
@@ -675,6 +689,8 @@ void FsiDataManager::UpdateActiveDomains() {
             TransformAABB(ad_body_H[ib].inverted, ad_body_H[ib].a_min, ad_body_H[ib].a_max, pos, rot, abs_ad_body_H[ib].a_min, abs_ad_body_H[ib].a_max);
             TransformAABB(ad_body_H[ib].inverted, ad_body_H[ib].e_min, ad_body_H[ib].e_max, pos, rot, abs_ad_body_H[ib].e_min, abs_ad_body_H[ib].e_max);
         }
+        for (size_t ib = 0; ib < num_bodies; ib++)
+            grow_union(abs_ad_body_H[ib]);
         ad_body_D = abs_ad_body_H;
     }
 
@@ -688,6 +704,8 @@ void FsiDataManager::UpdateActiveDomains() {
             abs_ad_node1D_H[in].e_min = ad_node1D_H[in].e_min + pos;
             abs_ad_node1D_H[in].e_max = ad_node1D_H[in].e_max + pos;
         }
+        for (size_t in = 0; in < num_nodes1D; in++)
+            grow_union(abs_ad_node1D_H[in]);
         ad_node1D_D = abs_ad_node1D_H;
     }
 
@@ -701,6 +719,8 @@ void FsiDataManager::UpdateActiveDomains() {
             abs_ad_node2D_H[in].e_min = ad_node2D_H[in].e_min + pos;
             abs_ad_node2D_H[in].e_max = ad_node2D_H[in].e_max + pos;
         }
+        for (size_t in = 0; in < num_nodes2D; in++)
+            grow_union(abs_ad_node2D_H[in]);
         ad_node2D_D = abs_ad_node2D_H;
     }
 }
