@@ -46,17 +46,13 @@ class SphForceWCSPH : public SphForce {
     /// Perform density re-initialization (as needed).
     void DensityReinitialization(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD);
 
-    // CRM
+    // CRM (CrmCalcRHS also calculates the particle shifting velocity)
     void CrmApplyBC(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD);
     void CrmCalcRHS(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD);
 
-    // CFD
+    // CFD (CfdCalcRHS also calculates the particle shifting velocity)
     void CfdApplyBC(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD);
     void CfdCalcRHS(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD);
-
-    /// Function to calculate the shifting of the particles.
-    /// Can use PPST, XSPH, or both.
-    void CalculateShifting(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD);
 
     int density_initialization;
 
