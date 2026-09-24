@@ -168,28 +168,22 @@ inline __device__ bool addBCForces_Sphere_frictionless(const int64_t3& sphPos,
     // precompute the int offset
     int64_t3 delta_int = sphPos - sphere_params.sphere_center;
 
-    {
-        // TODO is double even necessary
-        double3 delta = int64_t3_to_double3(delta_int) / (sphere_params.radius + sphereRadius_SU);
-        double d2 = Dot(delta, delta);
-        // this needs to be computed in double, then cast to float
-        reciplength = (float)rsqrt(d2);
-    }
-    // recompute in float to be cheaper
-    float3 delta = int64_t3_to_float3(delta_int) / (sphere_params.radius + sphereRadius_SU);
+    // float is enough: reciplength is a float either way, and the error of 2 - 2 / reciplength is set by that
+    float3 delta = int64_t3_to_float3(delta_int) / (float)(sphere_params.radius + sphereRadius_SU);
+    reciplength = rsqrtf(Dot(delta, delta));
 
     float3 contact_normal = delta * reciplength;
 
-    float penetration_over_R = 2. - 2. / reciplength;
+    float penetration_over_R = 2.f - 2.f / reciplength;
     contact = (penetration_over_R > 0);
     // contact means d2 <1, so 1/d2 > 1, reciplength > 1, penetration_over_R > 0
     if (contact) {
         float3 force_accum = {0, 0, 0};
 
-        float force_model_multiplier = sqrt(penetration_over_R);
+        float force_model_multiplier = sqrtf(penetration_over_R);
 
         // spring term
-        force_accum = force_accum + sphere_params.normal_sign * gran_params->K_n_s2w_SU * contact_normal * 0.5 * (sphere_params.radius + sphereRadius_SU) * penetration_over_R *
+        force_accum = force_accum + sphere_params.normal_sign * gran_params->K_n_s2w_SU * contact_normal * 0.5f * (sphere_params.radius + sphereRadius_SU) * penetration_over_R *
                                         force_model_multiplier;
 
         // Project relative velocity to the normal
@@ -328,7 +322,7 @@ inline __device__ bool addBCForces_ZCone(unsigned int sphID,
         // add tangent forces
         if (gran_params->friction_mode != chrono::dem::CHDEM_FRICTION_MODE::FRICTIONLESS) {
             float projection = Dot(sphVel, contact_normal);
-            float3 sphere_vel_rel = sphVel - bc_params.vel_SU - contact_normal * projection + Cross(sphOmega, -1. * dist * contact_normal);
+            float3 sphere_vel_rel = sphVel - bc_params.vel_SU - contact_normal * projection + Cross(sphOmega, -1.f * dist * contact_normal);
 
             float force_model_multiplier = sqrt((sphereRadius_SU - dist) / sphereRadius_SU);
             unsigned int BC_histmap_label = gran_params->nSpheres + BC_id + 1;
@@ -402,7 +396,7 @@ inline __device__ bool addBCForces_Plane_frictionless(const int64_t3& sphPos,
         const float m_eff = gran_params->sphere_mass_SU;
 
         // damping term
-        force_accum = force_accum + -1. * gran_params->Gamma_n_s2w_SU * projection * contact_normal * m_eff;
+        force_accum = force_accum + -1.f * gran_params->Gamma_n_s2w_SU * projection * contact_normal * m_eff;
         force_accum = force_accum * force_model_multiplier;
 
         force_from_BCs = force_from_BCs + force_accum;
@@ -449,11 +443,11 @@ inline __device__ bool addBCForces_Plane_frictionless_mbased(const int64_t3& sph
         sqrt_Rd = sqrt(penetration * sphereRadius_SU);
 
         float Sn = 2 * gran_params->E_eff_s2w_SU * sqrt_Rd;
-        float loge = (gran_params->COR_s2w_SU < EPSILON) ? log(EPSILON) : log(gran_params->COR_s2w_SU);
+        float loge = (gran_params->COR_s2w_SU < (float)EPSILON) ? logf((float)EPSILON) : logf(gran_params->COR_s2w_SU);
         beta = loge / sqrt(loge * loge + GPU_PI_F * GPU_PI_F);
 
-        float kn = (2.0 / 3.0) * Sn;
-        float gn = -2 * sqrt(5.0 / 6.0) * beta * sqrt(Sn * m_eff);
+        float kn = (2.f / 3.f) * Sn;
+        float gn = -2.f * sqrtf(5.f / 6.f) * beta * sqrtf(Sn * m_eff);
 
         float3 contact_normal = plane_params.normal;
 
@@ -557,7 +551,7 @@ inline __device__ bool addBCForces_Plane(unsigned int sphID,
 
         // float penetration = sphereRadius_SU - dist;
         float projection = Dot(sphVel - bc_velo, contact_normal);
-        float3 rel_vel = sphVel - bc_velo - contact_normal * projection + Cross(sphOmega, -1. * dist * contact_normal);
+        float3 rel_vel = sphVel - bc_velo - contact_normal * projection + Cross(sphOmega, -1.f * dist * contact_normal);
 
         // add tangent forces
         if (gran_params->friction_mode != chrono::dem::CHDEM_FRICTION_MODE::FRICTIONLESS) {
@@ -713,11 +707,11 @@ inline __device__ bool addBCForces_Zcyl_frictionless_mbased(const int64_t3& sphP
         sqrt_Rd = sqrt(penetration * sphereRadius_SU);
 
         float Sn = 2 * gran_params->E_eff_s2w_SU * sqrt_Rd;
-        float loge = (gran_params->COR_s2w_SU < EPSILON) ? log(EPSILON) : log(gran_params->COR_s2w_SU);
+        float loge = (gran_params->COR_s2w_SU < (float)EPSILON) ? logf((float)EPSILON) : logf(gran_params->COR_s2w_SU);
         beta = loge / sqrt(loge * loge + GPU_PI_F * GPU_PI_F);
 
-        float kn = (2.0 / 3.0) * Sn;
-        float gn = -2 * sqrt(5.0 / 6.0) * beta * sqrt(Sn * m_eff);
+        float kn = (2.f / 3.f) * Sn;
+        float gn = -2.f * sqrtf(5.f / 6.f) * beta * sqrtf(Sn * m_eff);
 
         // project velocity onto the normal
         float projection = Dot(sphVel, contact_normal);
@@ -780,7 +774,7 @@ inline __device__ bool addBCForces_Zcyl(unsigned int sphID,
     // if we had normal forces, and friction is on, compute tangential forces
     if (contact) {
         float projection = Dot(sphVel, contact_normal);
-        float3 rel_vel = sphVel - contact_normal * projection + Cross(sphOmega, -1. * dist * contact_normal);
+        float3 rel_vel = sphVel - contact_normal * projection + Cross(sphOmega, -1.f * dist * contact_normal);
 
         // add tangent forces
         if (gran_params->friction_mode != chrono::dem::CHDEM_FRICTION_MODE::FRICTIONLESS) {

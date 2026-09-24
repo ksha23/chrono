@@ -604,15 +604,11 @@ inline __device__ float3 computeSphereNormalForces(float& reciplength,
     // grab radius from global
     unsigned int sphereRadius_SU = gran_params->sphereRadius_SU;
 
-    // compute penetrations in double
-    {
-        double3 delta_r_double = int3_to_double3(sphereA_pos - sphereB_pos) / (2. * sphereRadius_SU);
-        // compute in double then convert to float
-        reciplength = (float)rsqrt(Dot(delta_r_double, delta_r_double));
-    }
-
-    // compute these in float now
-    delta_r = int3_to_float3(sphereA_pos - sphereB_pos) / (2. * sphereRadius_SU);
+    // Float is enough here. Positions are integers in SU and a typical penetration is many SU (about psi_L), while
+    // the float rounding error of 1 - 1 / reciplength is about 1e-7 * 2R, far below one SU. (The previous double
+    // path also rounded reciplength to float.) FP64 runs at 1/64 rate on consumer GPUs.
+    delta_r = int3_to_float3(sphereA_pos - sphereB_pos) / (2.f * sphereRadius_SU);
+    reciplength = rsqrtf(Dot(delta_r, delta_r));
 
     // Velocity difference, it's better to do a coalesced access here than a fragmented access inside
     float3 v_rel = sphereA_vel - sphereB_vel;
@@ -630,9 +626,9 @@ inline __device__ float3 computeSphereNormalForces(float& reciplength,
     vrel_t = v_rel - vrel_n;
 
     // Compute penetration term, this becomes the delta as we want it
-    float penetration_over_R = 2. * (1. - 1. / reciplength);
+    float penetration_over_R = 2.f * (1.f - 1.f / reciplength);
     // multiplier caused by Hooke vs Hertz force model
-    float hertz_force_factor = sqrt(penetration_over_R);
+    float hertz_force_factor = sqrtf(penetration_over_R);
 
     // add spring term
     float3 force_accum = hertz_force_factor * gran_params->K_n_s2s_SU * sphereRadius_SU * penetration_over_R * contact_normal;
@@ -661,14 +657,9 @@ inline __device__ float3 computeSphereNormalForces_matBased(float3& vrel_t,
     // grab radius from global
     unsigned int sphereRadius_SU = gran_params->sphereRadius_SU;
 
-    // compute penetrations in double
-    double3 delta_r_double = int3_to_double3(sphereA_pos - sphereB_pos) / (2. * sphereRadius_SU);
-
-    // compute in double then convert to float
-    float reciplength = (float)rsqrt(Dot(delta_r_double, delta_r_double));
-
-    // compute these in float now
-    float3 delta_r = int3_to_float3(sphereA_pos - sphereB_pos) / (2. * sphereRadius_SU);
+    // compute in float, see computeSphereNormalForces
+    float3 delta_r = int3_to_float3(sphereA_pos - sphereB_pos) / (2.f * sphereRadius_SU);
+    float reciplength = rsqrtf(Dot(delta_r, delta_r));
 
     // Velocity difference, it's better to do a coalesced access here than a fragmented access inside
     float3 v_rel = sphereA_vel - sphereB_vel;
@@ -677,7 +668,7 @@ inline __device__ float3 computeSphereNormalForces_matBased(float3& vrel_t,
     contact_normal = delta_r * reciplength;
 
     // penetration
-    float penetration = 2. * (double)sphereRadius_SU - Length(int3_to_double3(sphereA_pos - sphereB_pos));
+    float penetration = 2.f * sphereRadius_SU - Length(int3_to_float3(sphereA_pos - sphereB_pos));
 
     // normal component of relative velocity
     float projection = Dot(v_rel, contact_normal);
@@ -690,15 +681,15 @@ inline __device__ float3 computeSphereNormalForces_matBased(float3& vrel_t,
     float m_eff = gran_params->sphere_mass_SU / 2.f;
 
     // helper variables, returned for friction force calculation
-    sqrt_Rd = sqrt(penetration * sphereRadius_SU / 2.);
-    float Sn = 2. * gran_params->E_eff_s2s_SU * sqrt_Rd;
+    sqrt_Rd = sqrtf(penetration * sphereRadius_SU / 2.f);
+    float Sn = 2.f * gran_params->E_eff_s2s_SU * sqrt_Rd;
 
-    float loge = (gran_params->COR_s2s_SU < EPSILON) ? log(EPSILON) : log(gran_params->COR_s2s_SU);
-    beta = loge / sqrt(loge * loge + PI_F * PI_F);
+    float loge = (gran_params->COR_s2s_SU < (float)EPSILON) ? logf((float)EPSILON) : logf(gran_params->COR_s2s_SU);
+    beta = loge / sqrtf(loge * loge + PI_F * PI_F);
 
     // stiffness and damping coefficient
-    float kn = (2.0 / 3.0) * Sn;
-    float gn = 2 * sqrt(5.0 / 6.0) * beta * sqrt(Sn * m_eff);
+    float kn = (2.f / 3.f) * Sn;
+    float gn = 2.f * sqrtf(5.f / 6.f) * beta * sqrtf(Sn * m_eff);
 
     // normal force magnitude
     float forceN_mag = kn * penetration + gn * projection;
@@ -806,7 +797,7 @@ static __global__ void computeSphereContactForces(ChSystemDem_impl::GranSphereDa
                 sphere_data->normal_contact_force[body_A_offset + contact_id] = force_accum;
             }
 
-            float hertz_force_factor = sqrtf(2. * (1 - (1. / reciplength)));  // sqrt(delta_n / (2 R_eff)
+            float hertz_force_factor = sqrtf(2.f * (1.f - (1.f / reciplength)));  // sqrt(delta_n / (2 R_eff)
 
             // add frictional terms, if needed
             if (gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS) {
@@ -1343,9 +1334,9 @@ static __global__ void integrateSpheres(const float stepsize_SU,
         // no divergence, same for every thread in block
         switch (gran_params->time_integrator) {
             case CHDEM_TIME_INTEGRATOR::EXTENDED_TAYLOR: {
-                position_update_x = integrateForwardEuler(stepsize_SU, old_vel_X + 0.5 * curr_acc_X * stepsize_SU);
-                position_update_y = integrateForwardEuler(stepsize_SU, old_vel_Y + 0.5 * curr_acc_Y * stepsize_SU);
-                position_update_z = integrateForwardEuler(stepsize_SU, old_vel_Z + 0.5 * curr_acc_Z * stepsize_SU);
+                position_update_x = integrateForwardEuler(stepsize_SU, old_vel_X + 0.5f * curr_acc_X * stepsize_SU);
+                position_update_y = integrateForwardEuler(stepsize_SU, old_vel_Y + 0.5f * curr_acc_Y * stepsize_SU);
+                position_update_z = integrateForwardEuler(stepsize_SU, old_vel_Z + 0.5f * curr_acc_Z * stepsize_SU);
                 break;
             }
 

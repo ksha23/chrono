@@ -224,7 +224,7 @@ inline __device__ float3 computeRollingAngAcc(ChSystemDem_impl::GranSphereDataPt
                 // convert v_rot to user unit for threshold comparison
                 // float v_rot_uu = v_rot_su * velo_su2uu;
 
-                if (v_rot_su < 1e-4f * gran_params->TIME_UNIT / gran_params->LENGTH_UNIT) {
+                if (v_rot_su < 1e-4f * (float)gran_params->TIME_UNIT / (float)gran_params->LENGTH_UNIT) {
                     return make_float3(0.f, 0.f, 0.f);
                 }
 
@@ -358,8 +358,8 @@ inline __device__ float3 computeFrictionForces_matBased(ChSystemDem_impl::GranPa
 
     computeMultiStepDisplacement(gran_params, sphere_data, contact_index, vrel_t, contact_normal, delta_t);
     // evaluate kt and gt
-    float kt = 8. * G_eff * sqrt_Rd;
-    float gt = -2. * beta * std::sqrt(5. / 6. * m_eff * kt);
+    float kt = 8.f * G_eff * sqrt_Rd;
+    float gt = -2.f * beta * sqrtf(5.f / 6.f * m_eff * kt);
 
     // float3 tangent_force =  - kt * delta_t - gt * vrel_t; // this works for sph-sph and sph-bc contact
 
