@@ -21,8 +21,11 @@
 // pass criterion is 32 machine epsilons times the sum of the magnitudes of the
 // terms involved. This still catches any indexing, sign,
 // size or missing-term error. The number of results that are not bitwise
-// identical is printed for information; it is 0 on the platforms checked so
-// far (GCC and Clang, x86_64 SSE2/AVX2+FMA and arm64).
+// identical is printed for information. For the fixed-size blocks it is 0 on
+// the platforms checked so far (GCC and Clang, x86_64 SSE2/AVX2+FMA and arm64).
+// The scalar shaft term of ThreeBBShaft can differ at rounding level, because
+// the compiler may contract the reference expression in this file into an FMA
+// differently than the same expression in the library.
 //
 // =============================================================================
 
