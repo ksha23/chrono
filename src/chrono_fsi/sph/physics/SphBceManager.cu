@@ -150,9 +150,9 @@ __global__ void CalcRigidBceAcceleration_D(Real3* accelerations,        // BCE m
                                            const Real3* BCE_pos_local,  // BCE body-local coordinates
                                            const uint* body_IDs,        // rigid body ID for each BCE marker
                                            const Real4* body_rot,       // body orientation (relative to global frame)
-                                           const Real3* body_angvel,    // body ang. vels. (relative to global frame)
+                                           const Real3* body_angvel,    // body ang. vels. (relative to body frame)
                                            const Real3* body_linacc,    // body lin. acels. (relative to global frame)
-                                           const Real3* body_angacc,    // body ang. acels. (relative to global frame)
+                                           const Real3* body_angacc,    // body ang. acels. (relative to body frame)
                                            const uint* mapOriginalToSorted) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= countersD.numRigidMarkers)
@@ -622,7 +622,7 @@ __global__ void UpdateBodyMarkerState_D(Real4* positions,            // global m
                                         const Real3* body_pos,       // body positions (relative to global frame)
                                         const Real4* body_rot,       // body orientation (relative to global frame)
                                         const Real3* body_linvel,    // body lin. vels. (relative to global frame)
-                                        const Real3* body_angvel,    // body ang. vels. (relative to global frame)
+                                        const Real3* body_angvel,    // body ang. vels. (relative to body frame)
                                         const uint* mapOriginalToSorted) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= countersD.numRigidMarkers)
@@ -654,7 +654,7 @@ __global__ void UpdateBodyMarkerStateUnsorted_D(Real4* positions,            // 
                                                 const Real3* body_pos,       // body positions (relative to global frame)
                                                 const Real4* body_rot,       // body orientation (relative to global frame)
                                                 const Real3* body_linvel,    // body lin. vels. (relative to global frame)
-                                                const Real3* body_angvel) {  // body ang. vels. (relative to global frame)
+                                                const Real3* body_angvel) {  // body ang. vels. (relative to body frame)
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= countersD.numRigidMarkers)
         return;
