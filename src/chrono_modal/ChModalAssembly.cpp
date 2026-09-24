@@ -36,7 +36,9 @@ namespace modal {
 CH_FACTORY_REGISTER(ChModalAssembly)
 
 ChModalAssembly::ChModalAssembly() : modal_variables(nullptr) {
-    m_solver_invKIIc = chrono_types::make_shared<ChSolverSparseQR>();
+    // Default to SparseLU (much faster than SparseQR); K_IIc is expected to be nonsingular for a well-posed reduction.
+    // A rank-revealing ChSolverSparseQR can still be provided through SetModalSolver().
+    m_solver_invKIIc = chrono_types::make_shared<ChSolverSparseLU>();
     m_solver_invKIIc->LockSparsityPattern(false);
 }
 

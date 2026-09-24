@@ -104,7 +104,8 @@ class ChApiModal ChModalAssembly : public ChAssembly {
                           const ChModalDamping& damping_model = ChModalDampingNone()   ///< damping model
     );
 
-    /// Set a new linear solver to use for K_IIc^{-1} computation
+    /// Set a new linear solver to use for K_IIc^{-1} computation.
+    /// The default is ChSolverSparseLU; use ChSolverSparseQR if K_IIc may be rank deficient.
     void SetModalSolver(std::shared_ptr<ChDirectSolverLS> newsolver);
 
     /// Return the internal linear solver for K_IIc^{-1} computation

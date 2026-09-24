@@ -26,15 +26,16 @@ def SetChronoSolver(sys, solver_type, integrator_type, num_threads_mkl=1, verbos
               f" - no inverse mass matrix was provided")
         return False
 
-    # If the requested direct sparse solver module is not enabled, default to SPARSE_QR
+    # If the requested direct sparse solver module is not enabled, default to SPARSE_LU.
+    # SPARSE_QR (rank-revealing, much slower) can still be requested explicitly for rank-deficient problems.
     if slvr_type == chrono.ChSolver.Type_PARDISO_MKL:
         if not hasattr(chrono, 'ChSolverPardisoMKL'):
-            slvr_type = chrono.ChSolver.Type_SPARSE_QR
-            print(f"{prefix}Chrono::PardisoMKL not enabled. Setting solver to SPARSE_QR")
+            slvr_type = chrono.ChSolver.Type_SPARSE_LU
+            print(f"{prefix}Chrono::PardisoMKL not enabled. Setting solver to SPARSE_LU")
     elif slvr_type == chrono.ChSolver.Type_MUMPS:
         if not hasattr(chrono, 'ChSolverMumps'):
-            slvr_type = chrono.ChSolver.Type_SPARSE_QR
-            print(f"{prefix}Chrono::MUMPS not enabled. Setting solver to SPARSE_QR")
+            slvr_type = chrono.ChSolver.Type_SPARSE_LU
+            print(f"{prefix}Chrono::MUMPS not enabled. Setting solver to SPARSE_LU")
 
     # Set solver
     if slvr_type == chrono.ChSolver.Type_PARDISO_MKL:

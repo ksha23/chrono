@@ -52,8 +52,8 @@ using namespace chrono::fea;
 
 // -----------------------------------------------------------------------------
 
-// Supported direct sparse linear solver types: PardisoMKL and SparseQR
-ChSolver::Type solver_type = ChSolver::Type::SPARSE_QR;
+// Supported direct sparse linear solver types: PardisoMKL, SparseLU, and SparseQR
+ChSolver::Type solver_type = ChSolver::Type::SPARSE_LU;
 
 // -----------------------------------------------------------------------------
 
@@ -207,7 +207,7 @@ void RunSlewingBeam(bool do_modal_reduction,
     // Set linear solver
 #ifndef CHRONO_PARDISO_MKL
     if (solver_type == ChSolver::Type::PARDISO_MKL)
-        solver_type = ChSolver::Type::SPARSE_QR;
+        solver_type = ChSolver::Type::SPARSE_LU;
 #endif
 
     switch (solver_type) {
@@ -219,11 +219,17 @@ void RunSlewingBeam(bool do_modal_reduction,
 #endif
             break;
         }
-        default:
         case ChSolver::Type::SPARSE_QR: {
             std::cout << "Using SparseQR linear solver" << std::endl;
             auto qr_solver = chrono_types::make_shared<ChSolverSparseQR>();
             sys.SetSolver(qr_solver);
+            break;
+        }
+        default:
+        case ChSolver::Type::SPARSE_LU: {
+            std::cout << "Using SparseLU linear solver" << std::endl;
+            auto lu_solver = chrono_types::make_shared<ChSolverSparseLU>();
+            sys.SetSolver(lu_solver);
             break;
         }
     }

@@ -6,6 +6,7 @@ SET(TESTS
     utest_CH_assembly
     utest_CH_composite_inertia
     utest_CH_prismatic_spring
+    utest_CH_set_chrono_solver
 )
 
 if(CH_ENABLE_MODULE_PARDISO_MKL)
@@ -17,6 +18,9 @@ endif()
 set(LIBS Chrono_core)
 if(CH_ENABLE_MODULE_PARDISO_MKL)
     list(APPEND LIBS Chrono_pardisomkl)
+endif()
+if(CH_ENABLE_MODULE_MUMPS)
+    list(APPEND LIBS Chrono_mumps)
 endif()
 
 
