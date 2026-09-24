@@ -1,0 +1,202 @@
+Test project /home/kyle/chrono-audit/swarm/scm-contact-patch-hull/build-fix
+      Start 36: utest_CH_ConvexHull2D
+      Start 59: utest_VEH_destructors
+      Start 60: utest_VEH_tire_contact
+      Start 35: utest_CH_Delaunay2D
+ 1/92 Test #35: utest_CH_Delaunay2D ....................   Passed    0.00 sec
+      Start  1: utest_CH_archive
+ 2/92 Test #60: utest_VEH_tire_contact .................   Passed    0.01 sec
+      Start  2: utest_CH_archive_precision
+ 3/92 Test  #2: utest_CH_archive_precision .............   Passed    0.00 sec
+      Start  3: utest_CH_ChFunctions
+ 4/92 Test #59: utest_VEH_destructors ..................   Passed    0.01 sec
+      Start  4: utest_CH_ChVector
+ 5/92 Test  #3: utest_CH_ChFunctions ...................   Passed    0.00 sec
+      Start  5: utest_CH_ChQuaternion
+ 6/92 Test  #4: utest_CH_ChVector ......................   Passed    0.00 sec
+      Start  6: utest_CH_ChState
+ 7/92 Test  #6: utest_CH_ChState .......................   Passed    0.00 sec
+      Start  7: utest_CH_coords
+ 8/92 Test  #5: utest_CH_ChQuaternion ..................   Passed    0.00 sec
+      Start  8: utest_CH_linalg
+ 9/92 Test  #7: utest_CH_coords ........................   Passed    0.00 sec
+      Start  9: utest_CH_math
+10/92 Test  #8: utest_CH_linalg ........................   Passed    0.00 sec
+      Start 10: utest_CH_sparsematrix
+11/92 Test #10: utest_CH_sparsematrix ..................   Passed    0.00 sec
+      Start 11: utest_CH_ISO2631
+12/92 Test  #9: utest_CH_math ..........................   Passed    0.00 sec
+      Start 12: utest_CH_default_vismat
+13/92 Test #12: utest_CH_default_vismat ................   Passed    0.00 sec
+      Start 13: utest_CH_default_vismat_firstaccess
+14/92 Test #13: utest_CH_default_vismat_firstaccess ....   Passed    0.00 sec
+      Start 14: utest_COLL_bullet_utils
+15/92 Test #14: utest_COLL_bullet_utils ................   Passed    0.00 sec
+      Start 15: utest_COLL_narrow_prims
+16/92 Test #11: utest_CH_ISO2631 .......................   Passed    0.02 sec
+      Start 16: utest_COLL_narrow_mpr
+17/92 Test #15: utest_COLL_narrow_prims ................   Passed    0.00 sec
+      Start 17: utest_CH_slider_pend
+18/92 Test #16: utest_COLL_narrow_mpr ..................   Passed    0.00 sec
+      Start 18: utest_CH_double_pend
+19/92 Test #36: utest_CH_ConvexHull2D ..................   Passed    0.27 sec
+      Start 19: utest_CH_shafts
+20/92 Test  #1: utest_CH_archive .......................   Passed    0.30 sec
+      Start 20: utest_CH_compute_contact
+21/92 Test #20: utest_CH_compute_contact ...............   Passed    0.03 sec
+      Start 21: utest_CH_assembly
+22/92 Test #21: utest_CH_assembly ......................   Passed    0.00 sec
+      Start 22: utest_CH_composite_inertia
+23/92 Test #22: utest_CH_composite_inertia .............   Passed    0.00 sec
+      Start 23: utest_CH_prismatic_spring
+24/92 Test #23: utest_CH_prismatic_spring ..............   Passed    0.05 sec
+      Start 24: utest_JOINT_revolute
+25/92 Test #18: utest_CH_double_pend ...................   Passed    0.40 sec
+      Start 25: utest_JOINT_universal
+26/92 Test #19: utest_CH_shafts ........................   Passed    0.19 sec
+      Start 26: utest_JOINT_prismatic
+27/92 Test #25: utest_JOINT_universal ..................   Passed    0.10 sec
+      Start 27: utest_JOINT_cylindrical
+28/92 Test #17: utest_CH_slider_pend ...................   Passed    0.55 sec
+      Start 28: utest_JOINT_distance
+29/92 Test #27: utest_JOINT_cylindrical ................   Passed    0.25 sec
+      Start 29: utest_JOINT_distance_unilateral
+30/92 Test #29: utest_JOINT_distance_unilateral ........   Passed    0.01 sec
+      Start 30: utest_JOINT_rackpinion
+31/92 Test #30: utest_JOINT_rackpinion .................   Passed    0.14 sec
+      Start 31: utest_JOINT_linactuator
+32/92 Test #31: utest_JOINT_linactuator ................   Passed    0.05 sec
+      Start 32: utest_JOINT_transpring
+33/92 Test #32: utest_JOINT_transpring .................   Passed    0.10 sec
+      Start 33: utest_JOINT_tsda
+34/92 Test #24: utest_JOINT_revolute ...................   Passed    0.89 sec
+      Start 34: utest_JOINT_rotspring
+35/92 Test #26: utest_JOINT_prismatic ..................   Passed    1.00 sec
+      Start 37: utest_FEA_ANCFCable
+36/92 Test #37: utest_FEA_ANCFCable ....................   Passed    0.02 sec
+      Start 38: utest_FEA_ANCFbeam_3333
+37/92 Test #34: utest_JOINT_rotspring ..................   Passed    0.23 sec
+      Start 39: utest_FEA_ANCFbeam_Twist
+38/92 Test #38: utest_FEA_ANCFbeam_3333 ................   Passed    0.04 sec
+      Start 40: utest_FEA_IGABeam
+39/92 Test #39: utest_FEA_ANCFbeam_Twist ...............   Passed    0.01 sec
+      Start 41: utest_FEA_ANCFShell_Iso
+40/92 Test #40: utest_FEA_IGABeam ......................   Passed    0.01 sec
+      Start 42: utest_FEA_ANCFShell_Ort
+41/92 Test #41: utest_FEA_ANCFShell_Iso ................   Passed    0.07 sec
+      Start 43: utest_FEA_ANCFShell_OrtGrav
+42/92 Test #43: utest_FEA_ANCFShell_OrtGrav ............   Passed    0.10 sec
+      Start 44: utest_FEA_EASBrickIso
+43/92 Test #28: utest_JOINT_distance ...................   Passed    1.12 sec
+      Start 45: utest_FEA_EASBrickIso_Grav
+44/92 Test #42: utest_FEA_ANCFShell_Ort ................   Passed    0.30 sec
+      Start 46: utest_FEA_EASBrickMooneyR_Grav
+45/92 Test #45: utest_FEA_EASBrickIso_Grav .............   Passed    0.12 sec
+      Start 47: utest_FEA_ANCFConstraints
+46/92 Test #47: utest_FEA_ANCFConstraints ..............   Passed    0.02 sec
+      Start 48: utest_FEA_ANCFContact
+47/92 Test #48: utest_FEA_ANCFContact ..................   Passed    0.01 sec
+      Start 49: utest_FEA_compute_contact_mesh
+48/92 Test #46: utest_FEA_EASBrickMooneyR_Grav .........   Passed    0.05 sec
+      Start 50: utest_FEA_beams_static
+49/92 Test #49: utest_FEA_compute_contact_mesh .........   Passed    0.03 sec
+      Start 51: utest_FEA_ANCFbeam_3243_Formulation
+50/92 Test #50: utest_FEA_beams_static .................   Passed    0.01 sec
+      Start 52: utest_FEA_ANCFbeam_3333_Formulation
+51/92 Test #51: utest_FEA_ANCFbeam_3243_Formulation ....   Passed    0.02 sec
+      Start 53: utest_FEA_ANCFshell_3423_Formulation
+52/92 Test #52: utest_FEA_ANCFbeam_3333_Formulation ....   Passed    0.04 sec
+      Start 54: utest_FEA_ANCFshell_3443_Formulation
+53/92 Test #44: utest_FEA_EASBrickIso ..................   Passed    0.34 sec
+      Start 55: utest_FEA_ANCFshell_3833_Formulation
+54/92 Test #53: utest_FEA_ANCFshell_3423_Formulation ...   Passed    0.13 sec
+      Start 56: utest_FEA_ANCFhexa_3843_Formulation
+55/92 Test #33: utest_JOINT_tsda .......................   Passed    1.72 sec
+      Start 57: utest_FEA_ANCFhexa_3813_9
+56/92 Test #57: utest_FEA_ANCFhexa_3813_9 ..............   Passed    1.26 sec
+      Start 58: utest_FEA_domain_deformation
+57/92 Test #58: utest_FEA_domain_deformation ...........   Passed    3.29 sec
+      Start 61: utest_MCORE_real3
+58/92 Test #61: utest_MCORE_real3 ......................   Passed    0.01 sec
+      Start 62: utest_MCORE_real4
+59/92 Test #62: utest_MCORE_real4 ......................   Passed    0.00 sec
+      Start 63: utest_MCORE_matrix
+60/92 Test #63: utest_MCORE_matrix .....................   Passed    0.00 sec
+      Start 64: utest_MCORE_gravity
+61/92 Test #64: utest_MCORE_gravity ....................   Passed    0.01 sec
+      Start 65: utest_MCORE_shafts
+62/92 Test #65: utest_MCORE_shafts .....................   Passed    0.02 sec
+      Start 66: utest_MCORE_rotmotors
+63/92 Test #54: utest_FEA_ANCFshell_3443_Formulation ...   Passed    5.68 sec
+      Start 67: utest_MCORE_other_math
+64/92 Test #67: utest_MCORE_other_math .................   Passed    0.01 sec
+      Start 68: utest_MCORE_linactuator
+65/92 Test #68: utest_MCORE_linactuator ................   Passed    1.97 sec
+      Start 69: utest_MCORE_bodyauxref
+66/92 Test #69: utest_MCORE_bodyauxref .................   Passed    0.08 sec
+      Start 70: utest_MCORE_joints_dvi
+67/92 Test #70: utest_MCORE_joints_dvi .................   Passed    2.73 sec
+      Start 71: utest_MCORE_narrowphase
+68/92 Test #71: utest_MCORE_narrowphase ................   Passed    0.63 sec
+      Start 72: utest_MCORE_jacobians
+69/92 Test #72: utest_MCORE_jacobians ..................   Passed    0.38 sec
+      Start 73: utest_MCORE_contact_forces
+70/92 Test #56: utest_FEA_ANCFhexa_3843_Formulation ....   Passed   16.86 sec
+      Start 74: utest_SMCm_cohesion
+71/92 Test #74: utest_SMCm_cohesion ....................   Passed   12.72 sec
+      Start 75: utest_SMCm_cor_normal
+72/92 Test #75: utest_SMCm_cor_normal ..................   Passed   12.78 sec
+      Start 76: utest_SMCm_rolling_gravity
+73/92 Test #55: utest_FEA_ANCFshell_3833_Formulation ...   Passed   51.20 sec
+      Start 77: utest_SMCm_sliding_gravity
+74/92 Test #76: utest_SMCm_rolling_gravity .............   Passed   11.47 sec
+      Start 78: utest_SMCm_spinning_gravity
+75/92 Test #77: utest_SMCm_sliding_gravity .............   Passed   22.95 sec
+      Start 79: utest_SMCm_stacking
+76/92 Test #78: utest_SMCm_spinning_gravity ............   Passed   26.08 sec
+      Start 80: utest_DEM_frictionrolling
+77/92 Test #80: utest_DEM_frictionrolling ..............   Passed    8.79 sec
+      Start 81: utest_DEM_meshrolling
+78/92 Test #79: utest_SMCm_stacking ....................   Passed   19.23 sec
+      Start 82: utest_DEM_ballistic
+79/92 Test #82: utest_DEM_ballistic ....................   Passed    1.39 sec
+      Start 83: utest_DEM_stack
+80/92 Test #83: utest_DEM_stack ........................   Passed    3.66 sec
+      Start 84: utest_DEM_pyramid
+81/92 Test #84: utest_DEM_pyramid ......................   Passed   19.78 sec
+      Start 85: utest_FSI-SPH_Poiseuille_flow
+82/92 Test #81: utest_DEM_meshrolling ..................   Passed   31.43 sec
+      Start 86: utest_FSI-SPH_domain_guard
+83/92 Test #86: utest_FSI-SPH_domain_guard .............   Passed    1.31 sec
+      Start 87: utest_FSI-SPH_domain_update
+84/92 Test #87: utest_FSI-SPH_domain_update ............   Passed    0.51 sec
+      Start 88: utest_FSI-SPH_setter_guard
+85/92 Test #88: utest_FSI-SPH_setter_guard .............   Passed    0.34 sec
+      Start 89: utest_FSI-SPH_rheology_error_flag
+86/92 Test #89: utest_FSI-SPH_rheology_error_flag ......   Passed    0.28 sec
+      Start 90: utest_FSI-SPH_mcc_parameters
+87/92 Test #90: utest_FSI-SPH_mcc_parameters ...........   Passed    0.33 sec
+      Start 91: utest_FSI-SPH_proximity_cadence
+88/92 Test #85: utest_FSI-SPH_Poiseuille_flow ..........   Passed   10.54 sec
+      Start 92: utest_FSI-SPH_free_surface_export
+89/92 Test #92: utest_FSI-SPH_free_surface_export ......   Passed    0.42 sec
+90/92 Test #91: utest_FSI-SPH_proximity_cadence ........   Passed   34.22 sec
+91/92 Test #66: utest_MCORE_rotmotors ..................   Passed  198.93 sec
+92/92 Test #73: utest_MCORE_contact_forces .............   Passed  193.30 sec
+
+100% tests passed, 0 tests failed out of 92
+
+Label Time Summary:
+base         =   0.28 sec*proc (2 tests)
+collision    =   0.01 sec*proc (3 tests)
+core         =   0.35 sec*proc (13 tests)
+dem          =  65.06 sec*proc (5 tests)
+fea          =  79.60 sec*proc (22 tests)
+joints       =   5.60 sec*proc (11 tests)
+multicore    = 398.08 sec*proc (13 tests)
+physics      =   1.23 sec*proc (7 tests)
+smc_m        = 105.24 sec*proc (6 tests)
+sph          =  47.96 sec*proc (8 tests)
+vehicle      =   0.02 sec*proc (2 tests)
+
+Total Test time (real) = 206.72 sec
