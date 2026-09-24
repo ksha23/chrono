@@ -12,12 +12,25 @@
 //
 // Unit test for the solver constraint kernels ComputeJacobianTimesState and
 // IncrementState of the two-body, three-body-shaft and tuple constraints.
-// The results are compared bitwise against a reference implementation that
-// operates on the runtime-size state vector returned by ChVariables::State().
+// The results are compared against a reference implementation that operates
+// on the runtime-size state vector returned by ChVariables::State().
+//
+// The kernels use fixed-size Eigen expressions and the reference uses
+// runtime-size ones. Eigen does not guarantee that the two evaluation paths
+// round identically (e.g. different reduction order or FMA contraction), so the
+// pass criterion is 32 machine epsilons times the sum of the magnitudes of the
+// terms involved. This still catches any indexing, sign,
+// size or missing-term error. The number of results that are not bitwise
+// identical is printed for information; it is 0 on the platforms checked so
+// far (GCC and Clang, x86_64 SSE2/AVX2+FMA and arm64).
 //
 // =============================================================================
 
+#include <cmath>
+#include <iostream>
+#include <limits>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -58,17 +71,52 @@ double RefDot(const ChRowVectorN<double, N>& cq, ChVariables& var) {
     return cq * var.State();
 }
 
+// Sum of the magnitudes of the terms of the dot product, used to scale the tolerance.
+template <int N>
+double AbsDot(const ChRowVectorN<double, N>& cq, ChVariables& var) {
+    return cq.cwiseAbs() * var.State().cwiseAbs();
+}
+
+// Magnitudes of the terms of the increment, used to scale the tolerance.
+template <int N>
+ChVectorDynamic<double> AbsIncrement(const ChVectorN<double, N>& eq, ChVariables& var, double deltal) {
+    return var.State().cwiseAbs() + (eq * deltal).cwiseAbs();
+}
+
 template <int N>
 void RefIncrement(const ChVectorN<double, N>& eq, ChVariables& var, double deltal) {
     var.State() += eq * deltal;
 }
 
-// Bitwise comparison of two state vectors.
-void ExpectSameState(ChVectorConstRef a, ChVectorConstRef b) {
-    ASSERT_EQ(a.size(), b.size());
-    for (Eigen::Index i = 0; i < a.size(); i++)
-        EXPECT_EQ(a(i), b(i)) << "entry " << i;
-}
+// Compares kernel results with the reference within a tolerance scaled by the magnitude of the terms,
+// and counts the results that are not bitwise identical.
+class Checker {
+  public:
+    explicit Checker(const std::string& name) : m_name(name) {}
+    ~Checker() {
+        std::cout << "[ bitwise  ] " << m_name << ": " << m_mismatch << " of " << m_count
+                  << " results differ from the reference" << std::endl;
+    }
+
+    void Value(double got, double ref, double scale) {
+        m_count++;
+        if (got != ref)
+            m_mismatch++;
+        EXPECT_LE(std::abs(got - ref), kTol * scale) << m_name << ": got " << got << ", expected " << ref;
+    }
+
+    void State(ChVectorConstRef got, ChVectorConstRef ref, ChVectorConstRef scale) {
+        ASSERT_EQ(got.size(), ref.size());
+        for (Eigen::Index i = 0; i < got.size(); i++)
+            Value(got(i), ref(i), scale(i));
+    }
+
+  private:
+    static constexpr double kTol = 32 * std::numeric_limits<double>::epsilon();
+    std::string m_name;
+    int m_count = 0;
+    int m_mismatch = 0;
+};
 
 }  // namespace
 
@@ -77,6 +125,7 @@ void ExpectSameState(ChVectorConstRef a, ChVectorConstRef b) {
 TEST(ChConstraintState, TwoBodies) {
     ChVariablesBodyOwnMass va, vb;
     ChConstraintTwoBodies c(&va, &vb);
+    Checker check("TwoBodies");
 
     for (int trial = 0; trial < 1000; trial++) {
         // Exercise the inactive-variable branches too
@@ -97,22 +146,29 @@ TEST(ChConstraintState, TwoBodies) {
         ChVectorN<double, 6> eq_b = c.Get_Eq_b();
 
         double ref = 0;
-        if (va.IsActive())
+        double scale = 0;
+        if (va.IsActive()) {
             ref += RefDot<6>(cq_a, va);
-        if (vb.IsActive())
+            scale += AbsDot<6>(cq_a, va);
+        }
+        if (vb.IsActive()) {
             ref += RefDot<6>(cq_b, vb);
-        EXPECT_EQ(c.ComputeJacobianTimesState(), ref);
+            scale += AbsDot<6>(cq_b, vb);
+        }
+        check.Value(c.ComputeJacobianTimesState(), ref, scale);
 
         ChVariablesBodyOwnMass ra, rb;
         ra.State() = va.State();
         rb.State() = vb.State();
+        ChVectorDynamic<double> sa = AbsIncrement<6>(eq_a, ra, deltal);
+        ChVectorDynamic<double> sb = AbsIncrement<6>(eq_b, rb, deltal);
         if (va.IsActive())
             RefIncrement<6>(eq_a, ra, deltal);
         if (vb.IsActive())
             RefIncrement<6>(eq_b, rb, deltal);
         c.IncrementState(deltal);
-        ExpectSameState(va.State(), ra.State());
-        ExpectSameState(vb.State(), rb.State());
+        check.State(va.State(), ra.State(), sa);
+        check.State(vb.State(), rb.State(), sb);
     }
 }
 
@@ -120,6 +176,7 @@ TEST(ChConstraintState, ThreeBBShaft) {
     ChVariablesBodyOwnMass va, vb;
     ChVariablesShaft vc;
     ChConstraintThreeBBShaft c(&va, &vb, &vc);
+    Checker check("ThreeBBShaft");
 
     for (int trial = 0; trial < 1000; trial++) {
         va.SetDisabled(trial % 7 == 3);
@@ -142,25 +199,34 @@ TEST(ChConstraintState, ThreeBBShaft) {
         ChVectorN<double, 6> eq_b = c.Get_Eq_b();
 
         double ref = 0;
-        if (va.IsActive())
+        double scale = 0;
+        if (va.IsActive()) {
             ref += RefDot<6>(cq_a, va);
-        if (vb.IsActive())
+            scale += AbsDot<6>(cq_a, va);
+        }
+        if (vb.IsActive()) {
             ref += RefDot<6>(cq_b, vb);
+            scale += AbsDot<6>(cq_b, vb);
+        }
         ref += c.Get_Cq_c()(0) * vc.State()(0);
-        EXPECT_EQ(c.ComputeJacobianTimesState(), ref);
+        scale += std::abs(c.Get_Cq_c()(0) * vc.State()(0));
+        check.Value(c.ComputeJacobianTimesState(), ref, scale);
 
         ChVariablesBodyOwnMass ra, rb;
         ra.State() = va.State();
         rb.State() = vb.State();
+        ChVectorDynamic<double> sa = AbsIncrement<6>(eq_a, ra, deltal);
+        ChVectorDynamic<double> sb = AbsIncrement<6>(eq_b, rb, deltal);
         double qc = vc.State()(0) + c.Get_Eq_c()(0) * deltal;
+        double sc = std::abs(vc.State()(0)) + std::abs(c.Get_Eq_c()(0) * deltal);
         if (va.IsActive())
             RefIncrement<6>(eq_a, ra, deltal);
         if (vb.IsActive())
             RefIncrement<6>(eq_b, rb, deltal);
         c.IncrementState(deltal);
-        ExpectSameState(va.State(), ra.State());
-        ExpectSameState(vb.State(), rb.State());
-        EXPECT_EQ(vc.State()(0), qc);
+        check.State(va.State(), ra.State(), sa);
+        check.State(vb.State(), rb.State(), sb);
+        check.Value(vc.State()(0), qc, sc);
     }
 }
 
@@ -169,6 +235,7 @@ template <int N>
 void CheckTuple1() {
     ChVariablesGeneric v(N);
     ChConstraintTuple_1vars<N> t(&v);
+    Checker check("Tuple1<" + std::to_string(N) + ">");
 
     for (int trial = 0; trial < 1000; trial++) {
         v.SetDisabled(trial % 7 == 3);
@@ -181,14 +248,16 @@ void CheckTuple1() {
         ChVectorN<double, N> eq = t.Eq1();
 
         double ref = v.IsActive() ? RefDot<N>(cq, v) : 0.0;
-        EXPECT_EQ(t.ComputeJacobianTimesState(), ref);
+        double scale = v.IsActive() ? AbsDot<N>(cq, v) : 0.0;
+        check.Value(t.ComputeJacobianTimesState(), ref, scale);
 
         ChVariablesGeneric r(N);
         r.State() = v.State();
+        ChVectorDynamic<double> sr = AbsIncrement<N>(eq, r, deltal);
         if (v.IsActive())
             RefIncrement<N>(eq, r, deltal);
         t.IncrementState(deltal);
-        ExpectSameState(v.State(), r.State());
+        check.State(v.State(), r.State(), sr);
     }
 }
 
@@ -201,6 +270,7 @@ template <int N1, int N2>
 void CheckTuple2() {
     ChVariablesGeneric v1(N1), v2(N2);
     ChConstraintTuple_2vars<N1, N2> t(&v1, &v2);
+    Checker check("Tuple2<" + std::to_string(N1) + "," + std::to_string(N2) + ">");
 
     for (int trial = 0; trial < 1000; trial++) {
         v1.SetDisabled(trial % 7 == 3);
@@ -219,22 +289,29 @@ void CheckTuple2() {
         ChVectorN<double, N2> eq2 = t.Eq2();
 
         double ref = 0;
-        if (v1.IsActive())
+        double scale = 0;
+        if (v1.IsActive()) {
             ref += RefDot<N1>(cq1, v1);
-        if (v2.IsActive())
+            scale += AbsDot<N1>(cq1, v1);
+        }
+        if (v2.IsActive()) {
             ref += RefDot<N2>(cq2, v2);
-        EXPECT_EQ(t.ComputeJacobianTimesState(), ref);
+            scale += AbsDot<N2>(cq2, v2);
+        }
+        check.Value(t.ComputeJacobianTimesState(), ref, scale);
 
         ChVariablesGeneric r1(N1), r2(N2);
         r1.State() = v1.State();
         r2.State() = v2.State();
+        ChVectorDynamic<double> s1 = AbsIncrement<N1>(eq1, r1, deltal);
+        ChVectorDynamic<double> s2 = AbsIncrement<N2>(eq2, r2, deltal);
         if (v1.IsActive())
             RefIncrement<N1>(eq1, r1, deltal);
         if (v2.IsActive())
             RefIncrement<N2>(eq2, r2, deltal);
         t.IncrementState(deltal);
-        ExpectSameState(v1.State(), r1.State());
-        ExpectSameState(v2.State(), r2.State());
+        check.State(v1.State(), r1.State(), s1);
+        check.State(v2.State(), r2.State(), s2);
     }
 }
 
@@ -248,6 +325,7 @@ template <int N1, int N2, int N3>
 void CheckTuple3() {
     ChVariablesGeneric v1(N1), v2(N2), v3(N3);
     ChConstraintTuple_3vars<N1, N2, N3> t(&v1, &v2, &v3);
+    Checker check("Tuple3<" + std::to_string(N1) + "," + std::to_string(N2) + "," + std::to_string(N3) + ">");
 
     for (int trial = 0; trial < 1000; trial++) {
         v1.SetDisabled(trial % 7 == 3);
@@ -272,18 +350,28 @@ void CheckTuple3() {
         ChVectorN<double, N3> eq3 = t.Eq3();
 
         double ref = 0;
-        if (v1.IsActive())
+        double scale = 0;
+        if (v1.IsActive()) {
             ref += RefDot<N1>(cq1, v1);
-        if (v2.IsActive())
+            scale += AbsDot<N1>(cq1, v1);
+        }
+        if (v2.IsActive()) {
             ref += RefDot<N2>(cq2, v2);
-        if (v3.IsActive())
+            scale += AbsDot<N2>(cq2, v2);
+        }
+        if (v3.IsActive()) {
             ref += RefDot<N3>(cq3, v3);
-        EXPECT_EQ(t.ComputeJacobianTimesState(), ref);
+            scale += AbsDot<N3>(cq3, v3);
+        }
+        check.Value(t.ComputeJacobianTimesState(), ref, scale);
 
         ChVariablesGeneric r1(N1), r2(N2), r3(N3);
         r1.State() = v1.State();
         r2.State() = v2.State();
         r3.State() = v3.State();
+        ChVectorDynamic<double> s1 = AbsIncrement<N1>(eq1, r1, deltal);
+        ChVectorDynamic<double> s2 = AbsIncrement<N2>(eq2, r2, deltal);
+        ChVectorDynamic<double> s3 = AbsIncrement<N3>(eq3, r3, deltal);
         if (v1.IsActive())
             RefIncrement<N1>(eq1, r1, deltal);
         if (v2.IsActive())
@@ -291,9 +379,9 @@ void CheckTuple3() {
         if (v3.IsActive())
             RefIncrement<N3>(eq3, r3, deltal);
         t.IncrementState(deltal);
-        ExpectSameState(v1.State(), r1.State());
-        ExpectSameState(v2.State(), r2.State());
-        ExpectSameState(v3.State(), r3.State());
+        check.State(v1.State(), r1.State(), s1);
+        check.State(v2.State(), r2.State(), s2);
+        check.State(v3.State(), r3.State(), s3);
     }
 }
 
