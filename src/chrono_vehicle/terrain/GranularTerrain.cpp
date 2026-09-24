@@ -489,10 +489,12 @@ void GranularTerrain::Synchronize(double time) {
 
 //// TODO: work in the World vertical direction
 
-// Intersect the vertical line through 'loc' with all particles and return the highest intersection point. If the line
-// does not hit any particle, return the point on the bottom boundary. The Z coordinate of 'loc' is ignored.
+// Lower a probe sphere with the particle radius along the vertical line through 'loc' and return the lowest point of
+// the probe where it first touches a particle. Using a probe (rather than intersecting the vertical line with the
+// particles) bridges the small gaps between neighboring particles. If the probe does not touch any particle, return the
+// point on the bottom boundary. The Z coordinate of 'loc' is ignored.
 ChVector3d GranularTerrain::GetPoint(const ChVector3d& loc) const {
-    double r2 = m_radius * m_radius;
+    double d2max = 4 * m_radius * m_radius;
     double height = m_bottom;
     for (const auto& body : m_ground->GetSystem()->GetBodies()) {
         if (body->GetTag() < tag_particles)
@@ -501,8 +503,8 @@ ChVector3d GranularTerrain::GetPoint(const ChVector3d& loc) const {
         double dx = pos.x() - loc.x();
         double dy = pos.y() - loc.y();
         double d2 = dx * dx + dy * dy;
-        if (d2 < r2)
-            height = std::max(height, pos.z() + std::sqrt(r2 - d2));
+        if (d2 < d2max)
+            height = std::max(height, pos.z() + std::sqrt(d2max - d2) - m_radius);
     }
     return ChVector3d(loc.x(), loc.y(), height);
 }
