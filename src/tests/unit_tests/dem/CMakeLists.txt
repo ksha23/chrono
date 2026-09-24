@@ -6,6 +6,7 @@ SET(TESTS
     utest_DEM_stack
     utest_DEM_pyramid
     utest_DEM_advance
+    utest_DEM_system_reuse
 )
 
 SET(LIBS

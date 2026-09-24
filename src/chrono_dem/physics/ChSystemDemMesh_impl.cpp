@@ -17,6 +17,7 @@
 #include <fstream>
 #include <string>
 #include <cmath>
+#include <cstring>
 
 #include "chrono/core/ChDataPath.h"
 #include "chrono/core/ChVector3.h"
@@ -47,6 +48,11 @@ ChSystemDemMesh_impl::ChSystemDemMesh_impl(float sphere_rad, float density, floa
 
     // Allocate the device soup storage
     demErrchk(gpuMallocManaged(&meshSoup, sizeof(TriangleSoup), gpuMemAttachGlobal));
+
+    // Managed allocations are not zeroed (and may reuse memory freed by a previous system). In particular, the soup
+    // arrays are freed in the destructor even if no mesh was added.
+    std::memset(tri_params, 0, sizeof(MeshParams));
+    std::memset(meshSoup, 0, sizeof(TriangleSoup));
     // start with no triangles
     meshSoup->nTrianglesInSoup = 0;
     meshSoup->numTriangleFamilies = 0;
