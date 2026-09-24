@@ -866,7 +866,7 @@ __global__ void CrmHolmesBC_D(const uint* numNeighborsPerPart,
     Real chi_BCE = kernelSupport.x / kernelSupport.y;
     Real dBCE = SuppRadii * (2 * chi_BCE - 1);
     int predicateBCE = (dBCE < 0);
-    dBCE = predicateBCE ? 0.01 * SuppRadii : dBCE;
+    dBCE = predicateBCE ? Real(0.01) * SuppRadii : dBCE;
     Real3 prescribedVel = (IsBceSolidMarker(sortedRhoPresMuD[index].w)) ? (sortedVelMasD[index]) : mR3(0);
     Real3 velMasB_new = mR3(0);
 
@@ -893,7 +893,7 @@ __global__ void CrmHolmesBC_D(const uint* numNeighborsPerPart,
         Real chi_Fluid = sortedKernelSupport[j].x / sortedKernelSupport[j].y;
         Real dFluid = SuppRadii * (2 * chi_Fluid - 1);
         int predicateFluid = (dFluid < 0);
-        dFluid = predicateFluid ? 0.01 * SuppRadii : dFluid;
+        dFluid = predicateFluid ? Real(0.01) * SuppRadii : dFluid;
 
         Real dFluidBCE = dBCE / dFluid;
         // Use predication to avoid branching
@@ -950,7 +950,7 @@ __global__ void CfdHolmesBC_D(const uint* numNeighborsPerPart,
     Real chi_BCE = kernelSupport.x / kernelSupport.y;
     Real dBCE = SuppRadii * (2 * chi_BCE - 1);
     int predicateBCE = (dBCE < 0);
-    dBCE = predicateBCE ? 0.01 * SuppRadii : dBCE;
+    dBCE = predicateBCE ? Real(0.01) * SuppRadii : dBCE;
     Real3 prescribedVel = (IsBceSolidMarker(sortedRhoPresMuD[index].w)) ? (sortedVelMasD[index]) : mR3(0);
     Real3 velMasB_new = mR3(0);
 
@@ -975,7 +975,7 @@ __global__ void CfdHolmesBC_D(const uint* numNeighborsPerPart,
         Real chi_Fluid = sortedKernelSupport[j].x / sortedKernelSupport[j].y;
         Real dFluid = SuppRadii * (2 * chi_Fluid - 1);
         int predicateFluid = (dFluid < 0);
-        dFluid = predicateFluid ? 0.01 * SuppRadii : dFluid;
+        dFluid = predicateFluid ? Real(0.01) * SuppRadii : dFluid;
 
         Real dFluidBCE = dBCE / dFluid;
         // Use predication to avoid branching
