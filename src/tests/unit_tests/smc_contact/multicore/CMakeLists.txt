@@ -5,6 +5,7 @@ set(TESTS
     utest_SMCm_sliding_gravity
     utest_SMCm_spinning_gravity
     utest_SMCm_stacking
+    utest_SMCm_history_slots
 )
 
 set(UTILS
