@@ -30,6 +30,8 @@
 #include "chrono/fea/ChMesh.h"
 #include "chrono/solver/ChDirectSolverLS.h"
 
+#include <Eigen/Eigenvalues>
+
 #include "chrono_modal/ChModalAssembly.h"
 #include "chrono_modal/ChModalSolverUndamped.h"
 #include "chrono_modal/ChUnsymGenEigenvalueSolver.h"
@@ -39,11 +41,9 @@ using namespace chrono::modal;
 using namespace chrono::fea;
 
 struct ReducedResult {
-    ChVectorDynamic<> freq;
-    ChMatrixDynamic<> modal_M;
-    ChMatrixDynamic<> modal_K;
-    ChMatrixDynamic<> Psi;
-    ChVectorDynamic<> tip;  // tip node position history
+    ChVectorDynamic<> eig;    // eigenvalues of the reduced pencil (modal_K, modal_M), sorted
+    ChMatrixDynamic<> Psi_S;  // static modes (boundary columns of Psi); independent of eigenvector signs
+    ChVectorDynamic<> tip;    // tip node position history
 };
 
 static double RelDiff(const ChMatrixDynamic<>& a, const ChMatrixDynamic<>& b) {
@@ -113,11 +113,16 @@ static ReducedResult RunModel(ChModalAssembly::ReductionType type, std::shared_p
     hht->SetStepControl(false);
     hht->SetAlpha(-0.2);
 
+    // Eigenvalues of the reduced model are invariant to the sign/normalization of the retained eigenvectors,
+    // so they can be compared directly between runs
     ReducedResult res;
-    res.freq = assembly->GetUndampedFrequencies();
-    res.modal_M = assembly->GetModalMassMatrix();
-    res.modal_K = assembly->GetModalStiffnessMatrix();
-    res.Psi = assembly->GetModalReductionMatrix();
+    const ChMatrixDynamic<>& Mr = assembly->GetModalMassMatrix();
+    const ChMatrixDynamic<>& Kr = assembly->GetModalStiffnessMatrix();
+    Eigen::GeneralizedEigenSolver<ChMatrixDynamic<>> ges(Kr, Mr, false);
+    res.eig = ges.eigenvalues().real();
+    std::sort(res.eig.data(), res.eig.data() + res.eig.size());
+    int nB = assembly->GetNumCoordinatesVelBoundary();
+    res.Psi_S = assembly->GetModalReductionMatrix().leftCols(nB);
 
     node_B->SetForce(ChVector3d(0, -3, 2));
     const int num_steps = 50;
@@ -143,19 +148,17 @@ TEST_P(ModalSolverLUvsQR, reduced_model_and_dynamics) {
     auto lu = RunModel(type, chrono_types::make_shared<ChSolverSparseLU>());
     auto qr = RunModel(type, chrono_types::make_shared<ChSolverSparseQR>());
 
-    const double tol = 1e-9;
-    double d_freq = RelDiff(lu.freq, qr.freq);
-    double d_M = RelDiff(lu.modal_M, qr.modal_M);
-    double d_K = RelDiff(lu.modal_K, qr.modal_K);
-    double d_Psi = RelDiff(lu.Psi, qr.Psi);
+    const double tol = 1e-10;
+    double d_eig = RelDiff(lu.eig, qr.eig);
+    double d_Psi = RelDiff(lu.Psi_S, qr.Psi_S);
     double d_tip = RelDiff(lu.tip, qr.tip);
-    std::cout << "LU vs QR relative differences: freq " << d_freq << "  modal_M " << d_M << "  modal_K " << d_K << "  Psi " << d_Psi << "  tip history " << d_tip << std::endl;
+    std::cout << "LU vs QR relative differences: reduced eigenvalues " << d_eig << "  static modes " << d_Psi << "  tip history " << d_tip << std::endl;
 
-    ASSERT_GT(lu.freq.size(), 0);
+    ASSERT_GT(lu.eig.size(), 0);
+    EXPECT_TRUE(lu.eig.allFinite());
     EXPECT_TRUE(lu.tip.allFinite());
-    EXPECT_LT(d_freq, tol);
-    EXPECT_LT(d_M, tol);
-    EXPECT_LT(d_K, tol);
+    EXPECT_GT((lu.tip.tail(3) - lu.tip.head(3)).norm(), 1e-4);  // the tip does move
+    EXPECT_LT(d_eig, tol);
     EXPECT_LT(d_Psi, tol);
     EXPECT_LT(d_tip, tol);
 }
