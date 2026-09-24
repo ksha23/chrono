@@ -20,8 +20,14 @@
 // 2. A settled bed of spheres on a force-tracking plane. At rest, the plane carries
 //    the weight of the bed, the kinetic energy is negligible, and the mean height
 //    stays at its reference value.
+// 3. Pairs of spheres that barely touch, for each sphere-sphere force kernel. The float
+//    contact distance of such a pair can round to a slightly negative penetration; all
+//    states must stay finite.
+// 4. Free fall with the extended Taylor integrator, which is exact for a constant
+//    acceleration.
 // =============================================================================
 
+#include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <iostream>
@@ -74,8 +80,9 @@ void RunColumn(bool mat_based, CHDEM_FRICTION_MODE friction) {
     sys.SetParticles(pos);
     sys.SetParticleFixed(fixed);
 
+    // Always select the model explicitly (see the note above the tests)
+    sys.UseMaterialBasedModel(mat_based);
     if (mat_based) {
-        sys.UseMaterialBasedModel(true);
         sys.SetYoungModulus_SPH(youngs);
         sys.SetYoungModulus_WALL(youngs);
         sys.SetPoissonRatio_SPH(poisson);
@@ -121,10 +128,94 @@ void RunColumn(bool mat_based, CHDEM_FRICTION_MODE friction) {
     }
 }
 
+// Pairs of spheres whose centers are 2R apart in user units, in many directions, with the default (minimum) length
+// unit as in the DEM demos (here R is about 2.7e7 SU). After conversion to integer SU, each pair penetrates or is
+// separated by up to about a hundred SU, i.e. it barely touches. The float contact distance of such a pair has an
+// error of a few SU (about 1e-7 * 2R) and can give a slightly negative penetration, which must not produce a NaN.
+void RunNearTouchingPairs(bool mat_based, CHDEM_FRICTION_MODE friction) {
+    const int n_side = 12;                    // pairs per side of the lattice
+    const float spacing = 6 * radius;         // lattice spacing
+    const float half = n_side * spacing / 2;  // half lattice size
+
+    ChSystemDem sys(radius, density, ChVector3f(2 * half + 8, 2 * half + 8, 2 * half + 8));
+
+    std::vector<ChVector3f> pos;
+    const int npairs = n_side * n_side * n_side;
+    int k = 0;
+    for (int i = 0; i < n_side; i++) {
+        for (int j = 0; j < n_side; j++) {
+            for (int l = 0; l < n_side; l++, k++) {
+                // direction on a golden-angle spiral
+                double cz = 1 - 2 * (k + 0.5) / npairs;
+                double sz = std::sqrt(1 - cz * cz);
+                double phi = k * 2.399963229728653;
+                ChVector3f dir((float)(sz * std::cos(phi)), (float)(sz * std::sin(phi)), (float)cz);
+                ChVector3f a(-half + spacing * (i + 0.5f), -half + spacing * (j + 0.5f), -half + spacing * (l + 0.5f));
+                pos.push_back(a);
+                pos.push_back(a + 2 * radius * dir);
+            }
+        }
+    }
+    sys.SetParticles(pos);
+
+    sys.UseMaterialBasedModel(mat_based);
+    if (mat_based) {
+        sys.SetYoungModulus_SPH(youngs);
+        sys.SetYoungModulus_WALL(youngs);
+        sys.SetPoissonRatio_SPH(poisson);
+        sys.SetPoissonRatio_WALL(poisson);
+        sys.SetRestitution_SPH(0.1);
+        sys.SetRestitution_WALL(0.1);
+    } else {
+        sys.SetKn_SPH2SPH(kn);
+        sys.SetKn_SPH2WALL(kn);
+        sys.SetGn_SPH2SPH(5e4);
+        sys.SetGn_SPH2WALL(5e4);
+        sys.SetKt_SPH2SPH(kn);
+        sys.SetKt_SPH2WALL(kn);
+        sys.SetGt_SPH2SPH(5e4);
+        sys.SetGt_SPH2WALL(5e4);
+    }
+    sys.SetStaticFrictionCoeff_SPH2SPH(0.5f);
+    sys.SetStaticFrictionCoeff_SPH2WALL(0.5f);
+
+    sys.SetGravitationalAcceleration(ChVector3f(0, 0, -grav));
+    sys.SetFrictionMode(friction);
+    sys.SetTimeIntegrator(CHDEM_TIME_INTEGRATOR::CENTERED_DIFFERENCE);
+    sys.SetFixedStepSize(1e-5f);
+    sys.SetBDFixed(true);
+    sys.SetVerbosity(CHDEM_VERBOSITY::QUIET);
+    sys.Initialize();
+
+    for (int step = 0; step < 5; step++)
+        sys.AdvanceSimulation(1e-5f);
+
+    size_t nonfinite = 0;
+    double vmax = 0;
+    for (size_t n = 0; n < pos.size(); n++) {
+        ChVector3f p = sys.GetParticlePosition((int)n);
+        ChVector3f v = sys.GetParticleVelocity((int)n);
+        if (!std::isfinite(p.x()) || !std::isfinite(p.y()) || !std::isfinite(p.z()) || !std::isfinite(v.x()) || !std::isfinite(v.y()) || !std::isfinite(v.z()))
+            nonfinite++;
+        else
+            vmax = std::max(vmax, (double)v.Length());
+    }
+    unsigned int ncontacts = sys.GetNumContacts();
+    std::cout << npairs << " pairs, " << ncontacts << " in contact, non-finite states " << nonfinite << ", max speed " << vmax << " (free fall " << grav * 5e-5 << ")" << std::endl;
+    EXPECT_EQ(nonfinite, 0u);
+    // about half of the pairs touch, the others are separated by a few SU (contacts are counted only with friction)
+    if (friction != CHDEM_FRICTION_MODE::FRICTIONLESS)
+        EXPECT_GT(ncontacts, npairs / 4u);
+    // the contact forces are negligible: every sphere moves as in free fall
+    EXPECT_NEAR(vmax, grav * 5e-5, 1e-3 * grav * 5e-5);
+}
+
 }  // namespace
 
-// Note: the bed test runs first. A ChSystemDem created after a material-based one in the same process does
-// not advance (observed at aa3922df4a), so the material-based cases come last.
+// Note: every test selects the contact model explicitly with UseMaterialBasedModel. At aa3922df4a the constructor
+// does not initialize the device-side use_mat_based flag, so a system created after a material-based one in the same
+// process can inherit the flag from reused managed memory and then does not advance. With the explicit call the
+// tests pass in any order (checked with --gtest_shuffle).
 TEST(demContactForces, settled_bed) {
     const float box = 24;
     ChSystemDem sys(radius, density, ChVector3f(box, box, 40));
@@ -142,6 +233,7 @@ TEST(demContactForces, settled_bed) {
 
     size_t floor = sys.CreateBCPlane(ChVector3f(0, 0, -16), ChVector3f(0, 0, 1), true);
 
+    sys.UseMaterialBasedModel(false);
     sys.SetKn_SPH2SPH(kn);
     sys.SetKn_SPH2WALL(kn);
     sys.SetGn_SPH2SPH(2e4);
@@ -204,4 +296,56 @@ TEST(demContactForces, column_matbased_friction) {
 
 TEST(demContactForces, column_matbased_frictionless) {
     RunColumn(true, CHDEM_FRICTION_MODE::FRICTIONLESS);
+}
+
+TEST(demContactForces, near_touching_user_friction) {
+    RunNearTouchingPairs(false, CHDEM_FRICTION_MODE::MULTI_STEP);
+}
+
+TEST(demContactForces, near_touching_matbased_friction) {
+    RunNearTouchingPairs(true, CHDEM_FRICTION_MODE::MULTI_STEP);
+}
+
+TEST(demContactForces, near_touching_matbased_frictionless) {
+    RunNearTouchingPairs(true, CHDEM_FRICTION_MODE::FRICTIONLESS);
+}
+
+// Extended Taylor: x += h (v + a h / 2), v += a h. For a constant acceleration this is exact, z(t) = z0 - g t^2 / 2,
+// while forward Euler and centered difference are off by -+ g t h / 2 (0.0098 here).
+TEST(demContactForces, free_fall_extended_taylor) {
+    ChSystemDem sys(radius, density, ChVector3f(10, 10, 60));
+    const float z0 = 25;
+    std::vector<ChVector3f> pos = {ChVector3f(0.37f, 0.21f, z0), ChVector3f(-2.63f, 0.21f, z0)};
+    sys.SetParticles(pos);
+    sys.UseMaterialBasedModel(false);
+    sys.SetKn_SPH2SPH(kn);
+    sys.SetKn_SPH2WALL(kn);
+    sys.SetGn_SPH2SPH(5e4);
+    sys.SetGn_SPH2WALL(5e4);
+    sys.SetGravitationalAcceleration(ChVector3f(0, 0, -grav));
+    sys.SetFrictionMode(CHDEM_FRICTION_MODE::FRICTIONLESS);
+    sys.SetTimeIntegrator(CHDEM_TIME_INTEGRATOR::EXTENDED_TAYLOR);
+    const float h = 1e-4f;
+    const int nsteps = 2000;
+    sys.SetFixedStepSize(h);
+    sys.SetBDFixed(true);
+    sys.SetVerbosity(CHDEM_VERBOSITY::QUIET);
+    sys.Initialize();
+
+    for (int n = 0; n < nsteps; n++)
+        sys.AdvanceSimulation(h);
+
+    const double t = (double)nsteps * h;
+    const double z_exact = z0 - grav * t * t / 2;
+    // (the system may reorder the spheres; match them by x)
+    for (int i = 0; i < 2; i++) {
+        ChVector3f p = sys.GetParticlePosition(i);
+        ChVector3f v = sys.GetParticleVelocity(i);
+        const ChVector3f& p0 = std::abs(p.x() - pos[0].x()) < 1 ? pos[0] : pos[1];
+        std::cout << std::setprecision(8) << "sphere " << i << ": z " << p.z() << ", exact " << z_exact << ", vz " << v.z() << ", exact " << -grav * t << std::endl;
+        EXPECT_NEAR(p.z(), z_exact, 1e-4);
+        EXPECT_NEAR(v.z(), -grav * t, 1e-5 * grav * t);
+        EXPECT_NEAR(p.x(), p0.x(), 1e-5);
+        EXPECT_NEAR(p.y(), p0.y(), 1e-5);
+    }
 }
