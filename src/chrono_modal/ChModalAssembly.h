@@ -104,7 +104,10 @@ class ChApiModal ChModalAssembly : public ChAssembly {
                           const ChModalDamping& damping_model = ChModalDampingNone()   ///< damping model
     );
 
-    /// Set a new linear solver to use for K_IIc^{-1} computation
+    /// Set a new linear solver to use for K_IIc^{-1} computation.
+    /// The default is ChSolverSparseLU. If the default solver fails to factorize K_IIc (for example, K_IIc is rank
+    /// deficient because the internal subsystem has a mechanism), the reduction falls back to ChSolverSparseQR with a
+    /// warning. If a solver set here fails, the reduction throws. Use ChSolverSparseQR if K_IIc may be rank deficient.
     void SetModalSolver(std::shared_ptr<ChDirectSolverLS> newsolver);
 
     /// Return the internal linear solver for K_IIc^{-1} computation
@@ -543,6 +546,11 @@ class ChApiModal ChModalAssembly : public ChAssembly {
     /// Both Herting and Craig-Bampton reductions are implemented in this function.
     void ApplyModeAccelerationTransformation(const ChModalDamping& damping_model = ChModalDampingNone());
 
+    /// [INTERNAL USE ONLY]
+    /// Factorize the matrix currently loaded in the K_IIc^{-1} solver. If the default solver fails, fall back to
+    /// ChSolverSparseQR; if a user-provided solver fails, throw.
+    void SetupModalSolver();
+
     /// Computes the increment of the modal assembly (the increment of the current configuration respect
     /// to the initial "undeformed" configuration), and also gets the current speed.
     /// u_locred = P_W^T*[\delta qB; \delta eta]: corotated local displacement.
@@ -602,6 +610,7 @@ class ChApiModal ChModalAssembly : public ChAssembly {
     ChMatrixDynamic<> Psi_Cor_LambdaI;  ///< static correction mode - corresponding to internal Lagrange multipliers.
 
     std::shared_ptr<ChDirectSolverLS> m_solver_invKIIc;  /// linear solver for K_IIc^{-1}
+    bool m_modal_solver_is_default = true;               /// true if m_solver_invKIIc was not set by SetModalSolver()
 
     // Results of eigenvalue analysis like ComputeModes() or ComputeModesDamped():
     ChMatrixDynamic<std::complex<double>> m_modal_eigvect;  // eigenvectors

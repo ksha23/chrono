@@ -455,8 +455,8 @@ int main(int argc, char* argv[]) {
     auto mkl_solver = chrono_types::make_shared<ChSolverPardisoMKL>();
     sys.SetSolver(mkl_solver);
 #else
-    auto qr_solver = chrono_types::make_shared<ChSolverSparseQR>();
-    sys.SetSolver(qr_solver);
+    auto lu_solver = chrono_types::make_shared<ChSolverSparseLU>();
+    sys.SetSolver(lu_solver);
 #endif
 
     // Use HHT second order integrator (but slower)

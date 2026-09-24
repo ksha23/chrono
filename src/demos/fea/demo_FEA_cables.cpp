@@ -33,8 +33,9 @@ ChVisualSystem::Type vis_type = ChVisualSystem::Type::VSG;
 // Set integration step size
 double step = 1e-3;
 
-// Select solver type (SPARSE_QR, SPARSE_LU, or MINRES).
-ChSolver::Type solver_type = ChSolver::Type::SPARSE_QR;
+// Select solver type (SPARSE_LU, SPARSE_QR, or MINRES).
+// SPARSE_QR is rank-revealing but much slower; use it only for rank-deficient problems.
+ChSolver::Type solver_type = ChSolver::Type::SPARSE_LU;
 
 // Create output file with node positions and directions
 bool output = false;

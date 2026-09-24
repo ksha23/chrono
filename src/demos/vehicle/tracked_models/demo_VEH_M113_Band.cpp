@@ -311,11 +311,11 @@ int main(int argc, char* argv[]) {
     // Linear solver
 #ifndef CHRONO_PARDISO_MKL
     if (solver_type == ChSolver::Type::PARDISO_MKL)
-        solver_type = ChSolver::Type::SPARSE_QR;
+        solver_type = ChSolver::Type::SPARSE_LU;
 #endif
 #ifndef CHRONO_MUMPS
     if (solver_type == ChSolver::Type::MUMPS)
-        solver_type = ChSolver::Type::SPARSE_QR;
+        solver_type = ChSolver::Type::SPARSE_LU;
 #endif
 
     std::shared_ptr<ChDirectSolverLS> solver;

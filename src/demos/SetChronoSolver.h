@@ -67,16 +67,18 @@ bool SetChronoSolver(chrono::ChSystem& sys,
         return false;
     }
 
-    // If the requested direct sparse solver module is not enabled, default to SPARSE_QR
+    // If the requested direct sparse solver module is not enabled, default to SPARSE_LU.
+    // Eigen's SparseLU is much faster than SparseQR on typical multibody and FEA systems. SPARSE_QR (rank-revealing)
+    // can still be requested explicitly for rank-deficient problems (e.g., redundant constraints).
     if (slvr_type == chrono::ChSolver::Type::PARDISO_MKL) {
 #ifndef CHRONO_PARDISO_MKL
-        slvr_type = chrono::ChSolver::Type::SPARSE_QR;
-        cout << prefix << "Chrono::PardisoMKL not enabled. Setting solver to SPARSE_QR" << endl;
+        slvr_type = chrono::ChSolver::Type::SPARSE_LU;
+        cout << prefix << "Chrono::PardisoMKL not enabled. Setting solver to SPARSE_LU" << endl;
 #endif
     } else if (slvr_type == chrono::ChSolver::Type::MUMPS) {
 #ifndef CHRONO_MUMPS
-        slvr_type = chrono::ChSolver::Type::SPARSE_QR;
-        cout << prefix << "Chrono::MUMPS not enabled. Setting solver to SPARSE_QR" << endl;
+        slvr_type = chrono::ChSolver::Type::SPARSE_LU;
+        cout << prefix << "Chrono::MUMPS not enabled. Setting solver to SPARSE_LU" << endl;
 #endif
     }
 
