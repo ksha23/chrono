@@ -377,29 +377,30 @@ void FsiDataManager::ConstructReferenceArray() {
 }
 
 void FsiDataManager::ResetData() {
+    // These fills are ordered with the kernels of the step, so the host need not wait for them.
     auto zero4 = mR4(0);
     auto zero3 = mR3(0);
 
-    thrust::fill(derivVelRhoD.begin(), derivVelRhoD.end(), zero4);
-    thrust::fill(derivVelRhoOriginalD.begin(), derivVelRhoOriginalD.end(), zero4);
-    thrust::fill(freeSurfaceIdD.begin(), freeSurfaceIdD.end(), 0);
-    thrust::fill(posDivergenceD.begin(), posDivergenceD.end(), Real(0));
+    thrust::fill(SPH_THRUST_NOSYNC, derivVelRhoD.begin(), derivVelRhoD.end(), zero4);
+    thrust::fill(SPH_THRUST_NOSYNC, derivVelRhoOriginalD.begin(), derivVelRhoOriginalD.end(), zero4);
+    thrust::fill(SPH_THRUST_NOSYNC, freeSurfaceIdD.begin(), freeSurfaceIdD.end(), 0);
+    thrust::fill(SPH_THRUST_NOSYNC, posDivergenceD.begin(), posDivergenceD.end(), Real(0));
 
-    thrust::fill(vel_XSPH_D.begin(), vel_XSPH_D.end(), zero3);
+    thrust::fill(SPH_THRUST_NOSYNC, vel_XSPH_D.begin(), vel_XSPH_D.end(), zero3);
 
     if (paramsH->integration_scheme == IntegrationScheme::IMPLICIT_SPH)
-        thrust::fill(sr_tau_I_mu_i.begin(), sr_tau_I_mu_i.end(), zero4);
+        thrust::fill(SPH_THRUST_NOSYNC, sr_tau_I_mu_i.begin(), sr_tau_I_mu_i.end(), zero4);
 
     //// TODO: ISPH only
-    thrust::fill(bceAcc.begin(), bceAcc.end(), zero3);
+    thrust::fill(SPH_THRUST_NOSYNC, bceAcc.begin(), bceAcc.end(), zero3);
 
     //// TODO: CRM only
-    thrust::fill(derivTauXxYyZzD.begin(), derivTauXxYyZzD.end(), zero3);
-    thrust::fill(derivTauXyXzYzD.begin(), derivTauXyXzYzD.end(), zero3);
+    thrust::fill(SPH_THRUST_NOSYNC, derivTauXxYyZzD.begin(), derivTauXxYyZzD.end(), zero3);
+    thrust::fill(SPH_THRUST_NOSYNC, derivTauXyXzYzD.begin(), derivTauXyXzYzD.end(), zero3);
 
     //// Time step vectors
-    thrust::fill(courantViscousTimeStepD.begin(), courantViscousTimeStepD.end(), std::numeric_limits<Real>::max());
-    thrust::fill(accelerationTimeStepD.begin(), accelerationTimeStepD.end(), std::numeric_limits<Real>::max());
+    thrust::fill(SPH_THRUST_NOSYNC, courantViscousTimeStepD.begin(), courantViscousTimeStepD.end(), std::numeric_limits<Real>::max());
+    thrust::fill(SPH_THRUST_NOSYNC, accelerationTimeStepD.begin(), accelerationTimeStepD.end(), std::numeric_limits<Real>::max());
 }
 
 // ------------------------------------------------------------------------------
@@ -444,7 +445,13 @@ void FsiDataManager::ResizeArrays(uint numExtended) {
         m_resize_counter = 0;
     }
 
-    // Always resize to actual size needed
+    // Resize only to grow (or before shrinking the capacity). All kernels and algorithms work on the first numExtended
+    // entries (countersH->numExtendedParticles), never on the array sizes, so a larger size is harmless. Resizing down
+    // and back up as the number of active particles fluctuates would instead value-initialize the regrown entries of
+    // every array, one kernel and one host-device synchronization per array.
+    if (numExtended <= markersProximity_D->gridMarkerHashD.size() && !should_shrink)
+        return;
+
     markersProximity_D->gridMarkerHashD.resize(numExtended);
     markersProximity_D->gridMarkerIndexD.resize(numExtended);
     sortedSphMarkers2_D->posRadD.resize(numExtended);
