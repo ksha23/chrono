@@ -30,12 +30,16 @@ namespace sensor {
 
 // forward declaration
 class ChSensor;
+class ChAsyncWriter;
 
 /// @addtogroup sensor_filters
 /// @{
 
 /// A filter that, when applied to a sensor, saves point cloud data. Format will be CSV one point per line, with data as
 /// X,Y,Z,I
+///
+/// With the OptiX backend, the point cloud is copied into a pinned staging buffer and the CSV file is formatted and
+/// written by background writer threads (see ChFilterSave for the buffering and flushing rules).
 class CH_SENSOR_API ChFilterSavePtCloud : public ChFilter {
   public:
     /// Class constructor
@@ -54,6 +58,11 @@ class CH_SENSOR_API ChFilterSavePtCloud : public ChFilter {
     /// @param bufferInOut A buffer that is passed into the filter.
     virtual void Initialize(std::shared_ptr<ChSensor> pSensor, std::shared_ptr<SensorBuffer>& bufferInOut);
 
+    /// Set the number of background writer threads (OptiX backend only). Must be called before the sensor is added
+    /// to the sensor manager. 0 writes each frame synchronously on the render thread. The default is
+    /// min(4, half the hardware threads).
+    void SetNumWriterThreads(unsigned int num_threads) { m_num_writer_threads = num_threads; }
+
   private:
     std::string m_path;                                   ///< path to saved data
     unsigned int m_frame_number = 0;                      ///< frame counter for saving sequential frames
@@ -62,6 +71,8 @@ class CH_SENSOR_API ChFilterSavePtCloud : public ChFilter {
 #ifdef CHRONO_HAS_OPTIX
     CUstream m_cuda_stream;
 #endif
+    unsigned int m_num_writer_threads;        ///< number of background writer threads (0 = synchronous)
+    std::shared_ptr<ChAsyncWriter> m_writer;  ///< staging buffers + writer threads (OptiX backend)
 };
 
 /// @}

@@ -60,7 +60,9 @@ bool write_float_binary(const std::string& file_path, uint16_t width, uint16_t h
 }
 }  // namespace
 
-CH_SENSOR_API ChFilterSave::ChFilterSave(std::string data_path, std::string name) : ChFilter(name), m_path(data_path) {}
+CH_SENSOR_API ChFilterSave::ChFilterSave(std::string data_path, std::string name) : ChFilter(name), m_path(data_path), m_num_writer_threads(0) {}
+
+CH_SENSOR_API ChFilterSave::~ChFilterSave() {}
 
 CH_SENSOR_API void ChFilterSave::Initialize(std::shared_ptr<ChSensor> pSensor,
                                             std::shared_ptr<SensorBuffer>& bufferInOut) {
@@ -121,6 +123,7 @@ CH_SENSOR_API void ChFilterSave::ChangeDataPath(std::string data_path) {
 
 #else
 
+#include <algorithm>
 #include <vector>
 #include <sstream>
 #include <fstream>
@@ -130,6 +133,7 @@ CH_SENSOR_API void ChFilterSave::ChangeDataPath(std::string data_path) {
 #include "chrono_sensor/filters/ChFilterSave.h"
 #include "chrono_sensor/sensors/ChOptixSensor.h"
 #include "chrono_sensor/utils/CudaMallocHelper.h"
+#include "chrono_sensor/utils/ChAsyncWriter.h"
 
 #include "chrono_thirdparty/stb/stb_image_write.h"
 
@@ -218,62 +222,81 @@ bool WriteFloatToBinary(const std::string& file_path, uint16_t width, uint16_t h
     }
 }
 
-CH_SENSOR_API ChFilterSave::ChFilterSave(std::string data_path, std::string name) : ChFilter(name) {
+CH_SENSOR_API ChFilterSave::ChFilterSave(std::string data_path, std::string name) : ChFilter(name), m_num_writer_threads(ChAsyncWriter::DefaultNumThreads()) {
     m_path = data_path;
+}
+
+// Destroying the writer waits for every pending frame to be written.
+CH_SENSOR_API ChFilterSave::~ChFilterSave() {
+    m_writer.reset();
 }
 
 CH_SENSOR_API void ChFilterSave::Apply() {
     std::string filename = m_path + "frame_" + std::to_string(m_frame_number) + ".png";
     m_frame_number++;
 
+    // Copy the frame into a free staging buffer (waits while all are in use), then encode and write it on a writer
+    // thread so that PNG compression does not stall the render thread.
+    void* staging = m_writer->Acquire();
+
     if (m_r8_in) {
-        cudaMemcpyAsync(m_host_r8->Buffer.get(), m_r8_in->Buffer.get(), m_r8_in->Width * m_r8_in->Height * sizeof(char),
-                        cudaMemcpyDeviceToHost, m_cuda_stream);
+        unsigned int w = m_r8_in->Width;
+        unsigned int h = m_r8_in->Height;
+        cudaMemcpyAsync(staging, m_r8_in->Buffer.get(), w * h * sizeof(char), cudaMemcpyDeviceToHost, m_cuda_stream);
         cudaStreamSynchronize(m_cuda_stream);
-        // write a grayscale png
-        if (!stbi_write_png(filename.c_str(), m_host_r8->Width, m_host_r8->Height, 1, m_host_r8->Buffer.get(),
-                            m_host_r8->Width)) {
-            std::cerr << "Failed to write R8 image: " << filename << "\n";
-        }
+        m_writer->Submit(staging, [filename, w, h](const void* data) {
+            // write a grayscale png
+            if (!stbi_write_png(filename.c_str(), w, h, 1, data, w)) {
+                std::cerr << "Failed to write R8 image: " << filename << "\n";
+            }
+        });
     } else if (m_rgba8_in) {
-        cudaMemcpyAsync(m_host_rgba8->Buffer.get(), m_rgba8_in->Buffer.get(),
-                        m_rgba8_in->Width * m_rgba8_in->Height * sizeof(PixelRGBA8), cudaMemcpyDeviceToHost,
-                        m_cuda_stream);
+        unsigned int w = m_rgba8_in->Width;
+        unsigned int h = m_rgba8_in->Height;
+        cudaMemcpyAsync(staging, m_rgba8_in->Buffer.get(), w * h * sizeof(PixelRGBA8), cudaMemcpyDeviceToHost, m_cuda_stream);
         cudaStreamSynchronize(m_cuda_stream);
-        // write an rgba png
-        if (!stbi_write_png(filename.c_str(), m_host_rgba8->Width, m_host_rgba8->Height, sizeof(PixelRGBA8),
-                            m_host_rgba8->Buffer.get(), sizeof(PixelRGBA8) * m_host_rgba8->Width)) {
-            std::cerr << "Failed to write RGBA8 image: " << filename << "\n";
-        }
+        m_writer->Submit(staging, [filename, w, h](const void* data) {
+            // write an rgba png
+            if (!stbi_write_png(filename.c_str(), w, h, sizeof(PixelRGBA8), data, sizeof(PixelRGBA8) * w)) {
+                std::cerr << "Failed to write RGBA8 image: " << filename << "\n";
+            }
+        });
     } else if (m_rgba16_in) {
-        cudaMemcpyAsync(m_host_rgba16->Buffer.get(), m_rgba16_in->Buffer.get(),
-                        m_rgba16_in->Width * m_rgba16_in->Height * sizeof(PixelRGBA16), cudaMemcpyDeviceToHost,
-                        m_cuda_stream);
+        unsigned int w = m_rgba16_in->Width;
+        unsigned int h = m_rgba16_in->Height;
+        cudaMemcpyAsync(staging, m_rgba16_in->Buffer.get(), w * h * sizeof(PixelRGBA16), cudaMemcpyDeviceToHost, m_cuda_stream);
         cudaStreamSynchronize(m_cuda_stream);
         filename.replace(filename.length() - 3, 3, "bin");
-        if (!WriteRGBA16ToBinary(filename, m_host_rgba16->Width, m_host_rgba16->Height, m_host_rgba16->Buffer.get())) {
-            std::cerr << "Failed to write RGBA16 image: " << filename << "\n";
-        }
+        m_writer->Submit(staging, [filename, w, h](const void* data) {
+            if (!WriteRGBA16ToBinary(filename, w, h, data)) {
+                std::cerr << "Failed to write RGBA16 image: " << filename << "\n";
+            }
+        });
     } else if (m_semantic_in) {
-        cudaMemcpyAsync(m_host_semantic->Buffer.get(), m_semantic_in->Buffer.get(),
-                        m_semantic_in->Width * m_semantic_in->Height * sizeof(PixelSemantic), cudaMemcpyDeviceToHost,
-                        m_cuda_stream);
+        unsigned int w = m_semantic_in->Width;
+        unsigned int h = m_semantic_in->Height;
+        cudaMemcpyAsync(staging, m_semantic_in->Buffer.get(), w * h * sizeof(PixelSemantic), cudaMemcpyDeviceToHost, m_cuda_stream);
         cudaStreamSynchronize(m_cuda_stream);
-        // write an rgba png
-        if (!stbi_write_png(filename.c_str(), m_host_semantic->Width, m_host_semantic->Height, 4,
-                            m_host_semantic->Buffer.get(), 4 * m_host_semantic->Width)) {
-            std::cerr << "Failed to write semantic image: " << filename << "\n";
-        }
+        m_writer->Submit(staging, [filename, w, h](const void* data) {
+            // write an rgba png
+            if (!stbi_write_png(filename.c_str(), w, h, 4, data, 4 * w)) {
+                std::cerr << "Failed to write semantic image: " << filename << "\n";
+            }
+        });
     } else if (m_depth_in) {
-        cudaMemcpyAsync(m_host_depth->Buffer.get(), m_depth_in->Buffer.get(),
-                        m_depth_in->Width * m_depth_in->Height * sizeof(PixelDepth), cudaMemcpyDeviceToHost,
-                        m_cuda_stream);
+        unsigned int w = m_depth_in->Width;
+        unsigned int h = m_depth_in->Height;
+        cudaMemcpyAsync(staging, m_depth_in->Buffer.get(), w * h * sizeof(PixelDepth), cudaMemcpyDeviceToHost, m_cuda_stream);
         cudaStreamSynchronize(m_cuda_stream);
         // write the depth map
         filename.replace(filename.length() - 3, 3, "bin");
-        if (!WriteFloatToBinary(filename, m_host_depth->Width, m_host_depth->Height, m_host_depth->Buffer.get())) {
-            std::cerr << "Failed to write depth map to " << filename << "\n";
-        }
+        m_writer->Submit(staging, [filename, w, h](const void* data) {
+            if (!WriteFloatToBinary(filename, w, h, data)) {
+                std::cerr << "Failed to write depth map to " << filename << "\n";
+            }
+        });
+    } else {
+        m_writer->Submit(staging, [](const void*) {});
     }
 }
 
@@ -282,50 +305,33 @@ CH_SENSOR_API void ChFilterSave::Initialize(std::shared_ptr<ChSensor> pSensor,
     if (!bufferInOut)
         InvalidFilterGraphNullBuffer(pSensor);
 
+    // size in bytes of one staging buffer (a full copy of the input frame)
+    size_t staging_bytes = 0;
     if (auto pR8 = std::dynamic_pointer_cast<SensorDeviceR8Buffer>(bufferInOut)) {
         m_r8_in = pR8;
-        m_host_r8 = chrono_types::make_shared<SensorHostR8Buffer>();
-        std::shared_ptr<char[]> b(cudaHostMallocHelper<char>(m_r8_in->Width * m_r8_in->Height),
-                                  cudaHostFreeHelper<char>);
-        m_host_r8->Buffer = std::move(b);
-        m_host_r8->Width = m_r8_in->Width;
-        m_host_r8->Height = m_r8_in->Height;
+        staging_bytes = m_r8_in->Width * m_r8_in->Height * sizeof(char);
     } else if (auto pRGBA8 = std::dynamic_pointer_cast<SensorDeviceRGBA8Buffer>(bufferInOut)) {
         m_rgba8_in = pRGBA8;
-        m_host_rgba8 = chrono_types::make_shared<SensorHostRGBA8Buffer>();
-        std::shared_ptr<PixelRGBA8[]> b(cudaHostMallocHelper<PixelRGBA8>(m_rgba8_in->Width * m_rgba8_in->Height),
-                                        cudaHostFreeHelper<PixelRGBA8>);
-        m_host_rgba8->Buffer = std::move(b);
-        m_host_rgba8->Width = m_rgba8_in->Width;
-        m_host_rgba8->Height = m_rgba8_in->Height;
+        staging_bytes = m_rgba8_in->Width * m_rgba8_in->Height * sizeof(PixelRGBA8);
     } else if (auto pRGBA16 = std::dynamic_pointer_cast<SensorDeviceRGBA16Buffer>(bufferInOut)) {
         m_rgba16_in = pRGBA16;
-        m_host_rgba16 = chrono_types::make_shared<SensorHostRGBA16Buffer>();
-        std::shared_ptr<PixelRGBA16[]> b(cudaHostMallocHelper<PixelRGBA16>(m_rgba16_in->Width * m_rgba16_in->Height),
-                                         cudaHostFreeHelper<PixelRGBA16>);
-        m_host_rgba16->Buffer = std::move(b);
-        m_host_rgba16->Width = m_rgba16_in->Width;
-        m_host_rgba16->Height = m_rgba16_in->Height;
+        staging_bytes = m_rgba16_in->Width * m_rgba16_in->Height * sizeof(PixelRGBA16);
     } else if (auto pSemantic = std::dynamic_pointer_cast<SensorDeviceSemanticBuffer>(bufferInOut)) {
         m_semantic_in = pSemantic;
-        m_host_semantic = chrono_types::make_shared<SensorHostSemanticBuffer>();
-        std::shared_ptr<PixelSemantic[]> b(
-            cudaHostMallocHelper<PixelSemantic>(m_semantic_in->Width * m_semantic_in->Height),
-            cudaHostFreeHelper<PixelSemantic>);
-        m_host_semantic->Buffer = std::move(b);
-        m_host_semantic->Width = m_semantic_in->Width;
-        m_host_semantic->Height = m_semantic_in->Height;
+        staging_bytes = m_semantic_in->Width * m_semantic_in->Height * sizeof(PixelSemantic);
     } else if (auto pDepth = std::dynamic_pointer_cast<SensorDeviceDepthBuffer>(bufferInOut)) {
         m_depth_in = pDepth;
-        m_host_depth = chrono_types::make_shared<SensorHostDepthBuffer>();
-        std::shared_ptr<PixelDepth[]> b(cudaHostMallocHelper<PixelDepth>(m_depth_in->Width * m_depth_in->Height),
-                                        cudaHostFreeHelper<PixelDepth>);
-        m_host_depth->Buffer = std::move(b);
-        m_host_depth->Width = m_depth_in->Width;
-        m_host_depth->Height = m_depth_in->Height;
+        staging_bytes = m_depth_in->Width * m_depth_in->Height * sizeof(PixelDepth);
     } else {
         InvalidFilterGraphBufferTypeMismatch(pSensor);
     }
+
+    // Pinned staging buffers, two per writer thread, allocated on first use. This bounds the host memory held by
+    // frames waiting to be written.
+    unsigned int num_buffers = std::max(1u, 2 * m_num_writer_threads);
+    m_writer = chrono_types::make_shared<ChAsyncWriter>(m_num_writer_threads, num_buffers, [staging_bytes]() {
+        return std::shared_ptr<void>(cudaHostMallocHelper<unsigned char>(static_cast<unsigned int>(staging_bytes)), cudaHostFreeHelper<unsigned char>);
+    });
 
     if (auto pOpx = std::dynamic_pointer_cast<ChOptixSensor>(pSensor)) {
         m_cuda_stream = pOpx->GetCudaStream();
