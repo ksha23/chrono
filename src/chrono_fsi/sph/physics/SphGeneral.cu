@@ -537,9 +537,10 @@ __global__ void Jacobi_SOR_Iter(Real4* sortedRhoPreMu,
                                 const uint* csrColInd,
                                 const uint* numContacts,
                                 bool _3dvector,
+                                const int* converged,
                                 volatile bool* error_flag) {
     uint i_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i_idx >= countersD.numAllMarkers)
+    if (i_idx >= countersD.numAllMarkers || *converged)
         return;
 
     uint startIdx = numContacts[i_idx] + 1;  // Reserve the starting index for the A_ii
@@ -561,9 +562,17 @@ __global__ void Jacobi_SOR_Iter(Real4* sortedRhoPreMu,
     }
 }
 //--------------------------------------------------------------------------------------------------------------------------------
-__global__ void Update_AND_Calc_Res(Real4* sortedRhoPreMu, Real3* V_old, Real3* V_new, Real* q_old, Real* q_new, Real* Residuals, bool _3dvector, volatile bool* error_flag) {
+__global__ void Update_AND_Calc_Res(Real4* sortedRhoPreMu,
+                                    Real3* V_old,
+                                    Real3* V_new,
+                                    Real* q_old,
+                                    Real* q_new,
+                                    Real* Residuals,
+                                    bool _3dvector,
+                                    const int* converged,
+                                    volatile bool* error_flag) {
     uint i_idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i_idx >= countersD.numAllMarkers)
+    if (i_idx >= countersD.numAllMarkers || *converged)
         return;
 
     //    Real omega = _3dvector ? 1.0 : paramsD.PPE_relaxation;
