@@ -36,8 +36,8 @@ message(STATUS "Find MKL libraries")
 #             gnu_thread (GNU OpenMP),
 #             pgi_thread (PGI OpenMP) [PGI support is deprecated],
 #             tbb_thread
-#    Default: intel_thread
-#       Exceptions:- SYCL defaults to oneTBB, PGI compiler on Windows defaults to pgi_thread
+#    Default: gnu_thread if Chrono uses the GNU OpenMP runtime (libgomp), intel_thread otherwise
+#       (see the note on MKL_THREADING below)
 # MKL_INTERFACE (for MKL_ARCH=intel64 only)
 #    Values:  lp64, ilp64
 #       GNU or INTEL interface will be selected based on Compiler.
@@ -61,7 +61,17 @@ set_property(CACHE MKL_ARCH PROPERTY STRINGS intel64 ia32)
 set(MKL_LINK "dynamic" CACHE STRING "MKL linking mode")
 set_property(CACHE MKL_LINK PROPERTY STRINGS static dynamic sdl)
 
-set(MKL_THREADING "intel_thread" CACHE STRING "MKL threading lib")
+# The MKL threading layer must use the same OpenMP runtime as the rest of Chrono. intel_thread requires the Intel
+# (or LLVM) OpenMP runtime (libiomp5/libomp), while a GCC build of Chrono uses the GNU runtime (libgomp). If both
+# runtimes end up in the same process, the omp_* symbols are resolved from whichever one is loaded first; when
+# that is libgomp, multithreaded Pardiso fails (e.g. ANALYZE returns InvalidInput) or crashes. Therefore, default
+# to gnu_thread when Chrono's OpenMP support links libgomp, and to intel_thread otherwise.
+set(CH_MKL_THREADING_DEFAULT "intel_thread")
+if(CH_ENABLE_OPENMP AND "gomp" IN_LIST OpenMP_CXX_LIB_NAMES AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  set(CH_MKL_THREADING_DEFAULT "gnu_thread")
+endif()
+
+set(MKL_THREADING "${CH_MKL_THREADING_DEFAULT}" CACHE STRING "MKL threading lib")
 set_property(CACHE MKL_THREADING PROPERTY STRINGS intel_thread sequential gnu_thread pgi_thread tbb_thread)
 
 set(MKL_INTERFACE "lp64" CACHE STRING "MKL interface")
@@ -76,6 +86,13 @@ mark_as_advanced(FORCE MKL_LINK)
 mark_as_advanced(FORCE MKL_THREADING)
 mark_as_advanced(FORCE MKL_INTERFACE)
 mark_as_advanced(FORCE MKL_MPI)
+
+message(STATUS "MKL threading layer: ${MKL_THREADING} (default for this configuration: ${CH_MKL_THREADING_DEFAULT})")
+if(MKL_THREADING STREQUAL "intel_thread" AND CH_MKL_THREADING_DEFAULT STREQUAL "gnu_thread")
+  message(WARNING "MKL_THREADING=intel_thread loads the Intel/LLVM OpenMP runtime next to the GNU OpenMP runtime "
+                  "used by Chrono; multithreaded Pardiso may fail or crash. Set MKL_THREADING=gnu_thread "
+                  "(or sequential) unless you know both runtimes can coexist.")
+endif()
 
 if(NOT TARGET MKL::MKL)
   find_package(MKL CONFIG REQUIRED)
