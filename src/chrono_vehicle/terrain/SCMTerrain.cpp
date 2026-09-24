@@ -705,6 +705,7 @@ void SCMLoader::CreateVisualizationMesh(double sizeX, double sizeY) {
     std::vector<ChColor>& colors = trimesh->GetCoordsColors();
 
     // Resize mesh arrays.
+    m_vertex_flags.assign(n_verts, 0);
     vertices.resize(n_verts);
     normals.resize(n_verts);
     uv_coords.resize(n_verts);
@@ -843,27 +844,28 @@ int SCMLoader::GetMeshVertexIndex(const ChVector2i& loc) {
 }
 
 // Get indices of trimesh faces incident to the specified grid vertex.
-std::vector<int> SCMLoader::GetMeshFaceIndices(const ChVector2i& loc) {
-    int i = loc.x();
-    int j = loc.y();
+// An interior vertex has 6 incident faces; a vertex on the mesh boundary has fewer.
+int SCMLoader::GetMeshFaceIndices(const ChVector2i& loc, int faces[6]) const {
+    int i = loc.x() + m_nx;
+    int j = loc.y() + m_ny;
+    int nx = 2 * m_nx;  // number of grid cells in X direction
+    int ny = 2 * m_ny;  // number of grid cells in Y direction
 
-    // Ignore boundary vertices
-    if (i == -m_nx || i == m_nx || j == -m_ny || j == m_ny)
-        return std::vector<int>();
+    int n = 0;
+    if (i > 0 && j > 0) {
+        faces[n++] = 2 * ((i - 1) + nx * (j - 1));
+        faces[n++] = 2 * ((i - 1) + nx * (j - 1)) + 1;
+    }
+    if (i > 0 && j < ny)
+        faces[n++] = 2 * ((i - 1) + nx * (j - 0));
+    if (i < nx && j < ny) {
+        faces[n++] = 2 * ((i - 0) + nx * (j - 0));
+        faces[n++] = 2 * ((i - 0) + nx * (j - 0)) + 1;
+    }
+    if (i < nx && j > 0)
+        faces[n++] = 2 * ((i - 0) + nx * (j - 1)) + 1;
 
-    // Load indices of 6 adjacent faces
-    i += m_nx;
-    j += m_ny;
-    int nx = 2 * m_nx;
-    std::vector<int> faces(6);
-    faces[0] = 2 * ((i - 1) + nx * (j - 1));
-    faces[1] = 2 * ((i - 1) + nx * (j - 1)) + 1;
-    faces[2] = 2 * ((i - 1) + nx * (j - 0));
-    faces[3] = 2 * ((i - 0) + nx * (j - 0));
-    faces[4] = 2 * ((i - 0) + nx * (j - 0)) + 1;
-    faces[5] = 2 * ((i - 0) + nx * (j - 1)) + 1;
-
-    return faces;
+    return n;
 }
 
 // Get the initial undeformed terrain height (relative to the SCM plane) at the specified grid vertex.
@@ -1344,15 +1346,10 @@ void SCMLoader::ComputeInternalForces() {
         nr.step_plastic_flow = 0;
         nr.erosion = false;
         nr.hit_level = 1e9;
-
-        // Update visualization (only color changes relevant here)
-        if (m_trimesh_shape && CheckMeshBounds(ij)) {
-            int iv = GetMeshVertexIndex(ij);          // mesh vertex index
-            UpdateMeshVertexCoordinates(ij, iv, nr);  // update vertex coordinates and color
-            modified_vertices.push_back(iv);
-        }
     }
 
+    // Keep the list of nodes modified over the previous step (their visualization color must be reset)
+    m_prev_modified_nodes.swap(m_modified_nodes);
     m_modified_nodes.clear();
 
     // Reset timers
@@ -1931,7 +1928,6 @@ void SCMLoader::ComputeInternalForces() {
                     double z = GetInitHeight(ij);                                //     undeformed height
                     const ChVector3d& n = GetInitNormal(ij);                     //     terrain normal
                     m_grid_map.insert(std::make_pair(ij, NodeRecord(z, z, n)));  //     add new node record
-                    m_modified_nodes.push_back(ij);                              //     mark as modified
                 }
                 auto& nr = m_grid_map.at(ij);  //   node record
                 nr.erosion = true;             //   add to erosion domain
@@ -2033,19 +2029,9 @@ void SCMLoader::ComputeInternalForces() {
     m_timer_visualization.start();
 
     if (m_trimesh_shape) {
-        // Loop over list of modified nodes and adjust corresponding mesh vertices.
-        // If not rendering a wireframe mesh, also update normals.
-        for (const auto& ij : m_modified_nodes) {
-            if (!CheckMeshBounds(ij))                 // if node outside mesh
-                continue;                             //   do nothing
-            const auto& nr = m_grid_map.at(ij);       // grid node record
-            int iv = GetMeshVertexIndex(ij);          // mesh vertex index
-            UpdateMeshVertexCoordinates(ij, iv, nr);  // update vertex coordinates and color
-            modified_vertices.push_back(iv);          // cache in list of modified mesh vertices
-            if (!m_trimesh_shape->IsWireframe())      // if not wireframe
-                UpdateMeshVertexNormal(ij, iv);       // update vertex normal
-        }
-
+        // Adjust the mesh vertices of the nodes modified over this step (coordinates, color, normals) and of the nodes
+        // modified over the previous step (color only).
+        UpdateMeshVertices(m_modified_nodes, m_prev_modified_nodes, modified_vertices);
         m_trimesh_shape->SetModifiedVertices(modified_vertices);
     }
 
@@ -2147,13 +2133,92 @@ void SCMLoader::UpdateMeshVertexNormal(const ChVector2i ij, int iv) {
 
     // Average normals from adjacent faces
     normals[iv] = ChVector3d(0, 0, 0);
-    auto faces = GetMeshFaceIndices(ij);
-    for (auto f : faces) {
+    int faces[6];
+    int num_faces = GetMeshFaceIndices(ij, faces);
+    for (int k = 0; k < num_faces; k++) {
+        int f = faces[k];
         ChVector3d nrm = Vcross(vertices[idx_normals[f][1]] - vertices[idx_normals[f][0]], vertices[idx_normals[f][2]] - vertices[idx_normals[f][0]]);
         nrm.Normalize();
         normals[iv] += nrm;
     }
-    normals[iv] /= (double)faces.size();
+    normals[iv] /= (double)num_faces;
+}
+
+// Update the visualization mesh at the given grid nodes.
+// The normal at a mesh vertex depends on the positions of all vertices sharing a face with it, so moving a vertex also
+// changes the normals of these neighbors (6 in this triangulation). Each vertex is updated at most once.
+void SCMLoader::UpdateMeshVertices(const std::vector<ChVector2i>& moved_nodes, const std::vector<ChVector2i>& other_nodes, std::vector<int>& vertices) {
+    const int nvx = 2 * m_nx + 1;  // number of grid vertices in X direction
+    const int nvy = 2 * m_ny + 1;  // number of grid vertices in Y direction
+
+    const auto& mesh_vertices = m_trimesh_shape->GetMesh()->GetCoordsVertices();
+
+    // Offsets of the vertices sharing a face with a given vertex
+    static const int nbr_offsets[6][2] = {{-1, -1}, {0, -1}, {-1, 0}, {1, 0}, {0, 1}, {1, 1}};
+
+    // Per-vertex flags (reset before returning)
+    const char LISTED = 1;  // vertex included in output list
+    const char COORDS = 2;  // vertex coordinates and color updated
+    const char NORMAL = 4;  // vertex normal updated
+    auto& flags = m_vertex_flags;
+
+    std::vector<int> out;
+    out.reserve(vertices.size() + 2 * moved_nodes.size() + other_nodes.size());
+    auto list_vertex = [&](int iv) {
+        if (!(flags[iv] & LISTED)) {
+            flags[iv] |= LISTED;
+            out.push_back(iv);
+        }
+    };
+
+    // Vertices already updated elsewhere
+    for (int iv : vertices)
+        list_vertex(iv);
+
+    // Update coordinates and color at moved and other nodes; keep track of vertices that actually moved
+    std::vector<int> moved_vertices;
+    moved_vertices.reserve(moved_nodes.size());
+    for (const auto* nodes : {&moved_nodes, &other_nodes}) {
+        for (const auto& ij : *nodes) {
+            if (!CheckMeshBounds(ij))
+                continue;
+            int iv = GetMeshVertexIndex(ij);
+            if (flags[iv] & COORDS)
+                continue;
+            flags[iv] |= COORDS;
+            ChVector3d old_pos = mesh_vertices[iv];
+            UpdateMeshVertexCoordinates(ij, iv, m_grid_map.at(ij));
+            if (mesh_vertices[iv] != old_pos)
+                moved_vertices.push_back(iv);
+            list_vertex(iv);
+        }
+    }
+
+    // Update normals at moved vertices and at their neighbors (unless rendering a wireframe mesh)
+    if (!m_trimesh_shape->IsWireframe()) {
+        for (int iv : moved_vertices) {
+            int ix = iv % nvx;
+            int iy = iv / nvx;
+            for (int k = -1; k < 6; k++) {
+                int jx = (k < 0) ? ix : ix + nbr_offsets[k][0];
+                int jy = (k < 0) ? iy : iy + nbr_offsets[k][1];
+                if (jx < 0 || jx >= nvx || jy < 0 || jy >= nvy)
+                    continue;
+                int jv = jx + nvx * jy;
+                if (flags[jv] & NORMAL)
+                    continue;
+                flags[jv] |= NORMAL;
+                UpdateMeshVertexNormal(ChVector2i(jx - m_nx, jy - m_ny), jv);
+                list_vertex(jv);
+            }
+        }
+    }
+
+    // Reset flags
+    for (int iv : out)
+        flags[iv] = 0;
+
+    vertices = std::move(out);
 }
 
 // Get the heights of modified grid nodes.
@@ -2184,17 +2249,11 @@ void SCMLoader::SetModifiedNodes(const std::vector<SCMTerrain::NodeLevel>& nodes
 
     // Update visualization
     if (m_trimesh_shape) {
-        for (const auto& n : nodes) {
-            auto ij = n.first;                           // grid location
-            if (!CheckMeshBounds(ij))                    // if outside mesh
-                continue;                                //   do nothing
-            const auto& nr = m_grid_map.at(ij);          // grid node record
-            int iv = GetMeshVertexIndex(ij);             // mesh vertex index
-            UpdateMeshVertexCoordinates(ij, iv, nr);     // update vertex coordinates and color
-            if (!m_trimesh_shape->IsWireframe())         // if not in wireframe mode
-                UpdateMeshVertexNormal(ij, iv);          //   update vertex normal
-            m_external_modified_vertices.push_back(iv);  // cache in list
-        }
+        std::vector<ChVector2i> moved_nodes;
+        moved_nodes.reserve(nodes.size());
+        for (const auto& n : nodes)
+            moved_nodes.push_back(n.first);
+        UpdateMeshVertices(moved_nodes, {}, m_external_modified_vertices);
     }
 }
 

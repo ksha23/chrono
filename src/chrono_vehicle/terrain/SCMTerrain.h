@@ -566,8 +566,9 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
     // Get index of trimesh vertex corresponding to the specified grid node.
     int GetMeshVertexIndex(const ChVector2i& loc);
 
-    // Get indices of trimesh faces incident to the specified grid vertex.
-    std::vector<int> GetMeshFaceIndices(const ChVector2i& loc);
+    // Get indices of trimesh faces incident to the specified grid vertex (at most 6; fewer at the mesh boundary).
+    // Return the number of incident faces.
+    int GetMeshFaceIndices(const ChVector2i& loc, int faces[6]) const;
 
     // Check if the provided grid location is within the visualization mesh bounds
     bool CheckMeshBounds(const ChVector2i& loc) const;
@@ -653,6 +654,12 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
     // Update vertex normal in visualization mesh
     void UpdateMeshVertexNormal(const ChVector2i ij, int iv);
 
+    // Update the visualization mesh for the given grid nodes.
+    // Vertex coordinates and colors are updated at 'moved_nodes' and 'other_nodes'. Vertex normals are updated at
+    // 'moved_nodes' and at all vertices sharing a face with them. On input, 'vertices' lists mesh vertices already
+    // updated elsewhere; on output, it lists (once) all mesh vertices updated so far.
+    void UpdateMeshVertices(const std::vector<ChVector2i>& moved_nodes, const std::vector<ChVector2i>& other_nodes, std::vector<int>& vertices);
+
     /// Get the heights of all modified grid nodes.
     /// If 'all_nodes = true', return modified nodes from the start of simulation.  Otherwise, return only the nodes
     /// modified over the last step.
@@ -674,6 +681,7 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
 
     std::unordered_map<ChVector2i, NodeRecord, CoordHash> m_grid_map;  ///< modified grid nodes (persistent)
     std::vector<ChVector2i> m_modified_nodes;                          ///< modified grid nodes (current)
+    std::vector<ChVector2i> m_prev_modified_nodes;                     ///< modified grid nodes (previous step)
 
     ChAABB m_aabb;    ///< user-specified SCM terrain boundary
     bool m_boundary;  ///< user-specified SCM terrain boundary?
@@ -727,6 +735,7 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
 
     // Indices of visualization mesh vertices modified externally
     std::vector<int> m_external_modified_vertices;
+    std::vector<char> m_vertex_flags;  ///< scratch flags for visualization mesh updates (one per vertex)
 
     // Timers and counters
     ChTimer m_timer_active_domains;
