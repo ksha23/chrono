@@ -534,6 +534,7 @@ class ChSystemDem_impl {
     GranParams* gran_params;
 
     /// Holds system degrees of freedom.
+    /// Do not write its fields directly: set them in packSphereDataPointers, which copies sphere_data_host to it.
     SphereData* sphere_data;
 
     /// Host copy of the pointers in sphere_data. The managed structure is written only when a pointer changes, so that
