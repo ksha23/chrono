@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 
 #include "gtest/gtest.h"
 
@@ -57,6 +58,10 @@ static double RelDiff(const ChMatrixDynamic<>& a, const ChMatrixDynamic<>& b) {
 static ReducedResult RunModel(ChModalAssembly::ReductionType type, std::shared_ptr<ChDirectSolverLS> modal_solver, bool mechanism = false) {
     const int n_elements = 12;
     const double L = 6;
+
+    // The Krylov-Schur eigensolver starts from a random vector (std::rand). Seed it so that runs are comparable: with a
+    // singular K_IIc the retained Craig-Bampton modes are not unique and otherwise change from run to run.
+    std::srand(1);
 
     ChSystemNSC sys;
     sys.SetGravitationalAcceleration(VNULL);
