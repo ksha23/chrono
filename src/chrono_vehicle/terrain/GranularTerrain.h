@@ -125,11 +125,13 @@ class CH_VEHICLE_API GranularTerrain : public ChTerrain {
     unsigned int GetNumParticles() const { return m_num_particles; }
 
     /// Get the terrain point below the specified location.
-    /// This function returns the highest point over all granular particles.
+    /// This function returns the highest point where the vertical line through the given location intersects a
+    /// granular particle, or the point on the bottom boundary if that line does not hit any particle. The vertical
+    /// coordinate of the given location is ignored. The cost is linear in the number of particles.
     virtual ChVector3d GetPoint(const ChVector3d& loc) const override;
 
     /// Get the terrain height below the specified location.
-    /// This function returns the highest point over all granular particles.
+    /// This function returns the height of the point reported by GetPoint.
     virtual double GetHeight(const ChVector3d& loc) const override;
 
     /// Get the terrain normal at the point below the specified location.
