@@ -202,7 +202,8 @@ static GradientResult PressureGradientRatio(KernelType kernel) {
     r.num_particles = n;
 
     std::cout << "  kernel " << static_cast<int>(kernel) << ": " << n << " particles, pressure amplitude " << std::sqrt(A * A + B * B)
-              << " Pa, SPH / analytic gradient amplitude = " << r.ratio << " (full-support lattice sum " << r.ratio_ref << "), max transverse / axial = " << r.transverse << std::endl;
+              << " Pa, SPH / analytic gradient amplitude = " << r.ratio << " (full-support lattice sum " << r.ratio_ref << "), max transverse / axial = " << r.transverse
+              << std::endl;
     return r;
 }
 
