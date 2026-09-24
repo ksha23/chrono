@@ -197,7 +197,7 @@ void ChFsiProblemSPH::AddFeaMesh(std::shared_ptr<fea::ChMesh> mesh, bool check_e
     if (m_verbose) {
         if (fsi_mesh2D) {
             cout << "  added " << fsi_mesh2D->GetNumElements() << " faces" << endl;
-            m_fsi_meshes2D[mesh] = fsi_mesh1D->index;
+            m_fsi_meshes2D[mesh] = fsi_mesh2D->index;
         } else {
             cout << "  mesh does not contain any 2D elements" << endl;
         }

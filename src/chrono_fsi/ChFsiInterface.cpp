@@ -561,7 +561,7 @@ void ChFsiInterface::LoadSolidForces(std::vector<FsiBodyForce>& body_forces, std
         for (const auto& fsi_mesh : m_fsi_meshes1D) {
             size_t inode = 0;
             for (auto& node : fsi_mesh->ind2ptr_map) {
-                node.second->SetForce(mesh2D_forces[imesh].force[inode]);
+                node.second->SetForce(mesh1D_forces[imesh].force[inode]);
                 inode++;
             }
             imesh++;

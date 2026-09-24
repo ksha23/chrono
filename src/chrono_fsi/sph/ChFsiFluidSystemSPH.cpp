@@ -1245,7 +1245,7 @@ void ChFsiFluidSystemSPH::OnAddFeaMesh2D(std::shared_ptr<FsiMesh2D> fsi_mesh, bo
     m.check_embedded = check_embedded;
 
     CreateFeaMesh2DBce(fsi_mesh, m_pattern2D, m_remove_center2D, m.bce_ids, m.bce_coords, m.bce);
-    m_num_flex1D_meshes++;
+    m_num_flex2D_meshes++;
     m_num_flex2D_nodes += fsi_mesh->GetNumNodes();
     m_num_flex2D_elements += fsi_mesh->GetNumElements();
 
@@ -1783,7 +1783,7 @@ void ChFsiFluidSystemSPH::Initialize(const std::vector<FsiBodyState>& body_state
 
     for (const auto& m : m_meshes2D) {
         AddFeaMesh2DBce(m);
-        m_num_flex1D_meshes++;
+        m_num_flex2D_meshes++;
         m_num_flex2D_nodes += m.fsi_mesh->GetNumNodes();
         m_num_flex2D_elements += m.fsi_mesh->GetNumElements();
     }
