@@ -12,6 +12,7 @@ set(TESTS
     utest_MCORE_narrowphase
     utest_MCORE_jacobians
     utest_MCORE_contact_forces
+    utest_MCORE_jacobian_refill
 )
 
 set(UTILS
