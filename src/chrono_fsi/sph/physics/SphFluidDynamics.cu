@@ -85,13 +85,13 @@ void SphFluidDynamics::ProximitySearch() {
 // -----------------------------------------------------------------------------
 
 void SphFluidDynamics::CopySortedMarkers(const std::shared_ptr<SphMarkerDataD>& in, std::shared_ptr<SphMarkerDataD>& out) {
-    thrust::copy(in->posRadD.begin(), in->posRadD.begin() + m_data_mgr.countersH->numExtendedParticles, out->posRadD.begin());
-    thrust::copy(in->velMasD.begin(), in->velMasD.begin() + m_data_mgr.countersH->numExtendedParticles, out->velMasD.begin());
-    thrust::copy(in->rhoPresMuD.begin(), in->rhoPresMuD.begin() + m_data_mgr.countersH->numExtendedParticles, out->rhoPresMuD.begin());
+    thrust::copy(SPH_THRUST_NOSYNC, in->posRadD.begin(), in->posRadD.begin() + m_data_mgr.countersH->numExtendedParticles, out->posRadD.begin());
+    thrust::copy(SPH_THRUST_NOSYNC, in->velMasD.begin(), in->velMasD.begin() + m_data_mgr.countersH->numExtendedParticles, out->velMasD.begin());
+    thrust::copy(SPH_THRUST_NOSYNC, in->rhoPresMuD.begin(), in->rhoPresMuD.begin() + m_data_mgr.countersH->numExtendedParticles, out->rhoPresMuD.begin());
     if (m_data_mgr.paramsH->physics_problem == PhysicsProblem::CRM) {
-        thrust::copy(in->tauXxYyZzD.begin(), in->tauXxYyZzD.end(), out->tauXxYyZzD.begin());
-        thrust::copy(in->tauXyXzYzD.begin(), in->tauXyXzYzD.end(), out->tauXyXzYzD.begin());
-        thrust::copy(in->pcEvSvD.begin(), in->pcEvSvD.end(), out->pcEvSvD.begin());
+        thrust::copy(SPH_THRUST_NOSYNC, in->tauXxYyZzD.begin(), in->tauXxYyZzD.end(), out->tauXxYyZzD.begin());
+        thrust::copy(SPH_THRUST_NOSYNC, in->tauXyXzYzD.begin(), in->tauXyXzYzD.end(), out->tauXyXzYzD.begin());
+        thrust::copy(SPH_THRUST_NOSYNC, in->pcEvSvD.begin(), in->pcEvSvD.end(), out->pcEvSvD.begin());
     }
 }
 
