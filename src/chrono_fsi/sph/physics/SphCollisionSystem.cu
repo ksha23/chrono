@@ -239,7 +239,7 @@ __global__ void neighborSearchNum(const Real4* sortedPosRad,
 
     Real3 posRadA = mR3(sortedPosRad[index]);
     int3 gridPos = calcGridPos(posRadA);
-    Real SuppRadii = 2.0f * paramsD.h;
+    Real SuppRadii = paramsD.h_multiplier * paramsD.h;
     Real SqRadii = SuppRadii * SuppRadii;
     uint j_num = 0;
 
@@ -282,7 +282,7 @@ __global__ void neighborSearchID(const Real4* sortedPosRad,
     }
     Real3 posRadA = mR3(sortedPosRad[index]);
     int3 gridPos = calcGridPos(posRadA);
-    Real SuppRadii = 2.0f * paramsD.h;
+    Real SuppRadii = paramsD.h_multiplier * paramsD.h;
     Real SqRadii = SuppRadii * SuppRadii;
     uint j_num = 1;
     neighborList[numNeighborsPerPart[index]] = index;
