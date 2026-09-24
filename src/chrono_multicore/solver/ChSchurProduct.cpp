@@ -55,6 +55,34 @@ void ChSchurProduct::Setup(ChMulticoreDataManager* data_container_) {
     }
 }
 
+// Below this number of nonzeros the product runs serially (same threshold as Eigen's own parallel product).
+static const Eigen::Index spmv_parallel_min_nnz = 20000;
+
+void ChSchurProduct::SpMV(const SparseMatrixType& A, Eigen::Ref<const VectorType> x, Eigen::Ref<VectorType> y, bool accumulate) {
+    // Chrono_multicore is built with EIGEN_DONT_PARALLELIZE (Eigen must not spawn threads inside Chrono's own OpenMP
+    // regions), so an Eigen product would run serially here. The Schur product is called outside any parallel region.
+    assert(x.size() == A.cols() && y.size() == A.rows());
+
+    using Index = SparseMatrixType::StorageIndex;
+    const Index num_rows = (Index)A.rows();
+    const Index* outer = A.outerIndexPtr();
+    const Index* inner = A.innerIndexPtr();
+    const Index* inner_nnz = A.innerNonZeroPtr();  // null for a compressed matrix
+    const real* val = A.valuePtr();
+    const real* xp = x.data();
+    real* yp = y.data();
+
+    // Same per-row operation order as Eigen's serial row-major product, so results are bitwise identical to it
+#pragma omp parallel for schedule(static) if (A.nonZeros() > spmv_parallel_min_nnz)
+    for (Index i = 0; i < num_rows; i++) {
+        const Index end = inner_nnz ? outer[i] + inner_nnz[i] : outer[i + 1];
+        real tmp = 0;
+        for (Index k = outer[i]; k < end; k++)
+            tmp += val[k] * xp[inner[k]];
+        yp[i] = (accumulate ? yp[i] : real(0)) + tmp;
+    }
+}
+
 void ChSchurProduct::operator()(const VectorType& x, VectorType& output) {
     data_manager->system_timer.start("SchurProduct");
 
@@ -70,11 +98,12 @@ void ChSchurProduct::operator()(const VectorType& x, VectorType& output) {
 
     if (data_manager->settings.solver.local_solver_mode == data_manager->settings.solver.solver_mode) {
         if (data_manager->settings.solver.compute_N) {
-            output.noalias() = Nschur * x;
+            SpMV(Nschur, x, output);
             output += E.cwiseProduct(x);
         } else {
-            m_tmp.noalias() = data_manager->host_data.M_invD * x;
-            output.noalias() = D_T * m_tmp;
+            m_tmp.resize(data_manager->host_data.M_invD.rows());
+            SpMV(data_manager->host_data.M_invD, x, m_tmp);
+            SpMV(D_T, m_tmp, output);
             output += E.cwiseProduct(x);
         }
 
@@ -91,22 +120,23 @@ void ChSchurProduct::operator()(const VectorType& x, VectorType& output) {
 
         switch (data_manager->settings.solver.local_solver_mode) {
             case SolverMode::BILATERAL: {
-                m_tmp.noalias() = m_M_invD_b * x_b;
-                o_b.noalias() = m_D_b_T * m_tmp;
+                m_tmp.resize(m_M_invD_b.rows());
+                SpMV(m_M_invD_b, x_b, m_tmp);
+                SpMV(m_D_b_T, m_tmp, o_b);
                 o_b += E_b.cwiseProduct(x_b);
             } break;
 
             case SolverMode::NORMAL: {
                 m_tmp.setZero(bil_dof);
                 if (num_rigid_contacts > 0)
-                    m_tmp.noalias() += m_M_invD_n * x_n;
+                    SpMV(m_M_invD_n, x_n, m_tmp, true);
                 if (num_bilaterals > 0) {
-                    m_tmp.noalias() += m_M_invD_b * x_b;
-                    o_b.noalias() = m_D_b_T * m_tmp;
+                    SpMV(m_M_invD_b, x_b, m_tmp, true);
+                    SpMV(m_D_b_T, m_tmp, o_b);
                     o_b += E_b.cwiseProduct(x_b);
                 }
                 if (num_rigid_contacts > 0) {
-                    o_n.noalias() = m_D_n_T * m_tmp;
+                    SpMV(m_D_n_T, m_tmp, o_n);
                     o_n += E_n.cwiseProduct(x_n);
                 }
             } break;
@@ -118,18 +148,18 @@ void ChSchurProduct::operator()(const VectorType& x, VectorType& output) {
 
                 m_tmp.setZero(bil_dof);
                 if (num_rigid_contacts > 0) {
-                    m_tmp.noalias() += m_M_invD_n * x_n;
-                    m_tmp.noalias() += m_M_invD_t * x_t;
+                    SpMV(m_M_invD_n, x_n, m_tmp, true);
+                    SpMV(m_M_invD_t, x_t, m_tmp, true);
                 }
                 if (num_bilaterals > 0) {
-                    m_tmp.noalias() += m_M_invD_b * x_b;
-                    o_b.noalias() = m_D_b_T * m_tmp;
+                    SpMV(m_M_invD_b, x_b, m_tmp, true);
+                    SpMV(m_D_b_T, m_tmp, o_b);
                     o_b += E_b.cwiseProduct(x_b);
                 }
                 if (num_rigid_contacts > 0) {
-                    o_n.noalias() = m_D_n_T * m_tmp;
+                    SpMV(m_D_n_T, m_tmp, o_n);
                     o_n += E_n.cwiseProduct(x_n);
-                    o_t.noalias() = m_D_t_T * m_tmp;
+                    SpMV(m_D_t_T, m_tmp, o_t);
                     o_t += E_t.cwiseProduct(x_t);
                 }
 
@@ -146,21 +176,21 @@ void ChSchurProduct::operator()(const VectorType& x, VectorType& output) {
 
                 m_tmp.setZero(bil_dof);
                 if (num_rigid_contacts > 0) {
-                    m_tmp.noalias() += m_M_invD_n * x_n;
-                    m_tmp.noalias() += m_M_invD_t * x_t;
-                    m_tmp.noalias() += m_M_invD_s * x_s;
+                    SpMV(m_M_invD_n, x_n, m_tmp, true);
+                    SpMV(m_M_invD_t, x_t, m_tmp, true);
+                    SpMV(m_M_invD_s, x_s, m_tmp, true);
                 }
                 if (num_bilaterals > 0) {
-                    m_tmp.noalias() += m_M_invD_b * x_b;
-                    o_b.noalias() = m_D_b_T * m_tmp;
+                    SpMV(m_M_invD_b, x_b, m_tmp, true);
+                    SpMV(m_D_b_T, m_tmp, o_b);
                     o_b += E_b.cwiseProduct(x_b);
                 }
                 if (num_rigid_contacts > 0) {
-                    o_n.noalias() = m_D_n_T * m_tmp;
+                    SpMV(m_D_n_T, m_tmp, o_n);
                     o_n += E_n.cwiseProduct(x_n);
-                    o_t.noalias() = m_D_t_T * m_tmp;
+                    SpMV(m_D_t_T, m_tmp, o_t);
                     o_t += E_t.cwiseProduct(x_t);
-                    o_s.noalias() = m_D_s_T * m_tmp;
+                    SpMV(m_D_s_T, m_tmp, o_s);
                     o_s += E_s.cwiseProduct(x_s);
                 }
 
