@@ -604,11 +604,13 @@ inline __device__ float3 computeSphereNormalForces(float& reciplength,
     // grab radius from global
     unsigned int sphereRadius_SU = gran_params->sphereRadius_SU;
 
-    // Float is enough here. Positions are integers in SU and a typical penetration is many SU (about psi_L), while
-    // the float rounding error of 1 - 1 / reciplength is about 1e-7 * 2R, far below one SU. (The previous double
-    // path also rounded reciplength to float.) FP64 runs at 1/64 rate on consumer GPUs.
-    // A pair that barely touches (penetration of one SU or less) can round to reciplength <= 1, so the penetration
-    // below is clamped at zero.
+    // Float is enough here. The float rounding error of 1 - 1 / reciplength is about 1e-7 * 2R, orders of magnitude
+    // below a typical penetration (1e-4 R or more in the DEM demos). The previous double path also rounded
+    // reciplength to float.
+    // FP64 runs at 1/64 rate on consumer GPUs.
+    // A pair that barely touches (penetration within that rounding error) can round to reciplength <= 1, so the
+    // penetration below is clamped at zero. (fmaxf(NaN, 0) is 0, but reciplength is computed from integer positions
+    // and cannot be NaN; a NaN velocity still reaches the force through v_rel.)
     delta_r = int3_to_float3(sphereA_pos - sphereB_pos) / (2.f * sphereRadius_SU);
     reciplength = rsqrtf(Dot(delta_r, delta_r));
 

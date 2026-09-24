@@ -168,22 +168,29 @@ inline __device__ bool addBCForces_Sphere_frictionless(const int64_t3& sphPos,
     // precompute the int offset
     int64_t3 delta_int = sphPos - sphere_params.sphere_center;
 
-    // float is enough: reciplength is a float either way, and the error of 2 - 2 / reciplength is set by that
-    float3 delta = int64_t3_to_float3(delta_int) / (float)(sphere_params.radius + sphereRadius_SU);
-    reciplength = rsqrtf(Dot(delta, delta));
+    {
+        // Kept in double (unlike the sphere-sphere contact): the BC sphere can be much larger than a particle, and
+        // this runs once per sphere and BC, not per contact
+        double3 delta = int64_t3_to_double3(delta_int) / (sphere_params.radius + sphereRadius_SU);
+        double d2 = Dot(delta, delta);
+        // this needs to be computed in double, then cast to float
+        reciplength = (float)rsqrt(d2);
+    }
+    // recompute in float to be cheaper
+    float3 delta = int64_t3_to_float3(delta_int) / (sphere_params.radius + sphereRadius_SU);
 
     float3 contact_normal = delta * reciplength;
 
-    float penetration_over_R = 2.f - 2.f / reciplength;
+    float penetration_over_R = 2. - 2. / reciplength;
     contact = (penetration_over_R > 0);
     // contact means d2 <1, so 1/d2 > 1, reciplength > 1, penetration_over_R > 0
     if (contact) {
         float3 force_accum = {0, 0, 0};
 
-        float force_model_multiplier = sqrtf(penetration_over_R);
+        float force_model_multiplier = sqrt(penetration_over_R);
 
         // spring term
-        force_accum = force_accum + sphere_params.normal_sign * gran_params->K_n_s2w_SU * contact_normal * 0.5f * (sphere_params.radius + sphereRadius_SU) * penetration_over_R *
+        force_accum = force_accum + sphere_params.normal_sign * gran_params->K_n_s2w_SU * contact_normal * 0.5 * (sphere_params.radius + sphereRadius_SU) * penetration_over_R *
                                         force_model_multiplier;
 
         // Project relative velocity to the normal
