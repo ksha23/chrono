@@ -607,6 +607,8 @@ inline __device__ float3 computeSphereNormalForces(float& reciplength,
     // Float is enough here. Positions are integers in SU and a typical penetration is many SU (about psi_L), while
     // the float rounding error of 1 - 1 / reciplength is about 1e-7 * 2R, far below one SU. (The previous double
     // path also rounded reciplength to float.) FP64 runs at 1/64 rate on consumer GPUs.
+    // A pair that barely touches (penetration of one SU or less) can round to reciplength <= 1, so the penetration
+    // below is clamped at zero.
     delta_r = int3_to_float3(sphereA_pos - sphereB_pos) / (2.f * sphereRadius_SU);
     reciplength = rsqrtf(Dot(delta_r, delta_r));
 
@@ -626,7 +628,7 @@ inline __device__ float3 computeSphereNormalForces(float& reciplength,
     vrel_t = v_rel - vrel_n;
 
     // Compute penetration term, this becomes the delta as we want it
-    float penetration_over_R = 2.f * (1.f - 1.f / reciplength);
+    float penetration_over_R = fmaxf(2.f * (1.f - 1.f / reciplength), 0.f);
     // multiplier caused by Hooke vs Hertz force model
     float hertz_force_factor = sqrtf(penetration_over_R);
 
@@ -668,7 +670,7 @@ inline __device__ float3 computeSphereNormalForces_matBased(float3& vrel_t,
     contact_normal = delta_r * reciplength;
 
     // penetration
-    float penetration = 2.f * sphereRadius_SU - Length(int3_to_float3(sphereA_pos - sphereB_pos));
+    float penetration = fmaxf(2.f * sphereRadius_SU - Length(int3_to_float3(sphereA_pos - sphereB_pos)), 0.f);
 
     // normal component of relative velocity
     float projection = Dot(v_rel, contact_normal);
@@ -797,7 +799,7 @@ static __global__ void computeSphereContactForces(ChSystemDem_impl::GranSphereDa
                 sphere_data->normal_contact_force[body_A_offset + contact_id] = force_accum;
             }
 
-            float hertz_force_factor = sqrtf(2.f * (1.f - (1.f / reciplength)));  // sqrt(delta_n / (2 R_eff)
+            float hertz_force_factor = sqrtf(fmaxf(2.f * (1.f - (1.f / reciplength)), 0.f));  // sqrt(delta_n / (2 R_eff)
 
             // add frictional terms, if needed
             if (gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS) {
