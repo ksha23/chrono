@@ -10,12 +10,13 @@
 //
 // =============================================================================
 //
-// Unit test for fluid forces on 1-D FEA meshes with the generic FSI interface.
+// Unit test for FSI forces on 1-D FEA meshes with the generic FSI interface.
 //
-// An ANCF cable, clamped at its lower end, stands in a periodic channel of fluid moving in +x. The same
-// problem is run with the custom SPH FSI interface and with the generic FSI interface. Both interfaces
-// obtain the nodal forces from the same fluid solver, so the forces applied to the cable nodes and the
-// resulting cable motion must agree. The generic interface must also apply a nonzero drag to the cable.
+// A column of CRM soil collapses onto an ANCF cable clamped at its base (a reduced version of
+// demo_FSI-SPH_Flexible_Cable). The same problem is run with the custom SPH FSI interface and with
+// the generic FSI interface. Both interfaces obtain the nodal forces from the same SPH solver, so the
+// forces applied to the cable nodes and the resulting cable motion must agree. The comparison is made
+// shortly after the soil reaches the cable, before GPU round-off differences between runs grow.
 //
 // =============================================================================
 
@@ -26,7 +27,7 @@
 #include "gtest/gtest.h"
 
 #include "chrono/physics/ChSystemSMC.h"
-#include "chrono/solver/ChIterativeSolverLS.h"
+#include "chrono/solver/ChDirectSolverLS.h"
 #include "chrono/fea/ChBuilderBeam.h"
 #include "chrono/fea/ChLinkNodeFrame.h"
 #include "chrono/fea/ChLinkNodeSlopeFrame.h"
@@ -44,19 +45,15 @@ struct CableResult {
     ChVector3d tip_pos;                   // position of the free end of the cable
 };
 
-static CableResult RunCableInFlow(bool generic_interface, int num_steps) {
+static CableResult RunCable(bool generic_interface, int num_steps) {
     const double spacing = 0.02;
-    const double Lx = 0.4, Ly = 0.2, Lz = 0.3;
-    const double flow_speed = 0.2;
-    const double dt = 2e-4;
+    const double Lx = 1.6, Ly = 0.2, Hc = 1.0;  // container
+    const double a = 0.6, H = 0.6;              // soil column
+    const double dt = 2.5e-4;
 
     ChSystemSMC sysMBS;
     sysMBS.SetGravitationalAcceleration(ChVector3d(0, 0, -9.81));
-    auto solver = chrono_types::make_shared<ChSolverMINRES>();
-    solver->SetMaxIterations(2000);
-    solver->SetTolerance(1e-12);
-    solver->EnableDiagonalPreconditioner(true);
-    sysMBS.SetSolver(solver);
+    sysMBS.SetSolver(chrono_types::make_shared<ChSolverSparseQR>());
 
     ChFsiFluidSystemSPH sysSPH;
     ChFsiSystemSPH sysFSI(&sysMBS, &sysSPH, generic_interface);
@@ -65,62 +62,68 @@ static CableResult RunCableInFlow(bool generic_interface, int num_steps) {
     sysFSI.SetStepSizeCFD(dt);
     sysFSI.SetStepsizeMBD(dt);
 
-    ChFsiFluidSystemSPH::FluidProperties fluid_props;
-    fluid_props.density = 1000;
-    fluid_props.viscosity = 1e-3;
-    sysSPH.SetCfdSPH(fluid_props);
+    ChFsiFluidSystemSPH::SoilProperties mat_props;
+    mat_props.density = 1700;
+    mat_props.Young_modulus = 1e6;
+    mat_props.Poisson_ratio = 0.3;
+    mat_props.mu_I0 = 0.03;
+    mat_props.mu_fric_s = 0.5;
+    mat_props.mu_fric_2 = 0.5;
+    mat_props.average_diam = 0.005;
+    mat_props.cohesion_coeff = 0;
+    sysSPH.SetCrmSPH(mat_props);
 
     ChFsiFluidSystemSPH::SPHParameters sph_params;
     sph_params.integration_scheme = IntegrationScheme::RK2;
     sph_params.initial_spacing = spacing;
-    sph_params.d0_multiplier = 1.2;
-    sph_params.max_velocity = 1.0;
-    sph_params.viscosity_method = ViscosityMethod::ARTIFICIAL_UNILATERAL;
-    sph_params.artificial_viscosity = 0.02;
-    sph_params.shifting_method = ShiftingMethod::XSPH;
+    sph_params.d0_multiplier = 1.0;
+    sph_params.shifting_method = ShiftingMethod::PPST_XSPH;
+    sph_params.shifting_xsph_eps = 0.25;
+    sph_params.shifting_ppst_pull = 1.0;
+    sph_params.shifting_ppst_push = 3.0;
+    sph_params.artificial_viscosity = 0.5;
+    sph_params.viscosity_method = ViscosityMethod::ARTIFICIAL_BILATERAL;
     sysSPH.SetSPHParameters(sph_params);
 
-    // Periodic in x and y, bottom wall. The bottom BCE plate has markers at x = -Lx/2 ... +Lx/2 (inclusive) with
-    // the fluid spacing, so the periodic lengths are Lx + spacing and Ly + spacing.
-    ChVector3d cMin(-Lx / 2 - spacing / 2, -Ly / 2 - spacing / 2, -10 * spacing);
-    ChVector3d cMax(+Lx / 2 + spacing / 2, +Ly / 2 + spacing / 2, Lz + 10 * spacing);
-    sysSPH.SetComputationalDomain(ChAABB(cMin, cMax), {BCType::PERIODIC, BCType::PERIODIC, BCType::NONE});
+    // Container walls at x = -Lx/2, +Lx/2 and z = 0, periodic in y. The BCE plates have markers at
+    // y = -Ly/2 ... +Ly/2 (inclusive) with the particle spacing, so the periodic length is Ly + spacing.
+    ChVector3d cMin(-Lx, -Ly / 2 - spacing / 2, -0.5);
+    ChVector3d cMax(+Lx, +Ly / 2 + spacing / 2, 2 * Hc);
+    sysSPH.SetComputationalDomain(ChAABB(cMin, cMax), BC_Y_PERIODIC);
 
-    // Fluid in hydrostatic equilibrium, moving in +x, starting one spacing above the first BCE layer
-    double gz = 9.81;
-    double c2 = sysSPH.GetSoundSpeed() * sysSPH.GetSoundSpeed();
-    int nx = (int)std::round(Lx / spacing) + 1;
+    // Soil column against the left wall, with a lithostatic initial stress
+    int nx = (int)std::round(a / spacing);
     int ny = (int)std::round(Ly / spacing) + 1;
-    int nz = (int)std::round(Lz / spacing);
+    int nz = (int)std::round(H / spacing);
+    double rho = sysSPH.GetDensity();
     for (int ix = 0; ix < nx; ix++) {
         for (int iy = 0; iy < ny; iy++) {
             for (int iz = 0; iz < nz; iz++) {
-                ChVector3d pos(-Lx / 2 + ix * spacing, -Ly / 2 + iy * spacing, (iz + 1) * spacing);
-                double p = sysSPH.GetDensity() * gz * (Lz + spacing / 2 - pos.z());
-                double rho = sysSPH.GetDensity() + p / c2;
-                sysSPH.AddSPHParticle(pos, rho, p, sysSPH.GetViscosity(), ChVector3d(flow_speed, 0, 0));
+                ChVector3d pos(-Lx / 2 + (ix + 1) * spacing, -Ly / 2 + iy * spacing, (iz + 1) * spacing);
+                double p = rho * 9.81 * (H + spacing / 2 - pos.z());
+                sysSPH.AddSPHParticle(pos, rho, p, sysSPH.GetViscosity(), VNULL, ChVector3d(-p), VNULL);
             }
         }
     }
-    auto bottom_bce = sysSPH.CreatePointsBoxContainer(ChVector3d(Lx, Ly, Lz), {0, 0, -1});
-    sysFSI.AddFsiBoundary(bottom_bce, ChFrame<>(ChVector3d(0, 0, Lz / 2), QUNIT));
+    auto container_bce = sysSPH.CreatePointsBoxContainer(ChVector3d(Lx, Ly, Hc), {2, 0, -1});
+    sysFSI.AddFsiBoundary(container_bce, ChFrame<>(ChVector3d(0, 0, Hc / 2), QUNIT));
 
-    // Vertical ANCF cable, clamped at the bottom
+    // Vertical ANCF cable downstream of the soil column, clamped at the bottom
     auto ground = chrono_types::make_shared<ChBody>();
     ground->SetFixed(true);
     sysMBS.AddBody(ground);
 
     auto section = chrono_types::make_shared<ChBeamSectionCableANCF>();
     section->SetDiameter(0.02);
-    section->SetYoungModulus(1e6);
-    section->SetDensity(1000);
+    section->SetYoungModulus(6e8);
+    section->SetDensity(8000);
     section->SetRayleighDamping(0.02);
 
     auto mesh = chrono_types::make_shared<ChMesh>();
     ChBuilderCableANCF builder;
-    builder.BuildBeam(mesh, section, 8, ChVector3d(0, 0, 0.22), ChVector3d(0, 0, 0.02));
-    auto base_node = std::dynamic_pointer_cast<ChNodeFEAxyzD>(builder.GetLastBeamNodes().back());
-    auto tip_node = std::dynamic_pointer_cast<ChNodeFEAxyzD>(builder.GetLastBeamNodes().front());
+    builder.BuildBeam(mesh, section, 8, ChVector3d(0.1, 0, 0.5), ChVector3d(0.1, 0, 0.005));
+    auto base_node = builder.GetLastBeamNodes().back();
+    auto tip_node = builder.GetLastBeamNodes().front();
     auto pos_const = chrono_types::make_shared<ChLinkNodeFrame>();
     pos_const->Initialize(base_node, ground);
     sysMBS.Add(pos_const);
@@ -147,9 +150,10 @@ static CableResult RunCableInFlow(bool generic_interface, int num_steps) {
 }
 
 TEST(SPH_generic_interface, mesh1D_forces) {
-    const int num_steps = 50;
-    auto custom = RunCableInFlow(false, num_steps);
-    auto generic = RunCableInFlow(true, num_steps);
+    // The soil front reaches the cable at about t = 0.31 s; compare at t = 0.34 s
+    const int num_steps = 1360;
+    auto custom = RunCable(false, num_steps);
+    auto generic = RunCable(true, num_steps);
 
     ASSERT_EQ(custom.node_forces.size(), generic.node_forces.size());
 
@@ -170,11 +174,11 @@ TEST(SPH_generic_interface, mesh1D_forces) {
     std::cout << "  cable tip, custom:  " << custom.tip_pos << std::endl;
     std::cout << "  cable tip, generic: " << generic.tip_pos << std::endl;
 
-    // The fluid drags the cable downstream
-    EXPECT_GT(total_custom.x(), 0);
-    EXPECT_GT(total_generic.x(), 0);
+    // The soil pushes the cable downstream
+    EXPECT_GT(total_custom.x(), 10.0);
+    EXPECT_GT(total_generic.x(), 10.0);
 
     // Both interfaces apply the same fluid forces
     EXPECT_LE(max_diff, 1e-3 * max_force);
-    EXPECT_LE((custom.tip_pos - generic.tip_pos).Length(), 1e-6);
+    EXPECT_LE((custom.tip_pos - generic.tip_pos).Length(), 1e-5);
 }
