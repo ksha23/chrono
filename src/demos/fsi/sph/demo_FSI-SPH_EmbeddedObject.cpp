@@ -163,7 +163,7 @@ int main(int argc, char* argv[]) {
             ChVector3d size(0.4, 0.11, 0.2);
             ChBox box(size);
             mass = density * box.GetVolume();
-            inertia = density * box.GetGyration();
+            inertia = mass * box.GetGyration();
             geometry->coll_boxes.push_back(utils::ChBodyGeometry::BoxShape(ChVector3d(0.1, 0.1, 0), Q_ROTATE_Y_TO_Z, box, 0));
             break;
         }
@@ -172,7 +172,7 @@ int main(int argc, char* argv[]) {
             double length = 0.4;
             ChCylinder cylinder(radius, length);
             mass = density * cylinder.GetVolume();
-            inertia = density * cylinder.GetGyration();
+            inertia = mass * cylinder.GetGyration();
             geometry->coll_cylinders.push_back(utils::ChBodyGeometry::CylinderShape(VNULL, QuatFromAngleX(CH_PI / 4), cylinder, 0));
             break;
         }
@@ -180,7 +180,7 @@ int main(int argc, char* argv[]) {
             ChBox box1(ChVector3d(0.3, 0.1, 0.1));
             ChBox box2(ChVector3d(0.1, 0.1, 0.4));
             mass = density * box1.GetVolume();       // not exact
-            inertia = density * box1.GetGyration();  // not exact
+            inertia = mass * box1.GetGyration();     // not exact
             geometry->coll_boxes.push_back(utils::ChBodyGeometry::BoxShape(ChVector3d(0, 0, -0.15), QUNIT, box1, 0));
             geometry->coll_boxes.push_back(utils::ChBodyGeometry::BoxShape(ChVector3d(0, 0, +0.15), QUNIT, box1, 0));
             geometry->coll_boxes.push_back(utils::ChBodyGeometry::BoxShape(ChVector3d(-0.2, 0, 0), QUNIT, box2, 0));

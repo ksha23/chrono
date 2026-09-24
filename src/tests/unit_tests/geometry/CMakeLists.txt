@@ -1,5 +1,6 @@
 set(TESTS
     utest_CH_Delaunay2D
+    utest_CH_ChBox
     )
 
 set(LIBS Chrono_core)
