@@ -57,7 +57,7 @@ class ChApi ChContactable {
     void AddCollisionShape(std::shared_ptr<ChCollisionShape> shape, const ChFrame<>& frame = ChFrame<>());
 
     /// Access the collision model.
-    std::shared_ptr<ChCollisionModel> GetCollisionModel() const;
+    const std::shared_ptr<ChCollisionModel>& GetCollisionModel() const;
 
     /// Indicate whether or not the object must be considered in collision detection.
     virtual bool IsContactActive() = 0;

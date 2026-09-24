@@ -120,6 +120,11 @@ class ChApi ChContactMaterialCompositeSMC : public ChContactMaterialComposite {
     ChContactMaterialCompositeSMC(ChContactMaterialCompositionStrategy* strategy,
                                   std::shared_ptr<ChContactMaterialSMC> mat1,
                                   std::shared_ptr<ChContactMaterialSMC> mat2);
+
+    /// Construct the composite material from raw pointers to the two materials (no shared_ptr copies).
+    ChContactMaterialCompositeSMC(ChContactMaterialCompositionStrategy* strategy,
+                                  const ChContactMaterialSMC* mat1,
+                                  const ChContactMaterialSMC* mat2);
 };
 
 }  // end namespace chrono

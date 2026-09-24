@@ -109,6 +109,11 @@ class ChApi ChContactMaterialCompositeNSC : public ChContactMaterialComposite {
                                   std::shared_ptr<ChContactMaterialNSC> mat1,
                                   std::shared_ptr<ChContactMaterialNSC> mat2);
 
+    /// Construct the composite material from raw pointers to the two materials (no shared_ptr copies).
+    ChContactMaterialCompositeNSC(ChContactMaterialCompositionStrategy* strategy,
+                                  const ChContactMaterialNSC* mat1,
+                                  const ChContactMaterialNSC* mat2);
+
     /// Method to allow serialization of transient data to archives.
     virtual void ArchiveOut(ChArchiveOut& archive_out) override;
 

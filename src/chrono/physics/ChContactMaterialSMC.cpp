@@ -106,7 +106,12 @@ ChContactMaterialCompositeSMC::ChContactMaterialCompositeSMC()
 
 ChContactMaterialCompositeSMC::ChContactMaterialCompositeSMC(ChContactMaterialCompositionStrategy* strategy,
                                                              std::shared_ptr<ChContactMaterialSMC> mat1,
-                                                             std::shared_ptr<ChContactMaterialSMC> mat2) {
+                                                             std::shared_ptr<ChContactMaterialSMC> mat2)
+    : ChContactMaterialCompositeSMC(strategy, mat1.get(), mat2.get()) {}
+
+ChContactMaterialCompositeSMC::ChContactMaterialCompositeSMC(ChContactMaterialCompositionStrategy* strategy,
+                                                             const ChContactMaterialSMC* mat1,
+                                                             const ChContactMaterialSMC* mat2) {
     float inv_E = (1 - mat1->poisson_ratio * mat1->poisson_ratio) / mat1->young_modulus +
                   (1 - mat2->poisson_ratio * mat2->poisson_ratio) / mat2->young_modulus;
     float inv_G = 2 * (2 - mat1->poisson_ratio) * (1 + mat1->poisson_ratio) / mat1->young_modulus +

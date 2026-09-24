@@ -58,7 +58,7 @@ class ChApi ChCollisionShape {
 
     Type GetType() const { return m_type; }
 
-    std::shared_ptr<ChContactMaterial> GetMaterial() const { return m_material; }
+    const std::shared_ptr<ChContactMaterial>& GetMaterial() const { return m_material; }
     ChContactMethod GetContactMethod() const { return m_material->GetContactMethod(); }
 
     /// Get the shape bounding box.

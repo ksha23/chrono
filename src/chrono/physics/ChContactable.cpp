@@ -29,7 +29,7 @@ void ChContactable::AddCollisionShape(std::shared_ptr<ChCollisionShape> shape, c
     collision_model->AddShape(shape, frame);
 }
 
-std::shared_ptr<ChCollisionModel> ChContactable::GetCollisionModel() const {
+const std::shared_ptr<ChCollisionModel>& ChContactable::GetCollisionModel() const {
     return collision_model;
 }
 
