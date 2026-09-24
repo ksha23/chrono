@@ -1603,11 +1603,10 @@ void SCMLoader::ComputeInternalForces() {
 
     // Collect hit vertices assigned to each contact patch.
     struct ContactPatchRecord {
-        std::vector<ChVector2d> points;  // points in contact patch (in reference plane)
-        std::vector<ChVector2i> nodes;   // grid nodes in the contact patch
-        double area;                     // contact patch area
-        double perimeter;                // contact patch perimeter
-        double oob;                      // approximate value of 1/b
+        std::vector<ChVector2i> nodes;  // grid nodes in the contact patch
+        double area;                    // contact patch area
+        double perimeter;               // contact patch perimeter
+        double oob;                     // approximate value of 1/b
     };
     std::vector<ContactPatchRecord> contact_patches;
 
@@ -1624,7 +1623,6 @@ void SCMLoader::ComputeInternalForces() {
         h.second.patch_id = m_num_contact_patches++;
         ContactPatchRecord patch;
         patch.nodes.push_back(ij);
-        patch.points.push_back(ChVector2d(m_delta * ij.x(), m_delta * ij.y()));
 
         // Add current node to the work queue
         std::queue<ChVector2i> todo;
@@ -1649,9 +1647,8 @@ void SCMLoader::ComputeInternalForces() {
                     continue;
                 // Assign neighbor to the same contact patch
                 nbr->second.patch_id = crt_patch;
-                // Add neighbor point to patch lists
+                // Add neighbor to patch node list
                 patch.nodes.push_back(nbr_ij);
-                patch.points.push_back(ChVector2d(m_delta * nbr_ij.x(), m_delta * nbr_ij.y()));
                 // Add neighbor to end of work queue
                 todo.push(nbr_ij);
             }
@@ -1661,8 +1658,33 @@ void SCMLoader::ComputeInternalForces() {
 
     // Calculate area and perimeter of each contact patch.
     // Calculate approximation to Bekker term 1/b.
+    // Patch nodes are grid points, so the convex hull of a patch is the convex hull of the lowest and highest node in
+    // each grid column. Reduce each patch to these (at most 2 per column) points in O(n), then use a monotone chain.
     for (auto& p : contact_patches) {
-        utils::ChConvexHull2D ch(p.points);
+        int imin = p.nodes[0].x();
+        int imax = imin;
+        for (const auto& ij : p.nodes) {
+            imin = std::min(imin, ij.x());
+            imax = std::max(imax, ij.x());
+        }
+        std::vector<int> jmin(imax - imin + 1, std::numeric_limits<int>::max());
+        std::vector<int> jmax(imax - imin + 1, std::numeric_limits<int>::lowest());
+        for (const auto& ij : p.nodes) {
+            int c = ij.x() - imin;
+            jmin[c] = std::min(jmin[c], ij.y());
+            jmax[c] = std::max(jmax[c], ij.y());
+        }
+        std::vector<ChVector2d> points;
+        points.reserve(2 * jmin.size());
+        for (int c = 0; c < (int)jmin.size(); c++) {
+            if (jmin[c] > jmax[c])
+                continue;
+            points.push_back(ChVector2d(m_delta * (imin + c), m_delta * jmin[c]));
+            if (jmax[c] != jmin[c])
+                points.push_back(ChVector2d(m_delta * (imin + c), m_delta * jmax[c]));
+        }
+
+        utils::ChConvexHull2D ch(points, utils::ChConvexHull2D::MONOTONE);
         p.area = ch.GetArea();
         p.perimeter = ch.GetPerimeter();
         if (p.area < 1e-6) {
