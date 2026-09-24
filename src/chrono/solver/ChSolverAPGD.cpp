@@ -100,9 +100,6 @@ double ChSolverAPGD::Solve(ChSystemDescriptor& sysd) {
     // (6) t_k = 1 / L_k
     t = 1.0 / L;
 
-    //// RADU
-    //// Check consistency (e.g. sign of 'r' in comments vs. code)
-
     std::fill(violation_history.begin(), violation_history.end(), 0.0);
     std::fill(dlambda_history.begin(), dlambda_history.end(), 0.0);
 
@@ -147,6 +144,11 @@ double ChSolverAPGD::Solve(ChSystemDescriptor& sysd) {
             obj1 = gammaNew.dot(0.5 * Ngamma - r);
             obj2 = obj_y + (gammaNew - y).dot(g + 0.5 * L * (gammaNew - y));
         }  // (14) endwhile
+
+        // The loop can only exit with obj1 > obj2 when the cap was hit
+        if (verbose && obj1 > obj2)
+            std::cout << "APGD: backtracking cap (" << max_backtracks << ") reached at iteration " << m_iterations << ", accepting a step that fails the sufficient decrease test"
+                      << std::endl;
 
         // (15) theta_(k+1) = (-theta_k^2 + theta_k * sqrt(theta_k^2 + 4)) / 2
         thetaNew = (-theta * theta + theta * std::sqrt(theta * theta + 4.0)) / 2.0;
