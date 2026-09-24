@@ -17,7 +17,10 @@
 //
 // =============================================================================
 
+#include <algorithm>
 #include <iostream>
+#include <random>
+#include <set>
 #include <vector>
 
 #include "chrono/core/ChMatrix.h"
@@ -74,4 +77,60 @@ TEST(SparseMatrix, pattern_learner) {
     ASSERT_NEAR(spmat_mirror.valuePtr()[1], 2.1, precision);
     ASSERT_NEAR(spmat_mirror.valuePtr()[2], 2.2, precision);
     ASSERT_NEAR(spmat_mirror.valuePtr()[3], 3.3, precision);
+}
+
+// Pattern learned from many unordered and duplicated insertions must match a brute-force reference, both in the
+// per-row counts reserved by Apply and in the final compressed pattern of the matrix loaded afterwards.
+TEST(SparseMatrix, pattern_learner_duplicates) {
+    const int n = 200;
+    const int num_insertions = 20000;
+
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<int> idx(0, n - 1);
+    std::vector<std::pair<int, int>> entries;
+    for (int k = 0; k < num_insertions; k++)
+        entries.push_back({idx(rng), idx(rng)});
+    // Make every entry appear at least twice, in a different order
+    auto shuffled = entries;
+    std::shuffle(shuffled.begin(), shuffled.end(), rng);
+    entries.insert(entries.end(), shuffled.begin(), shuffled.end());
+
+    std::vector<std::set<int>> reference(n);
+    for (const auto& e : entries)
+        reference[e.first].insert(e.second);
+
+    ChSparsityPatternLearner spl(n, n);
+    for (const auto& e : entries)
+        spl.SetElement(e.first, e.second, 1.0);
+
+    ChSparseMatrix spmat_learned;
+    spl.Apply(spmat_learned);
+
+    // Apply reserves exactly the unique column indices of each row, in increasing order
+    int offset = 0;
+    for (int i = 0; i < n; i++) {
+        ASSERT_EQ(spmat_learned.outerIndexPtr()[i], offset);
+        for (int col : reference[i]) {
+            ASSERT_EQ(spmat_learned.innerIndexPtr()[offset], col);
+            offset++;
+        }
+    }
+    ASSERT_EQ(spmat_learned.outerIndexPtr()[n], offset);
+
+    // Loading the values afterwards yields the same pattern as a matrix built without the learner
+    ChSparseMatrix spmat_mirror(n, n);
+    for (const auto& e : entries) {
+        spmat_learned.SetElement(e.first, e.second, e.first + 0.001 * e.second);
+        spmat_mirror.SetElement(e.first, e.second, e.first + 0.001 * e.second);
+    }
+    spmat_learned.makeCompressed();
+    spmat_mirror.makeCompressed();
+
+    ASSERT_EQ(spmat_learned.nonZeros(), spmat_mirror.nonZeros());
+    for (int i = 0; i <= n; i++)
+        ASSERT_EQ(spmat_learned.outerIndexPtr()[i], spmat_mirror.outerIndexPtr()[i]);
+    for (int k = 0; k < spmat_mirror.nonZeros(); k++) {
+        ASSERT_EQ(spmat_learned.innerIndexPtr()[k], spmat_mirror.innerIndexPtr()[k]);
+        ASSERT_EQ(spmat_learned.valuePtr()[k], spmat_mirror.valuePtr()[k]);
+    }
 }
