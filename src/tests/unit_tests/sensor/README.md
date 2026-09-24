@@ -24,6 +24,7 @@ the build selected.
 | `utest_SEN_dynamic_sensors` | accelerometer / gyroscope / magnetometer / GPS / tachometer on a driving vehicle |
 | `utest_SEN_metal_stochastic` | convergence of the stochastic features (Metal RT builds) |
 | `utest_SEN_camera_convergence`, `utest_SEN_optix{engine,geometry,pipeline}` | OptiX-specific |
+| `utest_SEN_physcam_ops` | phys-cam CUDA filter ops: per-channel parameters, no per-frame device memory growth (OptiX builds) |
 
 `utest_SEN_analytic_render` and `utest_SEN_dynamic_sensors` print their measurements as they go, so a
 failing run says what was measured and not merely that something was wrong. They are ordinary
