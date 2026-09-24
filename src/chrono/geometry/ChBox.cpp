@@ -40,7 +40,7 @@ double ChBox::CalcVolume(const ChVector3d& lengths) {
 }
 
 double ChBox::GetVolume() const {
-    return CalcVolume(2 * hlen);
+    return CalcVolume(2.0 * hlen);
 }
 
 ChMatrix33<> ChBox::CalcGyration(const ChVector3d& lengths) {
@@ -54,7 +54,7 @@ ChMatrix33<> ChBox::CalcGyration(const ChVector3d& lengths) {
 }
 
 ChMatrix33<> ChBox::GetGyration() const {
-    return CalcGyration(2 * hlen);
+    return CalcGyration(2.0 * hlen);
 }
 
 ChVector3d ChBox::CalcGyrationXX(const ChVector3d& lengths) {
@@ -66,7 +66,7 @@ ChVector3d ChBox::CalcGyrationXX(const ChVector3d& lengths) {
 }
 
 ChVector3d ChBox::GetGyrationXX() const {
-    return CalcGyrationXX(2 * hlen);
+    return CalcGyrationXX(2.0 * hlen);
 }
 
 ChAABB ChBox::CalcBoundingBox(const ChVector3d& lengths) {
@@ -98,7 +98,7 @@ ChAABB ChBox::CalcBoundingBox(const ChVector3d& lengths) {
 }
 
 ChAABB ChBox::GetBoundingBox() const {
-    return CalcBoundingBox(2 * hlen);
+    return CalcBoundingBox(2.0 * hlen);
 }
 
 double ChBox::CalcBoundingSphereRadius(const ChVector3d& lengths) {
@@ -106,7 +106,7 @@ double ChBox::CalcBoundingSphereRadius(const ChVector3d& lengths) {
 }
 
 double ChBox::GetBoundingSphereRadius() const {
-    return CalcBoundingSphereRadius(2 * hlen);
+    return CalcBoundingSphereRadius(2.0 * hlen);
 }
 
 // -----------------------------------------------------------------------------

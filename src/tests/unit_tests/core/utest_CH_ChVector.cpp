@@ -16,6 +16,8 @@
 //
 // =============================================================================
 
+#include <type_traits>
+
 #include "gtest/gtest.h"
 #include "chrono/core/ChVector3.h"
 
@@ -92,4 +94,35 @@ TEST(ChVectorTest, cross) {
 
     auto pf = af.GetOrthogonalVector();
     ASSERT_NEAR(af.Cross(pf).Length(), af.Length() * pf.Length(), ABS_ERR_F);
+}
+
+TEST(ChVectorTest, scalar_mixed_types) {
+    // Left scaling with a scalar of a different type must not truncate the vector to integers
+    ChVector3d vd(0.3, 0.1, 1.5);
+    auto rd = 2 * vd;
+    ASSERT_TRUE((std::is_same<decltype(rd), ChVector3d>::value));
+    ASSERT_NEAR(rd.x(), 0.6, ABS_ERR_D);
+    ASSERT_NEAR(rd.y(), 0.2, ABS_ERR_D);
+    ASSERT_NEAR(rd.z(), 3.0, ABS_ERR_D);
+    ASSERT_TRUE(2 * vd == vd * 2);
+    ASSERT_TRUE(2.0f * vd == 2.0 * vd);
+
+    ChVector3f vf(0.3f, 0.1f, 1.5f);
+    auto rf = 2 * vf;
+    ASSERT_TRUE((std::is_same<decltype(rf), ChVector3f>::value));
+    ASSERT_NEAR(rf.x(), 0.6f, ABS_ERR_F);
+    ASSERT_NEAR(rf.y(), 0.2f, ABS_ERR_F);
+    ASSERT_NEAR(rf.z(), 3.0f, ABS_ERR_F);
+    ASSERT_TRUE(0.5 * vf == vf * 0.5f);
+
+    // Scaling an integer vector by a double still produces a double vector
+    ChVector3i vi(1, -2, 3);
+    auto ri = 0.5 * vi;
+    ASSERT_TRUE((std::is_same<decltype(ri), ChVector3d>::value));
+    ASSERT_NEAR(ri.x(), 0.5, ABS_ERR_D);
+    ASSERT_NEAR(ri.y(), -1.0, ABS_ERR_D);
+    ASSERT_NEAR(ri.z(), 1.5, ABS_ERR_D);
+    auto ri2 = 2 * vi;
+    ASSERT_TRUE((std::is_same<decltype(ri2), ChVector3i>::value));
+    ASSERT_TRUE(ri2 == ChVector3i(2, -4, 6));
 }
