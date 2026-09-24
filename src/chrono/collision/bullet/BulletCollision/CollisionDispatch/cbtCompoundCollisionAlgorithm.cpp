@@ -101,10 +101,13 @@ public:
 	cbtManifoldResult* m_resultOut;
 	cbtCollisionAlgorithm** m_childCollisionAlgorithms;
 	cbtPersistentManifold* m_sharedManifold;
+	cbtVector3 m_otherAabbMin;  // world AABB of the other shape, the same for every child
+	cbtVector3 m_otherAabbMax;
 
 	cbtCompoundLeafCallback(const cbtCollisionObjectWrapper* compoundObjWrap, const cbtCollisionObjectWrapper* otherObjWrap, cbtDispatcher* dispatcher, const cbtDispatcherInfo& dispatchInfo, cbtManifoldResult* resultOut, cbtCollisionAlgorithm** childCollisionAlgorithms, cbtPersistentManifold* sharedManifold)
 		: m_compoundColObjWrap(compoundObjWrap), m_otherObjWrap(otherObjWrap), m_dispatcher(dispatcher), m_dispatchInfo(dispatchInfo), m_resultOut(resultOut), m_childCollisionAlgorithms(childCollisionAlgorithms), m_sharedManifold(sharedManifold)
 	{
+		m_otherObjWrap->getCollisionShape()->getAabb(m_otherObjWrap->getWorldTransform(), m_otherAabbMin, m_otherAabbMax);
 	}
 
 	void ProcessChildShape(const cbtCollisionShape* childShape, int index)
@@ -133,11 +136,7 @@ public:
 		aabbMin0 -= extendAabb;
 		aabbMax0 += extendAabb;
 
-		cbtVector3 aabbMin1, aabbMax1;
-		m_otherObjWrap->getCollisionShape()->getAabb(m_otherObjWrap->getWorldTransform(), aabbMin1, aabbMax1);
-
-
-		if (TestAabbAgainstAabb2(aabbMin0, aabbMax0, aabbMin1, aabbMax1))
+		if (TestAabbAgainstAabb2(aabbMin0, aabbMax0, m_otherAabbMin, m_otherAabbMax))
 		{
 			cbtCollisionObjectWrapper compoundWrap(this->m_compoundColObjWrap, childShape, m_compoundColObjWrap->getCollisionObject(), newChildWorldTrans, -1, index);
 
@@ -284,8 +283,61 @@ void cbtCompoundCollisionAlgorithm::processCollision(const cbtCollisionObjectWra
 		localAabbMax += extraExtends;
 
 		const ATTRIBUTE_ALIGNED16(cbtDbvtVolume) bounds = cbtDbvtVolume::FromMM(localAabbMin, localAabbMax);
-		//process all children, that overlap with  the given AABB bounds
-		tree->collideTVNoStackAlloc(tree->m_root, bounds, stack2, callback);
+
+		// Chrono: 'bounds' is the compound-frame AABB of the whole other shape. For a large other shape (e.g. a ground
+		// box) under a rotated compound (e.g. a wheel mesh), it covers the entire compound and culls nothing. A child is
+		// only processed if its world AABB overlaps the other world AABB (see ProcessChildShape), and every child world
+		// AABB lies inside the compound world AABB. So a child can only be processed if the world AABB of its dbvt node
+		// overlaps region = (other world AABB, extended by the threshold) intersected with (compound world AABB). Also
+		// test each node against that region (world axes), which prunes whole subtrees and never removes a child that
+		// the per-child test would accept. The region is padded to absorb round-off, so it stays conservative.
+		const cbtTransform& compoundTrans = colObjWrap->getWorldTransform();
+		cbtVector3 compoundAabbMin, compoundAabbMax;
+		compoundShape->getAabb(compoundTrans, compoundAabbMin, compoundAabbMax);
+		cbtVector3 regionMin = callback.m_otherAabbMin - extraExtends;
+		cbtVector3 regionMax = callback.m_otherAabbMax + extraExtends;
+		regionMin.setMax(compoundAabbMin);
+		regionMax.setMin(compoundAabbMax);
+		cbtVector3 scale = compoundAabbMin.absolute();
+		scale.setMax(compoundAabbMax.absolute());
+		const cbtScalar pad = cbtScalar(16) * SIMD_EPSILON * (scale.x() + scale.y() + scale.z() + cbtScalar(1));
+		const cbtVector3 regionPad(pad, pad, pad);
+		regionMin -= regionPad;
+		regionMax += regionPad;
+
+		if (regionMin.x() <= regionMax.x() && regionMin.y() <= regionMax.y() && regionMin.z() <= regionMax.z())
+		{
+			const cbtVector3 regionCenter = cbtScalar(0.5) * (regionMin + regionMax);
+			const cbtVector3 regionHalf = cbtScalar(0.5) * (regionMax - regionMin);
+			const cbtMatrix3x3 absBasis = compoundTrans.getBasis().absolute();
+
+			//process all children that overlap with the given AABB bounds (same traversal as collideTVNoStackAlloc)
+			stack2.resize(0);
+			stack2.reserve(cbtDbvt::SIMPLE_STACKSIZE);
+			stack2.push_back(tree->m_root);
+			do
+			{
+				const cbtDbvtNode* n = stack2[stack2.size() - 1];
+				stack2.pop_back();
+				if (!Intersect(n->volume, bounds))
+					continue;
+				// world AABB of the node volume vs the region
+				const cbtVector3 nodeCenter = compoundTrans(n->volume.Center());
+				const cbtVector3 nodeHalf = n->volume.Extents().dot3(absBasis[0], absBasis[1], absBasis[2]);
+				const cbtVector3 d = (nodeCenter - regionCenter).absolute();
+				if (d.x() > nodeHalf.x() + regionHalf.x() || d.y() > nodeHalf.y() + regionHalf.y() || d.z() > nodeHalf.z() + regionHalf.z())
+					continue;
+				if (n->isinternal())
+				{
+					stack2.push_back(n->childs[0]);
+					stack2.push_back(n->childs[1]);
+				}
+				else
+				{
+					callback.Process(n);
+				}
+			} while (stack2.size() > 0);
+		}
 	}
 	else
 	{
@@ -307,7 +359,7 @@ void cbtCompoundCollisionAlgorithm::processCollision(const cbtCollisionObjectWra
 		cbtTransform orgTrans;
 
 		cbtTransform newChildWorldTrans;
-		cbtVector3 aabbMin0, aabbMax0, aabbMin1, aabbMax1;
+		cbtVector3 aabbMin0, aabbMax0;
 
 		for (i = 0; i < numChildren; i++)
 		{
@@ -322,9 +374,8 @@ void cbtCompoundCollisionAlgorithm::processCollision(const cbtCollisionObjectWra
 
 				//perform an AABB check first
 				childShape->getAabb(newChildWorldTrans, aabbMin0, aabbMax0);
-				otherObjWrap->getCollisionShape()->getAabb(otherObjWrap->getWorldTransform(), aabbMin1, aabbMax1);
 
-				if (!TestAabbAgainstAabb2(aabbMin0, aabbMax0, aabbMin1, aabbMax1))
+				if (!TestAabbAgainstAabb2(aabbMin0, aabbMax0, callback.m_otherAabbMin, callback.m_otherAabbMax))
 				{
 					m_childCollisionAlgorithms[i]->~cbtCollisionAlgorithm();
 					m_dispatcher->freeCollisionAlgorithm(m_childCollisionAlgorithms[i]);
