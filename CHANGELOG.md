@@ -485,6 +485,13 @@ basis. Gravity handling in modal assemblies was also fixed.
 
 See the Chrono::Modal demos and the corresponding unit tests.
 
+The default linear solver for K_IIc^{-1} in `ChModalAssembly` is now `ChSolverSparseLU` (it was
+`ChSolverSparseQR`). If SparseLU cannot factorize K_IIc, for example because the internal subsystem
+has a mechanism, the reduction falls back to SparseQR with a warning. A solver set with
+`SetModalSolver()` that fails to factorize K_IIc now throws instead of continuing with an invalid
+factorization. Demos and the `SetChronoSolver` helper also fall back to SparseLU instead of SparseQR
+when Chrono::PardisoMKL and Chrono::MUMPS are not available.
+
 ## [Changed] Build requirements and third-party dependencies
 
 - Chrono now requires a C++17-capable compiler, and this is enforced throughout the build.
