@@ -9,6 +9,7 @@ set(TESTS
     utest_FSI-SPH_free_surface_export
     utest_FSI-SPH_error_check
     utest_FSI-SPH_cell_sort
+    utest_FSI-SPH_step_results
 )
 
 list(APPEND LIBS Chrono_core)
