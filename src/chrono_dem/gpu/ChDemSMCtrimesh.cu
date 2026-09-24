@@ -754,9 +754,6 @@ __host__ double ChSystemDemMesh_impl::AdvanceSimulation(float duration) {
             updateFrictionData<<<nBlocksFricHistoryPostProcess, nThreadsUpdateHist>>>(fricMapSize, sphere_data, gran_params);
             demErrchk(gpuPeekAtLastError());
             demErrchk(gpuDeviceSynchronize());
-            updateAngVels<<<nBlocks, GPU_THREADS_PER_BLOCK>>>(stepSize_SU, sphere_data, nSpheres, gran_params);
-            demErrchk(gpuPeekAtLastError());
-            demErrchk(gpuDeviceSynchronize());
         }
 
         elapsedSimTime += (float)(stepSize_SU * TIME_SU2UU);  // Advance current time
