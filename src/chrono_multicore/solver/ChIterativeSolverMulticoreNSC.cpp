@@ -167,6 +167,9 @@ void ChIterativeSolverMulticoreNSC::ComputeD() {
 
     // build per row nnz counts for D_T
     D_T.resize(num_rows, num_dof);
+    // resize() keeps the allocation of the previous fill. Release it so that reserve() below leaves no spare capacity
+    // when this fill has fewer nonzeros; otherwise every insert() takes Eigen's O(nnz) slow path.
+    D_T.data().squeeze();
     {
         Eigen::VectorXi d_nnz(num_rows);
         d_nnz.setZero();
