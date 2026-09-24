@@ -12,8 +12,8 @@
 //
 // Regression test that pins the result of short SPH runs through the WCSPH
 // right-hand-side kernels (CrmCalcRHS_D, CfdCalcRHS_D), the boundary kernels
-// (Adami, with the Tait inverse equation of state) and the CRM stress update
-// (mu(I) and MCC).
+// (Adami and Holmes, CRM and CFD, with the Tait inverse equation of state) and
+// the CRM stress update (mu(I) and MCC).
 //
 // Each case runs a small problem for a fixed number of steps and compares a few
 // aggregate quantities of the SPH particles (mean position, mean speed, mean
@@ -26,6 +26,19 @@
 //
 // The reference values apply to the default single-precision build only. With
 // CH_USE_SPH_DOUBLE the values are printed but not checked.
+//
+// This test checks results, not the generated code. It does not detect double
+// precision literals or calls that slow down the single-precision kernels
+// without changing their results beyond rounding.
+//
+// Sensitivity, checked by mutating SphForceWCSPH.cu when the Holmes cases were
+// added: removing the CFD delta-SPH term, halving the CRM or CFD artificial
+// viscosity, or changing the Holmes velocity extrapolation limit makes the test
+// fail. Removing the CRM tensile-instability term or the Jaumann rotation terms
+// of the diagonal stress rate does not. The first is not active in these
+// cohesionless cases (the mu(I) update clamps the pressure at zero, and in the
+// MCC case the term moves the results by about 1e-5 of scale); the second moves
+// the checked quantities by less than 0.11% of their scale.
 //
 // =============================================================================
 
@@ -116,7 +129,7 @@ void Check(const std::string& what, double val, double ref, double scale, double
 // Case 1: CRM granular column collapse (mu(I) rheology).
 // A cylinder of soil is released inside an open box and spreads under gravity.
 // -----------------------------------------------------------------------------
-Checksum RunColumnCollapse(int num_steps) {
+Checksum RunColumnCollapse(int num_steps, BoundaryMethod boundary_method) {
     double step_size = 1e-4;
     double spacing = 0.005;
     double radius = 0.05;
@@ -156,7 +169,7 @@ Checksum RunColumnCollapse(int num_steps) {
     sph_params.use_variable_time_step = false;
     sph_params.kernel_type = KernelType::WENDLAND;
     sph_params.viscosity_method = ViscosityMethod::ARTIFICIAL_BILATERAL;
-    sph_params.boundary_method = BoundaryMethod::ADAMI;
+    sph_params.boundary_method = boundary_method;
     sysSPH.SetSPHParameters(sph_params);
 
     ChVector3d cMin(-bxDim / 2 - 3 * spacing, -byDim / 2 - 3 * spacing, -bzDim - 3 * spacing);
@@ -187,10 +200,10 @@ Checksum RunColumnCollapse(int num_steps) {
 }
 
 // -----------------------------------------------------------------------------
-// Case 2: CFD dam break (weakly compressible fluid, Tait EOS, delta-SPH, Adami walls).
+// Case 2: CFD dam break (weakly compressible fluid, Tait EOS, delta-SPH).
 // A water column at the left end of a tank periodic in y collapses and runs along the floor.
 // -----------------------------------------------------------------------------
-Checksum RunDamBreak(int num_steps) {
+Checksum RunDamBreak(int num_steps, BoundaryMethod boundary_method) {
     double step_size = 1e-4;
     double spacing = 0.01;
     double bxDim = 0.6, byDim = 0.1, bzDim = 0.4;
@@ -225,7 +238,7 @@ Checksum RunDamBreak(int num_steps) {
     sph_params.use_delta_sph = true;
     sph_params.delta_sph_coefficient = 0.1;
     sph_params.kernel_type = KernelType::WENDLAND;
-    sph_params.boundary_method = BoundaryMethod::ADAMI;
+    sph_params.boundary_method = boundary_method;
     sysSPH.SetSPHParameters(sph_params);
 
     ChVector3d cMin(-bxDim / 2 - 10 * spacing, -byDim / 2 - spacing / 2, -2 * bzDim);
@@ -348,7 +361,7 @@ int main(int argc, char* argv[]) {
     const double rtol_p = 5e-3;
 
     // Case 1
-    auto c1 = RunColumnCollapse(1000);
+    auto c1 = RunColumnCollapse(1000, BoundaryMethod::ADAMI);
     Print("column_collapse", c1);
     if (check) {
         Check("n", (double)c1.n, 6657, 1, 0);
@@ -359,7 +372,7 @@ int main(int argc, char* argv[]) {
     }
 
     // Case 2
-    auto c2 = RunDamBreak(2000);
+    auto c2 = RunDamBreak(2000, BoundaryMethod::ADAMI);
     Print("dam_break", c2);
     if (check) {
         Check("n", (double)c2.n, 6061, 1, 0);
@@ -380,6 +393,28 @@ int main(int argc, char* argv[]) {
         Check("mean_speed", c3.mean_speed, 0.0405264516, 0.05, rtol);
         Check("mean_p", c3.mean_p, 1417.19448, 1700, rtol_p);
         Check("sphere_z", sphere_z, 0.10387144, 0.05, rtol);
+    }
+
+    // Cases 1 and 2 with Holmes boundary conditions (CrmHolmesBC_D, CfdHolmesBC_D)
+    auto c4 = RunColumnCollapse(1000, BoundaryMethod::HOLMES);
+    Print("column_collapse_holmes", c4);
+    if (check) {
+        Check("n", (double)c4.n, 6657, 1, 0);
+        Check("mean_z", c4.mean_z, -0.0372279816, 0.1, rtol);
+        Check("mean_r", c4.mean_r, 0.0409697402, 0.05, rtol);
+        Check("mean_speed", c4.mean_speed, 0.300377554, 0.3, rtol);
+        Check("mean_p", c4.mean_p, 346.116012, 700, rtol_p);
+    }
+
+    auto c5 = RunDamBreak(2000, BoundaryMethod::HOLMES);
+    Print("dam_break_holmes", c5);
+    if (check) {
+        Check("n", (double)c5.n, 6061, 1, 0);
+        Check("mean_x", c5.mean_x, -0.13198383, 0.3, rtol);
+        Check("mean_z", c5.mean_z, 0.080445667, 0.15, rtol);
+        Check("max_x", c5.max_x, 0.188554555, 0.3, rtol);
+        Check("mean_speed", c5.mean_speed, 0.897619361, 1, rtol);
+        Check("mean_p", c5.mean_p, 1147.74812, 1500, rtol_p);
     }
 
     if (num_failures > 0) {
