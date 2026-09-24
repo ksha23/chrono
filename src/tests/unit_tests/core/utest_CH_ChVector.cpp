@@ -113,7 +113,9 @@ TEST(ChVectorTest, scalar_mixed_types) {
     ASSERT_NEAR(rf.x(), 0.6f, ABS_ERR_F);
     ASSERT_NEAR(rf.y(), 0.2f, ABS_ERR_F);
     ASSERT_NEAR(rf.z(), 3.0f, ABS_ERR_F);
-    ASSERT_TRUE(0.5 * vf == vf * 0.5f);
+    auto rf2 = 0.5 * vf;
+    ASSERT_TRUE((std::is_same<decltype(rf2), ChVector3f>::value));
+    ASSERT_TRUE(rf2 == vf * 0.5f);
 
     // Scaling an integer vector by a double still produces a double vector
     ChVector3i vi(1, -2, 3);
@@ -125,4 +127,10 @@ TEST(ChVectorTest, scalar_mixed_types) {
     auto ri2 = 2 * vi;
     ASSERT_TRUE((std::is_same<decltype(ri2), ChVector3i>::value));
     ASSERT_TRUE(ri2 == ChVector3i(2, -4, 6));
+    auto ri3 = 0.5f * vi;
+    ASSERT_TRUE((std::is_same<decltype(ri3), ChVector3d>::value));
+    ASSERT_NEAR(ri3.x(), 0.5, ABS_ERR_D);
+    auto ri4 = std::size_t(2) * vi;
+    ASSERT_TRUE((std::is_same<decltype(ri4), ChVector3d>::value));
+    ASSERT_TRUE(ri4 == ChVector3d(2, -4, 6));
 }

@@ -1047,11 +1047,16 @@ inline void ChVector3<Real>::ArchiveIn(ChArchiveIn& archive_in) {
 // Reversed operators
 
 /// Operator for scaling the vector by a scalar value, as s*V.
-/// Real is deduced from V only and s is converted to Real (as in V*s). Deducing Real from s as well would reject mixed
-/// calls such as 2*V (int, ChVector3d) and select the ChVector3i overload below, which truncates V to integers.
-template <class Real>
-ChVector3<Real> operator*(typename std::common_type<Real>::type s, const ChVector3<Real>& V) {
-    return ChVector3<Real>(V.x() * s, V.y() * s, V.z() * s);
+/// The scalar type S is deduced separately from Real and s is converted to Real (as in V*s). Requiring S == Real would
+/// reject mixed calls such as 2*V (int, ChVector3d) and select the ChVector3i overload below, which truncates V to
+/// integers. For an integer vector only S == Real is accepted, so any other scalar still selects that overload.
+template <class Real,
+          class S,
+          typename std::enable_if<std::is_arithmetic<S>::value &&
+                                      (std::is_floating_point<Real>::value || std::is_same<S, Real>::value),
+                                  int>::type = 0>
+ChVector3<Real> operator*(S s, const ChVector3<Real>& V) {
+    return V * static_cast<Real>(s);
 }
 
 /// Operator for scaling an integer vector by a double scalar, as s*V.
