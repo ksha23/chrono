@@ -84,9 +84,19 @@ Checksum Compute(ChFsiFluidSystemSPH& sysSPH) {
     return c;
 }
 
+// Mean pressure of the SPH particles.
+double MeanPressure(ChFsiFluidSystemSPH& sysSPH) {
+    size_t n = sysSPH.GetNumFluidMarkers();
+    auto prop = sysSPH.GetParticleFluidProperties();
+    double p = 0;
+    for (size_t i = 0; i < n; i++)
+        p += prop[i].y();
+    return p / n;
+}
+
 void Print(const std::string& name, const Checksum& c) {
-    printf("%s: n=%zu mean_x=%.9g mean_y=%.9g mean_z=%.9g max_x=%.9g mean_r=%.9g mean_speed=%.9g mean_rho=%.9g mean_p=%.9g\n",
-           name.c_str(), c.n, c.mean_x, c.mean_y, c.mean_z, c.max_x, c.mean_r, c.mean_speed, c.mean_rho, c.mean_p);
+    printf("%s: n=%zu mean_x=%.9g mean_y=%.9g mean_z=%.9g max_x=%.9g mean_r=%.9g mean_speed=%.9g mean_rho=%.9g mean_p=%.9g\n", name.c_str(), c.n, c.mean_x, c.mean_y, c.mean_z,
+           c.max_x, c.mean_r, c.mean_speed, c.mean_rho, c.mean_p);
 }
 
 int num_failures = 0;
@@ -97,8 +107,7 @@ int num_failures = 0;
 void Check(const std::string& what, double val, double ref, double scale, double rtol) {
     double err = std::abs(val - ref);
     bool ok = err <= rtol * scale;
-    printf("  %-26s %16.9g  ref %16.9g  |diff|/scale %.3e  (tol %.1e)  %s\n", what.c_str(), val, ref, err / scale, rtol,
-           ok ? "ok" : "FAIL");
+    printf("  %-26s %16.9g  ref %16.9g  |diff|/scale %.3e  (tol %.1e)  %s\n", what.c_str(), val, ref, err / scale, rtol, ok ? "ok" : "FAIL");
     if (!ok)
         num_failures++;
 }
@@ -242,9 +251,22 @@ Checksum RunDamBreak(int num_steps) {
     sysFSI.AddFsiBoundary(ground_bce, ChFrame<>(ChVector3d(0, 0, bzDim / 2), QUNIT));
 
     sysFSI.Initialize();
-    for (int i = 0; i < num_steps; i++)
+
+    // The instantaneous mean pressure of a weakly compressible fluid carries acoustic oscillations that
+    // amplify rounding differences, so the pressure checksum is averaged over the last 500 steps.
+    int num_avg_steps = 500;
+    int num_avg_samples = 0;
+    double mean_p = 0;
+    for (int i = 0; i < num_steps; i++) {
         sysFSI.DoStepDynamics(step_size);
-    return Compute(sysSPH);
+        if (i >= num_steps - num_avg_steps && i % 10 == 0) {
+            mean_p += MeanPressure(sysSPH);
+            num_avg_samples++;
+        }
+    }
+    auto c = Compute(sysSPH);
+    c.mean_p = mean_p / num_avg_samples;
+    return c;
 }
 
 // -----------------------------------------------------------------------------
@@ -318,12 +340,12 @@ int main(int argc, char* argv[]) {
 #else
     bool check = true;
 #endif
-    // Tolerances. Kinematic quantities are compared at 0.2% of their scale. Mean pressure in a weakly
-    // compressible fluid carries acoustic noise and is compared at 1% of its scale. Disabling FMA
-    // contraction in the SPH kernels (a rounding-only change) moves the dam-break mean pressure by 0.5%
-    // of its scale and every other quantity by less than 0.01%.
+    // Tolerances, relative to a problem scale for each quantity. Kinematic quantities are compared at
+    // 0.2% and mean pressures at 0.5% of their scale. Rounding-only changes measured when these values
+    // were recorded (FMA contraction disabled in the SPH kernels; the HIP backend on an AMD GPU instead of
+    // CUDA) moved every quantity by less than 0.06% of its scale.
     const double rtol = 2e-3;
-    const double rtol_p = 1e-2;
+    const double rtol_p = 5e-3;
 
     // Case 1
     auto c1 = RunColumnCollapse(1000);
@@ -345,7 +367,7 @@ int main(int argc, char* argv[]) {
         Check("mean_z", c2.mean_z, 0.0809445538, 0.15, rtol);
         Check("max_x", c2.max_x, 0.184732482, 0.3, rtol);
         Check("mean_speed", c2.mean_speed, 0.885350075, 1, rtol);
-        Check("mean_p", c2.mean_p, 923.877871, 1500, rtol_p);
+        Check("mean_p", c2.mean_p, 1129.35787, 1500, rtol_p);
     }
 
     // Case 3
