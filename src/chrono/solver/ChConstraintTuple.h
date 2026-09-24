@@ -64,11 +64,13 @@ class ChConstraintTuple_1vars : public ChConstraintTuple {
         }
     }
     virtual double ComputeJacobianTimesState() override {
+        assert(variables_1->GetDOF() == N);
         if (variables_1->IsActive())
             return Cq_1 * variables_1->State().template head<N>();
         return 0;
     }
     virtual void IncrementState(double deltal) override {
+        assert(variables_1->GetDOF() == N);
         if (variables_1->IsActive())
             variables_1->State().template head<N>() += Eq_1 * deltal;
     }
@@ -132,6 +134,8 @@ class ChConstraintTuple_2vars : public ChConstraintTuple {
         }
     }
     virtual double ComputeJacobianTimesState() override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
         double result = 0;
         if (variables_1->IsActive())
             result += Cq_1 * variables_1->State().template head<N1>();
@@ -140,6 +144,8 @@ class ChConstraintTuple_2vars : public ChConstraintTuple {
         return result;
     }
     virtual void IncrementState(double deltal) override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
         if (variables_1->IsActive())
             variables_1->State().template head<N1>() += Eq_1 * deltal;
         if (variables_2->IsActive())
@@ -226,6 +232,9 @@ class ChConstraintTuple_3vars : public ChConstraintTuple {
         }
     }
     virtual double ComputeJacobianTimesState() override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
+        assert(variables_3->GetDOF() == N3);
         double result = 0;
         if (variables_1->IsActive())
             result += Cq_1 * variables_1->State().template head<N1>();
@@ -236,6 +245,9 @@ class ChConstraintTuple_3vars : public ChConstraintTuple {
         return result;
     }
     virtual void IncrementState(double deltal) override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
+        assert(variables_3->GetDOF() == N3);
         if (variables_1->IsActive())
             variables_1->State().template head<N1>() += Eq_1 * deltal;
         if (variables_2->IsActive())
