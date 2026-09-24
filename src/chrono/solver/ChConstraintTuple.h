@@ -249,7 +249,7 @@ class ChConstraintTuple_3vars : public ChConstraintTuple {
         if (variables_2->IsActive())
             result += Cq_2 * vect.segment(variables_2->GetOffset(), N2);
         if (variables_3->IsActive())
-            result += Cq_3 * vect.segment(variables_2->GetOffset(), N3);
+            result += Cq_3 * vect.segment(variables_3->GetOffset(), N3);
     }
     virtual void AddJacobianTransposedTimesScalarInto(ChVectorRef result, double l) override {
         if (variables_1->IsActive())
