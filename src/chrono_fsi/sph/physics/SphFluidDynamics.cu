@@ -17,7 +17,6 @@
 
 #include <thrust/execution_policy.h>
 #include <thrust/scan.h>
-#include <thrust/logical.h>
 
 #include "chrono/utils/ChConstants.h"
 #include "chrono_fsi/sph/physics/SphFluidDynamics.cuh"
@@ -50,8 +49,7 @@ void CopyParametersToDevice_SphFluidDynamics(std::shared_ptr<ChFsiParamsSPH> par
     gpuCheckError();
 }
 
-SphFluidDynamics::SphFluidDynamics(FsiDataManager& data_mgr, bool verbose, bool check_errors)
-    : m_data_mgr(data_mgr), m_verbose(verbose), m_check_errors(check_errors), m_errflagD(nullptr) {
+SphFluidDynamics::SphFluidDynamics(FsiDataManager& data_mgr, bool verbose, bool check_errors) : m_data_mgr(data_mgr), m_verbose(verbose), m_check_errors(check_errors) {
     collisionSystem = chrono_types::make_shared<SphCollisionSystem>(data_mgr);
 
     if (m_data_mgr.paramsH->integration_scheme == IntegrationScheme::IMPLICIT_SPH)
@@ -60,12 +58,10 @@ SphFluidDynamics::SphFluidDynamics(FsiDataManager& data_mgr, bool verbose, bool 
         forceSystem = chrono_types::make_shared<SphForceWCSPH>(data_mgr, verbose, m_check_errors);
 
     gpuStreamCreate(&m_copy_stream);
-    gpuMallocErrorFlag(m_errflagD);
 }
 
 SphFluidDynamics::~SphFluidDynamics() {
     gpuStreamDestroy(m_copy_stream);
-    gpuFreeErrorFlag(m_errflagD);
 }
 
 // -----------------------------------------------------------------------------
@@ -617,6 +613,15 @@ __device__ void TauEulerStep(Real dT,
     }
 }
 
+// Flag a non-finite position or density/pressure state of a marker after an integration step. Every marker
+// in the processed range is checked, whether or not the step updated it.
+__device__ void CheckFiniteState(const Real4& posRad, const Real4& rhoPresMu, volatile bool* error_flags) {
+    if (!IsFinite(posRad))
+        error_flags[ERRFLAG_POS_NAN] = true;
+    if (!IsFinite(rhoPresMu))
+        error_flags[ERRFLAG_RHO_NAN] = true;
+}
+
 // Kernel to update the fluid properties of a particle, using an explicit Euler step.
 // First, update the particle position and velocity. Next,
 // - For a CFD problem, advance the density and calculate pressure from the Equation of State;
@@ -640,14 +645,17 @@ __global__ void EulerStep_D(Real4* posRadD,
                             const int32_t* activityIdentifierSortedD,
                             const uint numActive,
                             Real dT,
-                            volatile bool* error_flag) {
+                            volatile bool* error_flags) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= numActive)
         return;
 
     // Only update active SPH particles, not extended active particles
-    if (IsBceMarker(rhoPresMuD[index].w) || activityIdentifierSortedD[index] <= 0)
+    if (IsBceMarker(rhoPresMuD[index].w) || activityIdentifierSortedD[index] <= 0) {
+        if (error_flags)
+            CheckFiniteState(posRadD[index], rhoPresMuD[index], error_flags);
         return;
+    }
 
     // Euler step for position
     PositionEulerStep(dT, velMasD[index] + vel_XSPH_D[index], posRadD[index]);
@@ -658,11 +666,14 @@ __global__ void EulerStep_D(Real4* posRadD,
     if (paramsD.physics_problem == PhysicsProblem::CRM) {
         // Euler step for tau and pressure update
         TauEulerStep(dT, derivTauXxYyZzD[index], derivTauXyXzYzD[index], derivVelRhoD[index].w, freeSurfaceIdD[index], tauXxYyZzD[index], tauXyXzYzD[index], rhoPresMuD[index],
-                     pcEvSvD[index], error_flag);
+                     pcEvSvD[index], error_flags ? error_flags + ERRFLAG_RHEOLOGY : nullptr);
     } else {
         // Euler step for density and pressure update from EOS
         DensityEulerStep(dT, derivVelRhoD[index].w, paramsD.eos_type, rhoPresMuD[index]);
     }
+
+    if (error_flags)
+        CheckFiniteState(posRadD[index], rhoPresMuD[index], error_flags);
 }
 
 // Kernel to update the fluid properties of a particle, using an mid-point step.
@@ -689,14 +700,17 @@ __global__ void MidpointStep_D(Real4* posRadD,
                                const int32_t* activityIdentifierSortedD,
                                const uint numActive,
                                Real dT,
-                               volatile bool* error_flag) {
+                               volatile bool* error_flags) {
     uint index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= numActive)
         return;
 
     // Only update active SPH particles, not extended active particles
-    if (IsBceMarker(rhoPresMuD[index].w) || activityIdentifierSortedD[index] <= 0)
+    if (IsBceMarker(rhoPresMuD[index].w) || activityIdentifierSortedD[index] <= 0) {
+        if (error_flags)
+            CheckFiniteState(posRadD[index], rhoPresMuD[index], error_flags);
         return;
+    }
 
     // Advance position
     //// TODO: what about XSPH?
@@ -708,43 +722,32 @@ __global__ void MidpointStep_D(Real4* posRadD,
     if (paramsD.physics_problem == PhysicsProblem::CRM) {
         // Euler step for tau and pressure update
         TauEulerStep(dT, derivTauXxYyZzD[index], derivTauXyXzYzD[index], derivVelRhoD[index].w, freeSurfaceIdD[index], tauXxYyZzD[index], tauXyXzYzD[index], rhoPresMuD[index],
-                     pcEvSvD[index], error_flag);
+                     pcEvSvD[index], error_flags ? error_flags + ERRFLAG_RHEOLOGY : nullptr);
     } else {
         // Euler step for density and pressure update from EOS
         DensityEulerStep(dT, derivVelRhoD[index].w, paramsD.eos_type, rhoPresMuD[index]);
     }
-}
 
-template <typename T>
-struct check_infinite {
-    __host__ __device__ bool operator()(const T& v) { return !IsFinite(v); }
-};
+    if (error_flags)
+        CheckFiniteState(posRadD[index], rhoPresMuD[index], error_flags);
+}
 
 void SphFluidDynamics::EulerStep(std::shared_ptr<SphMarkerDataD> sortedMarkers, Real dT) {
     uint numActive = (uint)m_data_mgr.countersH->numExtendedParticles;
     uint numBlocks, numThreads;
     computeGridSize(numActive, 256, numBlocks, numThreads);
 
-    bool* error_flagD = nullptr;
-    if (m_check_errors) {
-        gpuResetErrorFlag(m_errflagD);
-        error_flagD = m_errflagD;
-    }
+    // Kernel-side checks (non-finite state, rheology failure) run only when error checking is enabled
+    bool* error_flagsD = m_check_errors ? m_data_mgr.errorFlags->Flag(0) : nullptr;
 
     EulerStep_D<<<numBlocks, numThreads>>>(mR4CAST(sortedMarkers->posRadD), mR3CAST(sortedMarkers->velMasD), mR4CAST(sortedMarkers->rhoPresMuD), mR3CAST(sortedMarkers->tauXxYyZzD),
                                            mR3CAST(sortedMarkers->tauXyXzYzD), mR3CAST(sortedMarkers->pcEvSvD), mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(m_data_mgr.derivVelRhoD),
                                            mR3CAST(m_data_mgr.derivTauXxYyZzD), mR3CAST(m_data_mgr.derivTauXyXzYzD), U1CAST(m_data_mgr.freeSurfaceIdD),
-                                           INT_32CAST(m_data_mgr.activityIdentifierSortedD), numActive, dT, error_flagD);
+                                           INT_32CAST(m_data_mgr.activityIdentifierSortedD), numActive, dT, error_flagsD);
 
-    if (m_check_errors) {
-        gpuCheckError();
-        if (thrust::any_of(sortedMarkers->posRadD.begin(), sortedMarkers->posRadD.begin() + numActive, check_infinite<Real4>()))
-            gpuThrowError("A particle position is NaN");
-        if (thrust::any_of(sortedMarkers->rhoPresMuD.begin(), sortedMarkers->rhoPresMuD.begin() + numActive, check_infinite<Real4>()))
-            gpuThrowError("A particle density is NaN");
-        // Even if one particle has this problem, we can't proceed
-        gpuCheckErrorFlag(error_flagD, "TauEulerStep (rheology model failure)");
-    }
+    // The flags are checked once per step (see ChFsiFluidSystemSPH::OnDoStepDynamics)
+    if (m_check_errors)
+        gpuCheckLaunchError();
 }
 
 void SphFluidDynamics::MidpointStep(std::shared_ptr<SphMarkerDataD> sortedMarkers, Real dT) {
@@ -752,25 +755,16 @@ void SphFluidDynamics::MidpointStep(std::shared_ptr<SphMarkerDataD> sortedMarker
     uint numBlocks, numThreads;
     computeGridSize(numActive, 256, numBlocks, numThreads);
 
-    bool* error_flagD = nullptr;
-    if (m_check_errors) {
-        gpuResetErrorFlag(m_errflagD);
-        error_flagD = m_errflagD;
-    }
+    // Kernel-side checks (non-finite state, rheology failure) run only when error checking is enabled
+    bool* error_flagsD = m_check_errors ? m_data_mgr.errorFlags->Flag(0) : nullptr;
     MidpointStep_D<<<numBlocks, numThreads>>>(
         mR4CAST(sortedMarkers->posRadD), mR3CAST(sortedMarkers->velMasD), mR4CAST(sortedMarkers->rhoPresMuD), mR3CAST(sortedMarkers->tauXxYyZzD),
         mR3CAST(sortedMarkers->tauXyXzYzD), mR3CAST(sortedMarkers->pcEvSvD), mR3CAST(m_data_mgr.vel_XSPH_D), mR4CAST(m_data_mgr.derivVelRhoD), mR3CAST(m_data_mgr.derivTauXxYyZzD),
-        mR3CAST(m_data_mgr.derivTauXyXzYzD), U1CAST(m_data_mgr.freeSurfaceIdD), INT_32CAST(m_data_mgr.activityIdentifierSortedD), numActive, dT, error_flagD);
+        mR3CAST(m_data_mgr.derivTauXyXzYzD), U1CAST(m_data_mgr.freeSurfaceIdD), INT_32CAST(m_data_mgr.activityIdentifierSortedD), numActive, dT, error_flagsD);
 
-    if (m_check_errors) {
-        gpuCheckError();
-        if (thrust::any_of(sortedMarkers->posRadD.begin(), sortedMarkers->posRadD.begin() + numActive, check_infinite<Real4>()))
-            gpuThrowError("A particle position is NaN");
-        if (thrust::any_of(sortedMarkers->rhoPresMuD.begin(), sortedMarkers->rhoPresMuD.begin() + numActive, check_infinite<Real4>()))
-            gpuThrowError("A particle density is NaN");
-        // Even if one particle has this problem, we can't proceed
-        gpuCheckErrorFlag(error_flagD, "TauEulerStep (rheology model failure)");
-    }
+    // The flags are checked once per step (see ChFsiFluidSystemSPH::OnDoStepDynamics)
+    if (m_check_errors)
+        gpuCheckLaunchError();
 }
 
 // -----------------------------------------------------------------------------
@@ -865,7 +859,7 @@ void SphFluidDynamics::CopySortedToOriginal(MarkerGroup group, std::shared_ptr<S
             mR4CAST(m_data_mgr.derivVelRhoOriginalD), U1CAST(m_data_mgr.markersProximity_D->gridMarkerIndexD));
     }
     if (m_check_errors) {
-        gpuCheckError();
+        gpuCheckLaunchError();
     }
 }
 
@@ -1004,7 +998,7 @@ void SphFluidDynamics::ApplyBoundaryConditions(std::shared_ptr<SphMarkerDataD> s
         case BCType::PERIODIC:
             ApplyPeriodicBoundaryX_D<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->posRadD), mR4CAST(sortedSphMarkersD->rhoPresMuD), numActive);
             if (m_check_errors) {
-                gpuCheckError();
+                gpuCheckLaunchError();
             }
             break;
         case BCType::INLET_OUTLET:
@@ -1020,7 +1014,7 @@ void SphFluidDynamics::ApplyBoundaryConditions(std::shared_ptr<SphMarkerDataD> s
         case BCType::PERIODIC:
             ApplyPeriodicBoundaryY_D<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->posRadD), mR4CAST(sortedSphMarkersD->rhoPresMuD), numActive);
             if (m_check_errors) {
-                gpuCheckError();
+                gpuCheckLaunchError();
             }
             break;
     }
@@ -1029,7 +1023,7 @@ void SphFluidDynamics::ApplyBoundaryConditions(std::shared_ptr<SphMarkerDataD> s
         case BCType::PERIODIC:
             ApplyPeriodicBoundaryZ_D<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->posRadD), mR4CAST(sortedSphMarkersD->rhoPresMuD), numActive);
             if (m_check_errors) {
-                gpuCheckError();
+                gpuCheckLaunchError();
             }
             break;
     }

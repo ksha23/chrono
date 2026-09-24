@@ -2040,6 +2040,12 @@ void ChFsiFluidSystemSPH::PrintTimeSteps(const std::string& path) const {
 
 void ChFsiFluidSystemSPH::OnDoStepDynamics(double time, double step) {
     SynchronizeCopyStream();
+
+    // Report errors flagged by device kernels during the previous step, then clear the flags for this step.
+    // The flags are checked here rather than after each kernel, which would synchronize with the device each time.
+    if (m_check_errors)
+        m_data_mgr->errorFlags->Check();
+    m_data_mgr->errorFlags->Reset();
     // Update particle activity
     m_fluid_dynamics->UpdateActivity(m_data_mgr->sphMarkers_D, time);
 
@@ -2074,6 +2080,10 @@ void ChFsiFluidSystemSPH::OnDoStepDynamics(double time, double step) {
     m_fluid_dynamics->DoStepDynamics(m_data_mgr->sortedSphMarkers2_D, time, step, m_paramsH->integration_scheme);
 
     m_fluid_dynamics->CopySortedToOriginal(MarkerGroup::NON_SOLID, m_data_mgr->sortedSphMarkers2_D, m_data_mgr->sphMarkers_D);
+
+    // Queue the copy of this step's error flags, checked at the beginning of the next step
+    if (m_check_errors)
+        m_data_mgr->errorFlags->Record();
 
     ChDebugLog("GPU Memory usage: " << m_data_mgr->GetCurrentGPUMemoryUsage() / 1024.0 / 1024.0 << " MB");
 

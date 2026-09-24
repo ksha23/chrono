@@ -117,6 +117,18 @@ inline gpuError gpuMemset(void* dst, int value, std::size_t bytes) {
     return cudaMemset(dst, value, bytes);
 }
 
+inline gpuError gpuMemsetAsync(void* dst, int value, std::size_t bytes, gpuStream stream = 0) {
+    return cudaMemsetAsync(dst, value, bytes, stream);
+}
+
+inline gpuError gpuMallocHost(void** ptr, std::size_t bytes) {
+    return cudaMallocHost(ptr, bytes);
+}
+
+inline gpuError gpuFreeHost(void* ptr) {
+    return cudaFreeHost(ptr);
+}
+
 inline gpuError gpuDeviceSynchronize() {
     return cudaDeviceSynchronize();
 }
@@ -265,6 +277,18 @@ inline gpuError gpuMemset(void* dst, int value, std::size_t bytes) {
     return hipMemset(dst, value, bytes);
 }
 
+inline gpuError gpuMemsetAsync(void* dst, int value, std::size_t bytes, gpuStream stream = 0) {
+    return hipMemsetAsync(dst, value, bytes, stream);
+}
+
+inline gpuError gpuMallocHost(void** ptr, std::size_t bytes) {
+    return hipHostMalloc(ptr, bytes, hipHostMallocDefault);
+}
+
+inline gpuError gpuFreeHost(void* ptr) {
+    return hipHostFree(ptr);
+}
+
 inline gpuError gpuDeviceSynchronize() {
     return hipDeviceSynchronize();
 }
@@ -394,6 +418,18 @@ inline gpuError gpuMemcpyAsync(void*, const void*, std::size_t, gpuMemcpyKind, g
 
 inline gpuError gpuMemset(void*, int, std::size_t) {
     return gpuErrorNotSupported;
+}
+
+inline gpuError gpuMemsetAsync(void*, int, std::size_t, gpuStream = 0) {
+    return gpuErrorNotSupported;
+}
+
+inline gpuError gpuMallocHost(void**, std::size_t) {
+    return gpuErrorNotSupported;
+}
+
+inline gpuError gpuFreeHost(void*) {
+    return gpuSuccess;
 }
 
 inline gpuError gpuDeviceSynchronize() {
