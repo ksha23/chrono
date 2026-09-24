@@ -1899,7 +1899,7 @@ void SCMLoader::ComputeInternalForces() {
         m_timer_bulldozing_boundary.start();
 
         NodeSet boundary;  // union of contact patch boundaries
-        for (auto p : contact_patches) {
+        for (const auto& p : contact_patches) {
             NodeSet p_boundary;  // boundary of effective contact patch
 
             // Calculate the displaced material from all touched nodes and identify boundary
@@ -1913,9 +1913,10 @@ void SCMLoader::ComputeInternalForces() {
                     ChVector2i nbr_ij = ij + neighbors4[k];  //     neighbor node coordinates
                     ////if (!CheckMeshBounds(nbr_ij))                     //     if neighbor out of bounds
                     ////    continue;                                     //       skip neighbor
-                    if (m_grid_map.find(nbr_ij) == m_grid_map.end())  //     if neighbor not yet recorded
+                    auto rec = m_grid_map.find(nbr_ij);               //     neighbor record
+                    if (rec == m_grid_map.end())                      //     if neighbor not yet recorded
                         p_boundary.insert(nbr_ij);                    //       set neighbor as boundary
-                    else if (m_grid_map.at(nbr_ij).sigma <= 0)        //     if neighbor not touched
+                    else if (rec->second.sigma <= 0)                  //     if neighbor not touched
                         p_boundary.insert(nbr_ij);                    //       set neighbor as boundary
                 }
             }
@@ -1927,13 +1928,14 @@ void SCMLoader::ComputeInternalForces() {
             // Raise boundary (create a sharp spike which will be later smoothed out with erosion)
             for (const auto& ij : p_boundary) {                                  // for each node in boundary
                 m_modified_nodes.push_back(ij);                                  //   mark as modified
-                if (m_grid_map.find(ij) == m_grid_map.end()) {                   //   if not yet recorded
+                auto rec = m_grid_map.find(ij);                                  //   node record
+                if (rec == m_grid_map.end()) {                                   //   if not yet recorded
                     double z = GetInitHeight(ij);                                //     undeformed height
                     const ChVector3d& n = GetInitNormal(ij);                     //     terrain normal
-                    m_grid_map.insert(std::make_pair(ij, NodeRecord(z, z, n)));  //     add new node record
-                    m_modified_nodes.push_back(ij);                              //     mark as modified
+                    rec = m_grid_map.insert(std::make_pair(ij, NodeRecord(z, z, n))).first;  //     add new node record
+                    m_modified_nodes.push_back(ij);                                          //     mark as modified
                 }
-                auto& nr = m_grid_map.at(ij);  //   node record
+                auto& nr = rec->second;        //   node record
                 nr.erosion = true;             //   add to erosion domain
                 AddMaterialToNode(diff, nr);   //   add raise amount
             }
@@ -1949,7 +1951,7 @@ void SCMLoader::ComputeInternalForces() {
         m_timer_bulldozing_domain.start();
 
         NodeSet erosion_domain = boundary;
-        NodeSet erosion_front = boundary;  // initialize erosion front to boundary nodes
+        NodeSet erosion_front = std::move(boundary);  // initialize erosion front to boundary nodes
         for (int i = 0; i < m_erosion_propagations; i++) {
             NodeSet front;                                   // new erosion front
             for (const auto& ij : erosion_front) {           // for each node in current erosion front
@@ -1957,7 +1959,8 @@ void SCMLoader::ComputeInternalForces() {
                     ChVector2i nbr_ij = ij + neighbors4[k];  //   neighbor node coordinates
                     ////if (!CheckMeshBounds(nbr_ij))                       //   if out of bounds
                     ////    continue;                                       //     ignore neighbor
-                    if (m_grid_map.find(nbr_ij) == m_grid_map.end()) {  //   if neighbor not yet recorded
+                    auto rec = m_grid_map.find(nbr_ij);                 //   neighbor record
+                    if (rec == m_grid_map.end()) {                      //   if neighbor not yet recorded
                         double z = GetInitHeight(nbr_ij);               //     undeformed height at neighbor location
                         const ChVector3d& n = GetInitNormal(nbr_ij);    //     terrain normal at neighbor location
                         NodeRecord nr(z, z, n);                         //     create new record
@@ -1966,7 +1969,7 @@ void SCMLoader::ComputeInternalForces() {
                         front.insert(nbr_ij);                           //     add neighbor to new front
                         m_modified_nodes.push_back(nbr_ij);             //     mark as modified
                     } else {                                            //   if neighbor previously recorded
-                        NodeRecord& nr = m_grid_map.at(nbr_ij);         //     get existing record
+                        NodeRecord& nr = rec->second;                   //     get existing record
                         if (!nr.erosion && nr.sigma <= 0) {             //     if neighbor not touched
                             nr.erosion = true;                          //       include in erosion domain
                             front.insert(nbr_ij);                       //       add neighbor to new front
@@ -1976,7 +1979,7 @@ void SCMLoader::ComputeInternalForces() {
                 }
             }
             erosion_domain.insert(front.begin(), front.end());  // add current front to erosion domain
-            erosion_front = front;                              // advance erosion front
+            erosion_front = std::move(front);                   // advance erosion front
         }
 
         m_num_erosion_nodes = static_cast<int>(erosion_domain.size());
@@ -1985,15 +1988,31 @@ void SCMLoader::ComputeInternalForces() {
         // (3) Erosion algorithm on domain
         m_timer_bulldozing_erosion.start();
 
+        // Cache the records of the domain nodes and of their 4 neighbors (nullptr if not recorded), in the domain
+        // iteration order. The grid map is not modified during erosion, so these pointers stay valid.
+        struct ErosionNode {
+            NodeRecord* nr;
+            NodeRecord* nbr[4];
+        };
+        std::vector<ErosionNode> domain_nodes;
+        domain_nodes.reserve(erosion_domain.size());
+        for (const auto& ij : erosion_domain) {
+            ErosionNode en;
+            en.nr = &m_grid_map.at(ij);
+            for (int k = 0; k < 4; k++) {
+                auto rec = m_grid_map.find(ij + neighbors4[k]);
+                en.nbr[k] = (rec == m_grid_map.end()) ? nullptr : &rec->second;
+            }
+            domain_nodes.push_back(en);
+        }
+
         for (int iter = 0; iter < m_erosion_iterations; iter++) {
-            for (const auto& ij : erosion_domain) {
-                auto& nr = m_grid_map.at(ij);
+            for (const auto& en : domain_nodes) {
+                auto& nr = *en.nr;
                 for (int k = 0; k < 4; k++) {
-                    ChVector2i nbr_ij = ij + neighbors4[k];
-                    auto rec = m_grid_map.find(nbr_ij);
-                    if (rec == m_grid_map.end())
+                    if (!en.nbr[k])
                         continue;
-                    auto& nbr_nr = rec->second;
+                    auto& nbr_nr = *en.nbr[k];
 
                     // (3.1) Flow remaining material to neighbor
                     double diff = 0.5 * (nr.massremainder - nbr_nr.massremainder) / 4;  //// TODO: rethink this!
