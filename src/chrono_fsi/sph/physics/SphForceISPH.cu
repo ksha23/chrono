@@ -895,6 +895,63 @@ __global__ void Shifting(Real4* sortedPosRad,
 }
 
 //--------------------------------------------------------------------------------------------------------------------------------
+// Device-side convergence test for the Jacobi solves
+
+#define RESIDUAL_MAX_THREADS 256
+#define RESIDUAL_MAX_BLOCKS 256
+
+// Maximum of two residuals; a NaN operand wins, so a NaN residual anywhere gives a NaN maximum.
+__device__ __forceinline__ Real ResidualMax(Real a, Real b) {
+    return (b > a || b != b) ? b : a;
+}
+
+// Block-wise maximum of the residuals (grid-stride), one value per block.
+__global__ void ResidualBlockMax_D(const Real* residuals, size_t n, Real* block_max, const JacobiStateISPH* state) {
+    if (state->converged)
+        return;
+
+    __shared__ Real smax[RESIDUAL_MAX_THREADS];
+    Real m = 0;
+    for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += (size_t)blockDim.x * gridDim.x)
+        m = ResidualMax(m, residuals[i]);
+    smax[threadIdx.x] = m;
+    __syncthreads();
+    for (uint s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s)
+            smax[threadIdx.x] = ResidualMax(smax[threadIdx.x], smax[threadIdx.x + s]);
+        __syncthreads();
+    }
+    if (threadIdx.x == 0)
+        block_max[blockIdx.x] = smax[0];
+}
+
+// Reduce the block maxima, count the iteration, and apply the stopping test (single block).
+__global__ void UpdateJacobiState_D(const Real* block_max, uint num_blocks, JacobiStateISPH* state, double tol, int max_iter) {
+    if (state->converged)
+        return;
+
+    __shared__ Real smax[RESIDUAL_MAX_THREADS];
+    Real m = 0;
+    for (uint i = threadIdx.x; i < num_blocks; i += blockDim.x)
+        m = ResidualMax(m, block_max[i]);
+    smax[threadIdx.x] = m;
+    __syncthreads();
+    for (uint s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (threadIdx.x < s)
+            smax[threadIdx.x] = ResidualMax(smax[threadIdx.x], smax[threadIdx.x + s]);
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) {
+        int iteration = state->iteration + 1;
+        Real residual = smax[0];
+        state->iteration = iteration;
+        state->residual = residual;
+        if (!((residual > tol || iteration < 3) && iteration < max_iter))
+            state->converged = 1;
+    }
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------
 
 SphForceISPH::SphForceISPH(FsiDataManager& data_mgr, bool verbose, bool check_errors) : SphForce(data_mgr, verbose), m_check_errors(check_errors) {
     CopyParametersToDevice(m_data_mgr.paramsH, m_data_mgr.countersH);
@@ -945,6 +1002,8 @@ void SphForceISPH::Initialize() {
     b1Vector.resize(numAllMarkers);
     b3Vector.resize(numAllMarkers);
     Residuals.resize(numAllMarkers);
+    ResidualsBlockMax.resize(RESIDUAL_MAX_BLOCKS);
+    JacobiStateD.resize(1);
 }
 
 //--------------------------------------------------------------------------------------------------------------------------------
@@ -992,9 +1051,9 @@ void SphForceISPH::ForceSPH(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, R
 
     // ------
 
-    thrust::device_vector<Real4> rhoPresMuD_old = sortedSphMarkersD->rhoPresMuD;
-    thrust::device_vector<Real4> posRadD_old = sortedSphMarkersD->posRadD;
-    thrust::device_vector<Real3> velMasD_old = sortedSphMarkersD->velMasD;
+    rhoPresMuD_old = sortedSphMarkersD->rhoPresMuD;
+    posRadD_old = sortedSphMarkersD->posRadD;
+    velMasD_old = sortedSphMarkersD->velMasD;
 
     thrust::fill(V_star_old.begin(), V_star_old.end(), mR3(0));
     thrust::fill(V_star_new.begin(), V_star_new.end(), mR3(0));
@@ -1034,23 +1093,7 @@ void SphForceISPH::ForceSPH(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, R
 
     int Iteration = 0;
     Real MaxRes = 100;
-    while ((MaxRes > 1e-10 || Iteration < 3) && Iteration < pH->LinearSolver_Max_Iter) {
-        Jacobi_SOR_Iter<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->rhoPresMuD), R1CAST(AMatrix), mR3CAST(V_star_old), mR3CAST(V_star_new), mR3CAST(b3Vector),
-                                                   R1CAST(q_old), R1CAST(q_new), R1CAST(b1Vector), U1CAST(m_data_mgr.neighborList), U1CAST(m_data_mgr.numNeighborsPerPart), true,
-                                                   m_errflagD);
-        gpuCheckErrorFlag(m_errflagD, "Jacobi_SOR_Iter");
-
-        Update_AND_Calc_Res<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->rhoPresMuD), mR3CAST(V_star_old), mR3CAST(V_star_new), R1CAST(q_old), R1CAST(q_new),
-                                                       R1CAST(Residuals), true, m_errflagD);
-        gpuCheckErrorFlag(m_errflagD, "Update_AND_Calc_Res");
-
-        Iteration++;
-        thrust::device_vector<Real>::iterator iter = thrust::max_element(Residuals.begin(), Residuals.end());
-        ////auto position = iter - Residuals.begin();
-        MaxRes = *iter;
-        if (pH->Verbose_monitoring)
-            printf("Iter = %d, Res= %.4e\n", Iteration, MaxRes);
-    }
+    SolveJacobi(sortedSphMarkersD, true, 1e-10, numBlocks, numThreads, Iteration, MaxRes);
 
     //    thrust::device_vector<Real3>::iterator iter =
     //        thrust::max_element(V_star_new.begin(), V_star_new.end(), compare_Real3_mag());
@@ -1143,36 +1186,7 @@ void SphForceISPH::ForceSPH(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, R
 
     if (pH->LinearSolver == SolverType::JACOBI || !myLinearSolver->GetSolverStatus()) {
         thrust::fill(Residuals.begin(), Residuals.end(), 0.0);
-        while ((MaxRes > pH->LinearSolver_Abs_Tol || Iteration < 3) && Iteration < pH->LinearSolver_Max_Iter) {
-            Jacobi_SOR_Iter<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->rhoPresMuD), R1CAST(AMatrix), mR3CAST(V_star_old), mR3CAST(V_star_new), mR3CAST(b3Vector),
-                                                       R1CAST(q_old), R1CAST(q_new), R1CAST(b1Vector), U1CAST(m_data_mgr.neighborList), U1CAST(m_data_mgr.numNeighborsPerPart),
-                                                       false, m_errflagD);
-            gpuCheckErrorFlag(m_errflagD, "Jacobi_SOR_Iter");
-
-            //            if (pH->Pressure_Constraint) {
-            //                Real sum_last = 0;
-            //                cublasHandle_t cublasHandle = 0;
-            //                uint Start_last = Contact_i[numAllMarkers];
-            //                cublasDdot(cublasHandle, numAllMarkers, R1CAST(b1Vector), 1,
-            //                           (double*)thrust::raw_pointer_cast(&AMatrix[Start_last]), 1, &sum_last);
-            //                gpuDeviceSynchronize();
-            //                b1Vector[numAllMarkers] += b1Vector[0];
-            //                q_new[numAllMarkers] = b1Vector[numAllMarkers] - sum_last -
-            //                                       q_new[numAllMarkers] * AMatrix[Contact_i[numAllMarkers + 1] - 1];
-            //            }mu_s_
-
-            Update_AND_Calc_Res<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->rhoPresMuD), mR3CAST(V_star_old), mR3CAST(V_star_new), R1CAST(q_old), R1CAST(q_new),
-                                                           R1CAST(Residuals), false, m_errflagD);
-            gpuCheckErrorFlag(m_errflagD, "Update_AND_Calc_Res");
-
-            Iteration++;
-            thrust::device_vector<Real>::iterator iter = thrust::max_element(Residuals.begin(), Residuals.end());
-            ////auto position = iter - Residuals.begin();
-            MaxRes = *iter;
-
-            if (pH->Verbose_monitoring)
-                printf("Iter = %d, Res= %.4e\n", Iteration, MaxRes);
-        }
+        SolveJacobi(sortedSphMarkersD, false, pH->LinearSolver_Abs_Tol, numBlocks, numThreads, Iteration, MaxRes);
     }
     //    Real4_y unary_op_p;
     //    real_sum binary_op;
@@ -1243,6 +1257,50 @@ void SphForceISPH::ForceSPH(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, R
     csrValLaplacian.clear();
     csrValFunction.clear();
     AMatrix.clear();
+}
+
+//--------------------------------------------------------------------------------------------------------------------------------
+
+void SphForceISPH::SolveJacobi(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, bool vector3, double tol, uint numBlocks, uint numThreads, int& iteration, Real& residual) {
+    auto& pH = m_data_mgr.paramsH;
+    int max_iter = pH->LinearSolver_Max_Iter;
+    if (!((residual > tol || iteration < 3) && iteration < max_iter))
+        return;
+
+    JacobiStateISPH state = {iteration, 0, residual};
+    JacobiStateD[0] = state;
+    JacobiStateISPH* stateD = thrust::raw_pointer_cast(JacobiStateD.data());
+    const int* convergedD = &stateD->converged;
+
+    size_t n = Residuals.size();
+    uint numBlocksMax = (uint)std::min<size_t>(RESIDUAL_MAX_BLOCKS, (n + RESIDUAL_MAX_THREADS - 1) / RESIDUAL_MAX_THREADS);
+    numBlocksMax = std::max(numBlocksMax, 1u);
+
+    // Iterations launched after the device-side test is met do nothing, so the result does not depend on how
+    // often the host checks; checking every iteration would add a device synchronization per iteration.
+    int interval = pH->Verbose_monitoring ? 1 : std::max(pH->LinearSolver_Check_Interval, 1);
+
+    for (int k = iteration + 1;; k++) {
+        Jacobi_SOR_Iter<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->rhoPresMuD), R1CAST(AMatrix), mR3CAST(V_star_old), mR3CAST(V_star_new), mR3CAST(b3Vector),
+                                                   R1CAST(q_old), R1CAST(q_new), R1CAST(b1Vector), U1CAST(m_data_mgr.neighborList), U1CAST(m_data_mgr.numNeighborsPerPart), vector3,
+                                                   convergedD, m_errflagD);
+        Update_AND_Calc_Res<<<numBlocks, numThreads>>>(mR4CAST(sortedSphMarkersD->rhoPresMuD), mR3CAST(V_star_old), mR3CAST(V_star_new), R1CAST(q_old), R1CAST(q_new),
+                                                       R1CAST(Residuals), vector3, convergedD, m_errflagD);
+        ResidualBlockMax_D<<<numBlocksMax, RESIDUAL_MAX_THREADS>>>(R1CAST(Residuals), n, R1CAST(ResidualsBlockMax), stateD);
+        UpdateJacobiState_D<<<1, RESIDUAL_MAX_THREADS>>>(R1CAST(ResidualsBlockMax), numBlocksMax, stateD, tol, max_iter);
+
+        if (k % interval == 0 || k >= max_iter) {
+            gpuCheckErrorFlag(m_errflagD, "Jacobi_SOR_Iter / Update_AND_Calc_Res");
+            state = JacobiStateD[0];
+            if (pH->Verbose_monitoring)
+                printf("Iter = %d, Res= %.4e\n", state.iteration, state.residual);
+            if (state.converged)
+                break;
+        }
+    }
+
+    iteration = state.iteration;
+    residual = state.residual;
 }
 
 //--------------------------------------------------------------------------------------------------------------------------------

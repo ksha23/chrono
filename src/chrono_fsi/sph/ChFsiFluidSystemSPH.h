@@ -137,6 +137,7 @@ class CH_FSI_API ChFsiFluidSystemSPH : public ChFsiFluidSystem {
         double atol;        ///< absolute tolerance
         double rtol;        ///< relative tolerance
         int max_num_iters;  ///< maximum number of iterations
+        int check_interval;  ///< Jacobi only: iterations between host-side convergence checks (default: 10)
 
         LinSolverParameters();
     };

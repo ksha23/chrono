@@ -139,6 +139,7 @@ struct ChFsiParamsSPH {
     Real LinearSolver_Abs_Tol;  ///< Poisson Pressure Equation residual
     Real LinearSolver_Rel_Tol;  ///< Poisson Pressure Equation Absolute residual
     int LinearSolver_Max_Iter;  ///< Linear Solver maximum number of iteration
+    int LinearSolver_Check_Interval;  ///< Jacobi iterations between host-side convergence checks
     bool Verbose_monitoring;    ///< Poisson Pressure Equation Absolute residual
 
     Real Max_Pressure;             ///< Max Pressure in the pressure solver

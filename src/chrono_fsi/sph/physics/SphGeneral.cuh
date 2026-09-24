@@ -566,9 +566,18 @@ __global__ void Jacobi_SOR_Iter(Real4* sortedRhoPreMu,
                                 const uint* csrColInd,
                                 const uint* numContacts,
                                 bool _3dvector,
+                                const int* converged,  // if nonzero, the iteration is a no-op
                                 volatile bool* error_flag);
 
-__global__ void Update_AND_Calc_Res(Real4* sortedRhoPreMu, Real3* V_old, Real3* V_new, Real* q_old, Real* q_new, Real* Residuals, bool _3dvector, volatile bool* error_flag);
+__global__ void Update_AND_Calc_Res(Real4* sortedRhoPreMu,
+                                    Real3* V_old,
+                                    Real3* V_new,
+                                    Real* q_old,
+                                    Real* q_new,
+                                    Real* Residuals,
+                                    bool _3dvector,
+                                    const int* converged,  // if nonzero, the iteration is a no-op
+                                    volatile bool* error_flag);
 
 __global__ void Initialize_Variables(Real4* sortedRhoPreMu, Real* p_old, Real3* sortedVelMas, Real3* V_new, volatile bool* error_flag);
 

@@ -25,6 +25,13 @@ namespace sph {
 /// @addtogroup fsisph_physics
 /// @{
 
+/// Convergence state of a Jacobi solve, kept on the device so that iterations need no host round trip.
+struct JacobiStateISPH {
+    int iteration;  ///< number of iterations performed
+    int converged;  ///< nonzero once the stopping test is met; further iterations are then no-ops
+    Real residual;  ///< maximum residual after the last iteration
+};
+
 /// Inter-particle force calculation for the implicit SPH method.
 class SphForceISPH : public SphForce {
   public:
@@ -57,6 +64,11 @@ class SphForceISPH : public SphForce {
     thrust::device_vector<Real> b1Vector;
     thrust::device_vector<Real3> b3Vector;
     thrust::device_vector<Real> Residuals;
+    thrust::device_vector<Real> ResidualsBlockMax;        ///< per-block maxima of Residuals
+    thrust::device_vector<JacobiStateISPH> JacobiStateD;  ///< state of the current Jacobi solve
+    thrust::device_vector<Real4> rhoPresMuD_old;
+    thrust::device_vector<Real4> posRadD_old;
+    thrust::device_vector<Real3> velMasD_old;
 
     size_t numAllMarkers;
     size_t NNZ;
@@ -66,6 +78,12 @@ class SphForceISPH : public SphForce {
     void ForceSPH(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, Real time, Real step) override;
 
     void PreProcessor(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, bool calcLaplacianOperator);
+
+    /// Run Jacobi iterations for V* (vector3 = true) or the pressure (vector3 = false) while
+    /// (residual > tol || iteration < 3) && iteration < LinearSolver_Max_Iter.
+    /// The stopping test is evaluated on the device after every iteration; the host polls it only every
+    /// LinearSolver_Check_Interval iterations, and iterations launched after convergence do nothing.
+    void SolveJacobi(std::shared_ptr<SphMarkerDataD> sortedSphMarkersD, bool vector3, double tol, uint numBlocks, uint numThreads, int& iteration, Real& residual);
 };
 
 /// @} fsisph_physics

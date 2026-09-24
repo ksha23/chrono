@@ -144,6 +144,7 @@ void ChFsiFluidSystemSPH::InitParams() {
     m_paramsH->LinearSolver_Abs_Tol = Real(0.0);
     m_paramsH->LinearSolver_Rel_Tol = Real(0.0);
     m_paramsH->LinearSolver_Max_Iter = 1000;
+    m_paramsH->LinearSolver_Check_Interval = 10;
     m_paramsH->Verbose_monitoring = false;
     m_paramsH->Pressure_Constraint = false;
     m_paramsH->base_pressure = Real(0.0);
@@ -698,7 +699,7 @@ void ChFsiFluidSystemSPH::SetSPHParameters(const SPHParameters& sph_params) {
     m_paramsH->use_variable_time_step = sph_params.use_variable_time_step;
 }
 
-ChFsiFluidSystemSPH::LinSolverParameters::LinSolverParameters() : type(SolverType::JACOBI), atol(0.0), rtol(0.0), max_num_iters(1000) {}
+ChFsiFluidSystemSPH::LinSolverParameters::LinSolverParameters() : type(SolverType::JACOBI), atol(0.0), rtol(0.0), max_num_iters(1000), check_interval(10) {}
 
 void ChFsiFluidSystemSPH::SetLinSolverParameters(const LinSolverParameters& linsolv_params) {
     ChAssertAlways(!m_is_initialized);
@@ -706,6 +707,7 @@ void ChFsiFluidSystemSPH::SetLinSolverParameters(const LinSolverParameters& lins
     m_paramsH->LinearSolver_Abs_Tol = linsolv_params.atol;
     m_paramsH->LinearSolver_Rel_Tol = linsolv_params.rtol;
     m_paramsH->LinearSolver_Max_Iter = linsolv_params.max_num_iters;
+    m_paramsH->LinearSolver_Check_Interval = std::max(linsolv_params.check_interval, 1);
 }
 
 ChFsiFluidSystemSPH::SplashsurfParameters::SplashsurfParameters() : smoothing_length(1.5), cube_size(0.5), surface_threshold(0.6) {}
