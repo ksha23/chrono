@@ -96,10 +96,7 @@ void RefIncrement(const ChVectorN<double, N>& eq, ChVariables& var, double delta
 class Checker {
   public:
     explicit Checker(const std::string& name) : m_name(name) {}
-    ~Checker() {
-        std::cout << "[ bitwise  ] " << m_name << ": " << m_mismatch << " of " << m_count
-                  << " results differ from the reference" << std::endl;
-    }
+    ~Checker() { std::cout << "[ bitwise  ] " << m_name << ": " << m_mismatch << " of " << m_count << " results differ from the reference" << std::endl; }
 
     void Value(double got, double ref, double scale) {
         m_count++;
