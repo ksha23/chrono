@@ -231,9 +231,10 @@ void ChElementBeamIGA::ComputeKRMmatricesGlobal(ChMatrixRef H, double Kfactor, d
     int mrows_w = this->GetLoadableNumCoordsVelLevel();
     int mrows_x = this->GetLoadableNumCoordsPosLevel();
 
-    // compute Q at current speed & position, x_0, v_0
+    // compute Q at current speed & position, x_0, v_0 (only needed for the K and R matrices)
     ChVectorDynamic<> Q0(mrows_w);
-    this->ComputeInternalForces_impl(Q0, state_x, state_w, true);  // Q0 = Q(x, v)
+    if (Kfactor || Rfactor)
+        this->ComputeInternalForces_impl(Q0, state_x, state_w, true);  // Q0 = Q(x, v)
 
     ChVectorDynamic<> Q1(mrows_w);
     ChVectorDynamic<> Jcolumn(mrows_w);

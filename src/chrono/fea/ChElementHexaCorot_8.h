@@ -124,6 +124,10 @@ class ChApi ChElementHexaCorot_8 : public ChElementHexahedron,
                                           double Rfactor = 0,
                                           double Mfactor = 0) override;
 
+    /// Sets M as the global mass matrix (lumped, diagonal).
+    /// Same result as ComputeKRMmatricesGlobal(M, 0, 0, 1), without computing the corotated stiffness matrix.
+    virtual void ComputeMmatrixGlobal(ChMatrixRef M) override;
+
     /// Computes the internal forces (ex. the actual position of nodes is not in relaxed reference position) and set
     /// values in the Fi vector.
     virtual void ComputeInternalForces(ChVectorDynamic<>& Fi) override;
