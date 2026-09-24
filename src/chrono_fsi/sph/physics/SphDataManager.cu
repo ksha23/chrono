@@ -984,7 +984,7 @@ std::vector<int> FsiDataManager::FindParticlesInBox(const Real3& hsize, const Re
     indices_D.resize(num_active);
 
     // Copy to output
-    std::vector<int> indices_H;
+    std::vector<int> indices_H(num_active);
     thrust::copy(indices_D.begin(), indices_D.end(), indices_H.begin());
     return indices_H;
 }

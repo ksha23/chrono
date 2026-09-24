@@ -7,6 +7,7 @@ set(TESTS
     utest_FSI-SPH_mcc_parameters
     utest_FSI-SPH_proximity_cadence
     utest_FSI-SPH_free_surface_export
+    utest_FSI-SPH_find_particles_in_box
 )
 
 list(APPEND LIBS Chrono_core)
