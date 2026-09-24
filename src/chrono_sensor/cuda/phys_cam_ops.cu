@@ -33,6 +33,16 @@ namespace sensor {
 #define WAVELENGTH_GREEN 546.1 	// [nm]
 #define WAVELENGTH_BLUE 435.8 	// [nm]
 
+/// Per-channel (R, G, B) filter parameters, passed to the kernels by value as kernel arguments.
+/// This avoids a device allocation, a blocking copy and a device-wide synchronization per frame.
+struct PhysCamRGBParams {
+    float v[3];
+};
+
+static PhysCamRGBParams MakeRGBParams(const float* host_vals) {
+    return {{host_vals[0], host_vals[1], host_vals[2]}};
+}
+
 
 ////---- Functions for cuda_phys_cam_defocus_blur ----////
 
@@ -123,7 +133,6 @@ __host__ void cuda_phys_cam_defocus_blur(void* buf_in, void* buf_out, unsigned i
     cuda_phys_cam_defocus_blur_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         (__half*)buf_in, (__half*)buf_out, img_w, img_h, f, U, N, C, defocus_gain, defocus_bias
     );
-    cudaDeviceSynchronize();
 }
 
 
@@ -162,7 +171,6 @@ __host__ void cuda_phys_cam_vignetting(void* buf_in_out, unsigned int img_w, uns
     cuda_phys_cam_vignetting_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
         (__half*)buf_in_out, img_w, img_h, f, L, G_vignet
     );
-    cudaDeviceSynchronize();
 }
 
 
@@ -171,13 +179,13 @@ __host__ void cuda_phys_cam_vignetting(void* buf_in_out, unsigned int img_w, uns
 
 // kernel function
 __global__ void cuda_phys_cam_aggregator_kernel(__half* buf_in_out, unsigned int img_w, unsigned int img_h,
-                                                float N, float t, float C, float P, float *rgb_QEs, float G_aggregator) {
+                                                float N, float t, float C, float P, PhysCamRGBParams rgb_QEs, float G_aggregator) {
     int pixel_num = img_w * img_h;
     int px_idx = (blockDim.x * blockIdx.x + threadIdx.x); // pixel index in output buffer
     if (px_idx < pixel_num) {
         for (int ch_idx = 0; ch_idx < 3; ++ch_idx) {
             // [W/m^2] x [sec] x [m^2] = [J]
-            buf_in_out[4 * px_idx + ch_idx] *= G_aggregator * P / N / N * C * C * t * rgb_QEs[ch_idx];
+            buf_in_out[4 * px_idx + ch_idx] *= G_aggregator * P / N / N * C * C * t * rgb_QEs.v[ch_idx];
         }
     }
 }
@@ -189,17 +197,10 @@ __host__ void cuda_phys_cam_aggregator(void* buf_in_out, unsigned int img_w, uns
     const int threads_per_block = 512;
     const int blocks_per_grid = (img_w * img_h + threads_per_block - 1) / threads_per_block;
 
-    // Prepare arrays that are allocated as device memory
-    float *dev_rgb_QEs;
-    cudaMalloc((void**)&dev_rgb_QEs, sizeof(float) * 3);
-    cudaMemcpy(dev_rgb_QEs, host_rgb_QEs, sizeof(float) * 3, cudaMemcpyHostToDevice);
-
     // Launch the kernel
     cuda_phys_cam_aggregator_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
-        (__half*)buf_in_out, img_w, img_h, N, t, C, P, dev_rgb_QEs, G_aggregator
+        (__half*)buf_in_out, img_w, img_h, N, t, C, P, MakeRGBParams(host_rgb_QEs), G_aggregator
     );
-    cudaDeviceSynchronize();
-    cudaFree(dev_rgb_QEs);
 }
 
 
@@ -207,8 +208,8 @@ __host__ void cuda_phys_cam_aggregator(void* buf_in_out, unsigned int img_w, uns
 
 // kernel function
 __global__ void cuda_phys_cam_noise_kernel(
-    __half* buf_in_out, unsigned int img_w, unsigned int img_h, float t, float* dark_currents, float* noise_gains,
-    float* sigma_reads, curandState_t* rng_shot, curandState_t* rng_FPN
+    __half* buf_in_out, unsigned int img_w, unsigned int img_h, float t, PhysCamRGBParams dark_currents,
+    PhysCamRGBParams noise_gains, PhysCamRGBParams sigma_reads, curandState_t* rng_shot, curandState_t* rng_FPN
 ) {
     int px_idx = (blockDim.x * blockIdx.x + threadIdx.x); // pixel index in output buffer
     if (px_idx < img_w * img_h) {
@@ -221,14 +222,14 @@ __global__ void cuda_phys_cam_noise_kernel(
         
         // if ((double)(buf_in_out[4 * px_idx + 2]) > 1e-12) printf("%f\n", __half2float(buf_in_out[4 * px_idx + 2])); // debug
         for (int ch_idx = 0; ch_idx < 3; ++ch_idx) {
-            double e_num = (double)(buf_in_out[4 * px_idx + ch_idx]) + dark_currents[ch_idx] * t; // mean number of electrons
+            double e_num = (double)(buf_in_out[4 * px_idx + ch_idx]) + dark_currents.v[ch_idx] * t; // mean number of electrons
 
             // sample random variables L ~ Poisson(e_num + D * t)
             // if ((double)(buf_in_out[4 * px_idx + 0]) > 1e-12) printf("%f\n", ceil((e_num_R + e_num_dark)));
-            e_num += curand_normal(&rng_shot[px_idx]) * noise_gains[ch_idx] * sqrt(e_num);
+            e_num += curand_normal(&rng_shot[px_idx]) * noise_gains.v[ch_idx] * sqrt(e_num);
 
             // sample random variables N_read ~ Gaussian(0, sigma_read)
-            e_num += curand_normal(&rng_FPN[px_idx]) * sigma_reads[ch_idx];
+            e_num += curand_normal(&rng_FPN[px_idx]) * sigma_reads.v[ch_idx];
 
             // printf("gain: %f, sigma_read: %f\n", noise_gains[ch_idx], sigma_reads[ch_idx]);
             // if ((double)(buf_in_out[4 * px_idx + 0]) > 1e-12) printf("%f\n", e_num_R);
@@ -250,24 +251,11 @@ __host__ void cuda_phys_cam_noise(void* buf_in_out, unsigned int img_w, unsigned
     const int threads_per_block = 512;
     const int blocks_per_grid = (img_w * img_h + threads_per_block - 1) / threads_per_block;
 
-    // Prepare device-allocated arrays
-    float *dev_dark_currents, *dev_noise_gains, *dev_sigma_reads;
-    cudaMalloc((void**)&dev_dark_currents, sizeof(float) * 3);
-    cudaMalloc((void**)&dev_noise_gains, sizeof(float) * 3);
-    cudaMalloc((void**)&dev_sigma_reads, sizeof(float) * 3);
-    cudaMemcpy(dev_dark_currents, host_dark_currents, sizeof(float) * 3, cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_noise_gains, host_noise_gains, sizeof(float) * 3, cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_sigma_reads, host_sigma_reads, sizeof(float) * 3, cudaMemcpyHostToDevice);
-
     // Launch the kernel
     cuda_phys_cam_noise_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
-        (__half*)buf_in_out, img_w, img_h, t, dev_dark_currents, dev_noise_gains, dev_sigma_reads, rng_shot, rng_FPN
+        (__half*)buf_in_out, img_w, img_h, t, MakeRGBParams(host_dark_currents), MakeRGBParams(host_noise_gains),
+        MakeRGBParams(host_sigma_reads), rng_shot, rng_FPN
     );
-    cudaDeviceSynchronize();
-
-    cudaFree(dev_dark_currents);
-    cudaFree(dev_noise_gains);
-
 }
 
 
@@ -275,7 +263,7 @@ __host__ void cuda_phys_cam_noise(void* buf_in_out, unsigned int img_w, unsigned
 
 // kernel function for linear function
 __global__ void cuda_phys_cam_expsr2dv_kernel_linear(__half* buf_in, __half* buf_out, unsigned int img_w, unsigned int img_h,
-                                                     float ISO, float* gains, float* biases) {
+                                                     float ISO, PhysCamRGBParams gains, PhysCamRGBParams biases) {
     
     int pixel_num = img_w * img_h;
     int px_idx = (blockDim.x * blockIdx.x + threadIdx.x);  // pixel index in input/output buffer
@@ -283,7 +271,7 @@ __global__ void cuda_phys_cam_expsr2dv_kernel_linear(__half* buf_in, __half* buf
         // convert from exposure domain to DV domain
         // I = gain * E + bias, I: [DV], from 0 to 1.0, E: exposure [electrons]
         for (int ch_idx = 0; ch_idx < 3; ++ch_idx) {
-            float px_I = gains[ch_idx] * ISO * (float)(buf_in[4 * px_idx + ch_idx]) + biases[ch_idx];
+            float px_I = gains.v[ch_idx] * ISO * (float)(buf_in[4 * px_idx + ch_idx]) + biases.v[ch_idx];
 
             // buf_out[4 * px_idx + ch_idx] = (uint16_t)(clamp(px_I, 0.f, 1.f) * 65534.999f);
             buf_out[4 * px_idx + ch_idx] = (__half)px_I;
@@ -300,7 +288,7 @@ __global__ void cuda_phys_cam_expsr2dv_kernel_linear(__half* buf_in, __half* buf
 
 // kernel function for sigmoid function (especially for film sensor)
 __global__ void cuda_phys_cam_expsr2dv_kernel_sigmoid(__half* buf_in, __half* buf_out, unsigned int img_w, unsigned int img_h,
-                                                      float ISO, float* gains, float* biases) {
+                                                      float ISO, PhysCamRGBParams gains, PhysCamRGBParams biases) {
     
     int pixel_num = img_w * img_h;
     int px_idx = (blockDim.x * blockIdx.x + threadIdx.x);  // pixel index in input/output buffer
@@ -308,7 +296,7 @@ __global__ void cuda_phys_cam_expsr2dv_kernel_sigmoid(__half* buf_in, __half* bu
         // convert from exposure domain to DV domain
         // I = 1 / (1 + exp(-gain * lg(E) - bias)), I: [DV], from 0 to 1.0, E: exposure [electrons]
         for (int ch_idx = 0; ch_idx < 3; ++ch_idx) {
-            float px_I = gains[ch_idx] * ISO * (float)(buf_in[4 * px_idx + ch_idx]) + biases[ch_idx];
+            float px_I = gains.v[ch_idx] * ISO * (float)(buf_in[4 * px_idx + ch_idx]) + biases.v[ch_idx];
             px_I = 1.f / (1.f + expf(-px_I));
 
             // buf_out[4 * px_idx + ch_idx] = (uint16_t)(clamp(px_I, 0.f, 1.f) * 65534.999f);
@@ -328,7 +316,7 @@ __global__ void cuda_phys_cam_expsr2dv_kernel_sigmoid(__half* buf_in, __half* bu
 
 // kernel function for gamma_correct (especially for digital imaging sensor)
 __global__ void cuda_phys_cam_expsr2dv_kernel_gamma(__half* buf_in, __half* buf_out, unsigned int img_w, unsigned int img_h,
-                                                    float ISO, float* gains, float* biases, float gamma) {
+                                                    float ISO, PhysCamRGBParams gains, PhysCamRGBParams biases, float gamma) {
     
     int pixel_num = img_w * img_h;
     int px_idx = (blockDim.x * blockIdx.x + threadIdx.x);  // pixel index in input/output buffer
@@ -336,7 +324,7 @@ __global__ void cuda_phys_cam_expsr2dv_kernel_gamma(__half* buf_in, __half* buf_
         // convert from exposure domain to DV domain
         // I = a * (lg(E))^gamma + b, I: [DV] from 0 to 1.0, E: exposure [electrons]
         for (int ch_idx = 0; ch_idx < 3; ++ch_idx) {
-            float px_I = gains[ch_idx] * powf(log2f(ISO * (float)(buf_in[4 * px_idx + ch_idx])), gamma) + biases[ch_idx];
+            float px_I = gains.v[ch_idx] * powf(log2f(ISO * (float)(buf_in[4 * px_idx + ch_idx])), gamma) + biases.v[ch_idx];
             
             // buf_out[4 * px_idx + ch_idx] = (uint16_t)(clamp(px_I, 0.f, 1.f) * 65534.999f);
             buf_out[4 * px_idx + ch_idx] = (__half)px_I;
@@ -359,38 +347,28 @@ __host__ void cuda_phys_cam_expsr2dv(void* buf_in, void* buf_out, unsigned int i
     const int threads_per_block = 512;
     const int blocks_per_grid = (img_w * img_h + threads_per_block - 1) / threads_per_block;
 
-    // Prepare arrays that are allocated as device memory
-    float *dev_gains, *dev_biases;
-    cudaMalloc((void**)&dev_gains, sizeof(float) * 3);
-    cudaMalloc((void**)&dev_biases, sizeof(float) * 3);
-    cudaMemcpy(dev_gains, host_gains, sizeof(float) * 3, cudaMemcpyHostToDevice);
-    cudaMemcpy(dev_biases, host_biases, sizeof(float) * 3, cudaMemcpyHostToDevice);
+    const PhysCamRGBParams gains = MakeRGBParams(host_gains);
+    const PhysCamRGBParams biases = MakeRGBParams(host_biases);
 
     // Launch the kernel
     if (crf_type == 0) { // gamma correction function
         cuda_phys_cam_expsr2dv_kernel_gamma<<<blocks_per_grid, threads_per_block, 0, stream>>>(
-            (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, dev_gains, dev_biases, gamma
+            (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, gains, biases, gamma
         );
-        cudaDeviceSynchronize();
     }
     else if (crf_type == 1) { // sigmoid function
         cuda_phys_cam_expsr2dv_kernel_sigmoid<<<blocks_per_grid, threads_per_block, 0, stream>>>(
-            (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, dev_gains, dev_biases
+            (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, gains, biases
         );
-        cudaDeviceSynchronize();
     }
     else if (crf_type == 2) { // linear function
         cuda_phys_cam_expsr2dv_kernel_linear<<<blocks_per_grid, threads_per_block, 0, stream>>>(
-            (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, dev_gains, dev_biases
+            (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, gains, biases
         );
-        cudaDeviceSynchronize();
     }
     else {
         throw std::runtime_error("Invalid camera response function type");
     }
-
-    cudaFree(dev_gains);
-    cudaFree(dev_biases);
 }
 
 }  // namespace sensor
