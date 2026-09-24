@@ -77,7 +77,7 @@ TEST(ChronoMulticore, jacobian_refill) {
                 body->EnableCollision(true);
                 utils::AddSphereGeometry(body.get(), mat, r);
                 sys.AddBody(body);
-                if (k == n - 1 && i < 4 && j < 4)
+                if (k == n - 1)
                     top.push_back(body);
             }
         }
@@ -93,7 +93,7 @@ TEST(ChronoMulticore, jacobian_refill) {
     ASSERT_GT(nc1, 2000u);
     SparseMatrixType previous = D_T;  // keeps the allocation of the larger fill
 
-    // Lift a few bodies out of the pile so that the next step has fewer contacts.
+    // Lift the top layer out of the pile so that the next step has fewer contacts.
     for (auto& body : top) {
         body->SetPos(body->GetPos() + ChVector3d(0, 0, 10));
         body->SetPosDt(VNULL);
