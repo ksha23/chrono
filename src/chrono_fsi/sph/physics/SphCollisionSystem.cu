@@ -15,8 +15,18 @@
 // Base class for processing proximity in fsi system.
 // =============================================================================
 
-#include <thrust/sort.h>
 #include <fstream>
+
+#include <thrust/fill.h>
+#include <thrust/scan.h>
+
+#if defined(CHRONO_USE_HIP) && !defined(__HIP_PLATFORM_NVIDIA__)
+    #include <hipcub/hipcub.hpp>
+namespace cub = hipcub;
+#else
+    #include <cub/cub.cuh>
+#endif
+
 #include "chrono_fsi/sph/physics/SphCollisionSystem.cuh"
 #include "chrono_fsi/sph/physics/SphGeneral.cuh"
 #include "chrono_fsi/sph/utils/SphUtilsDevice.cuh"
@@ -357,9 +367,40 @@ void SphCollisionSystem::ArrangeData(std::shared_ptr<SphMarkerDataD> sphMarkersD
                                          (uint)m_data_mgr.countersH->numExtendedParticles, m_errflagD);
     gpuCheckErrorFlag(m_errflagD, "calcHashD");
 
-    // Sort Particles based on Hash
-    thrust::sort_by_key(m_data_mgr.markersProximity_D->gridMarkerHashD.begin(), m_data_mgr.markersProximity_D->gridMarkerHashD.begin() + m_data_mgr.countersH->numExtendedParticles,
-                        m_data_mgr.markersProximity_D->gridMarkerIndexD.begin());
+    // Sort particles based on hash.
+    // A valid hash is smaller than numCells, so the radix sort only needs the bits of numCells - 1. The sort is
+    // stable, so the resulting order is the same as that of a full 32-bit key sort. The alternate buffers and the
+    // temporary storage are kept between calls, so the sort does not allocate device memory on every step.
+    {
+        int numKeys = (int)m_data_mgr.countersH->numExtendedParticles;
+        int end_bit = 1;
+        while (end_bit < 32 && ((uint)(numCells - 1) >> end_bit) != 0)
+            end_bit++;
+
+        auto& hashD = m_data_mgr.markersProximity_D->gridMarkerHashD;
+        auto& indexD = m_data_mgr.markersProximity_D->gridMarkerIndexD;
+        // Keep the alternate buffers the same size as the proximity arrays, which they may be swapped with below
+        if (m_hashAltD.size() != hashD.size()) {
+            m_hashAltD.resize(hashD.size());
+            m_indexAltD.resize(indexD.size());
+        }
+
+        cub::DoubleBuffer<uint> keys(U1CAST(hashD), U1CAST(m_hashAltD));
+        cub::DoubleBuffer<uint> values(U1CAST(indexD), U1CAST(m_indexAltD));
+        size_t temp_bytes = 0;
+        cub::DeviceRadixSort::SortPairs(nullptr, temp_bytes, keys, values, numKeys, 0, end_bit);
+        if (m_sortTempD.size() < temp_bytes)
+            m_sortTempD.resize(temp_bytes);
+        gpuError err = cub::DeviceRadixSort::SortPairs(TCAST(m_sortTempD), temp_bytes, keys, values, numKeys, 0, end_bit);
+        if (err != gpuSuccess)
+            gpuThrowError(gpuGetErrorString(err));
+
+        // The sorted data may end up in the alternate buffers; if so, exchange them with the proximity arrays.
+        if (keys.Current() != U1CAST(hashD))
+            hashD.swap(m_hashAltD);
+        if (values.Current() != U1CAST(indexD))
+            indexD.swap(m_indexAltD);
+    }
 
     // Find the start index and the end index of the sorted array in each cell
     thrust::fill(m_data_mgr.markersProximity_D->cellStartD.begin(), m_data_mgr.markersProximity_D->cellStartD.end(), 0);
