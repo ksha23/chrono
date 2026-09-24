@@ -61,7 +61,7 @@ void ChConstraintThreeBBShaft::SetVariables(ChVariables* mvariables_a,
                                             ChVariables* mvariables_c) {
     assert(dynamic_cast<ChVariablesBody*>(mvariables_a));
     assert(dynamic_cast<ChVariablesBody*>(mvariables_b));
-    assert(dynamic_cast<ChVariablesBody*>(mvariables_c));
+    assert(mvariables_c && mvariables_c->GetDOF() == 1);
 
     if (!mvariables_a || !mvariables_b || !mvariables_c) {
         SetValid(false);
