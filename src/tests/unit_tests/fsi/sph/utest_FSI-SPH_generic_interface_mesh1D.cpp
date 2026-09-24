@@ -80,19 +80,23 @@ static CableResult RunCableInFlow(bool generic_interface, int num_steps) {
     sph_params.shifting_method = ShiftingMethod::XSPH;
     sysSPH.SetSPHParameters(sph_params);
 
-    // Periodic in x and y, bottom wall
-    ChVector3d cMin(-Lx / 2, -Ly / 2, -10 * spacing);
-    ChVector3d cMax(+Lx / 2, +Ly / 2, Lz + 10 * spacing);
+    // Periodic in x and y, bottom wall. The bottom BCE plate has markers at x = -Lx/2 ... +Lx/2 (inclusive) with
+    // the fluid spacing, so the periodic lengths are Lx + spacing and Ly + spacing.
+    ChVector3d cMin(-Lx / 2 - spacing / 2, -Ly / 2 - spacing / 2, -10 * spacing);
+    ChVector3d cMax(+Lx / 2 + spacing / 2, +Ly / 2 + spacing / 2, Lz + 10 * spacing);
     sysSPH.SetComputationalDomain(ChAABB(cMin, cMax), {BCType::PERIODIC, BCType::PERIODIC, BCType::NONE});
 
-    // Fluid in hydrostatic equilibrium, moving in +x
+    // Fluid in hydrostatic equilibrium, moving in +x, starting one spacing above the first BCE layer
     double gz = 9.81;
     double c2 = sysSPH.GetSoundSpeed() * sysSPH.GetSoundSpeed();
-    for (int ix = 0; ix < (int)std::round(Lx / spacing); ix++) {
-        for (int iy = 0; iy < (int)std::round(Ly / spacing); iy++) {
-            for (int iz = 0; iz < (int)std::round(Lz / spacing); iz++) {
-                ChVector3d pos(-Lx / 2 + (ix + 0.5) * spacing, -Ly / 2 + (iy + 0.5) * spacing, (iz + 0.5) * spacing);
-                double p = sysSPH.GetDensity() * gz * (Lz - pos.z());
+    int nx = (int)std::round(Lx / spacing) + 1;
+    int ny = (int)std::round(Ly / spacing) + 1;
+    int nz = (int)std::round(Lz / spacing);
+    for (int ix = 0; ix < nx; ix++) {
+        for (int iy = 0; iy < ny; iy++) {
+            for (int iz = 0; iz < nz; iz++) {
+                ChVector3d pos(-Lx / 2 + ix * spacing, -Ly / 2 + iy * spacing, (iz + 1) * spacing);
+                double p = sysSPH.GetDensity() * gz * (Lz + spacing / 2 - pos.z());
                 double rho = sysSPH.GetDensity() + p / c2;
                 sysSPH.AddSPHParticle(pos, rho, p, sysSPH.GetViscosity(), ChVector3d(flow_speed, 0, 0));
             }
