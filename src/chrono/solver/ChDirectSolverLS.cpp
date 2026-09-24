@@ -72,9 +72,7 @@ bool ChDirectSolverLS::Setup(ChSystemDescriptor& sysd, bool analyze) {
     if (call_learner) {
         LearnSparsityPattern(sysd);
     } else if (call_reserve) {
-        double density = (m_sparsity > 0) ? 1 - m_sparsity : 1 - SPM_DEF_SPARSITY;
-        m_mat.resize(m_dim, m_dim);
-        m_mat.reserve(Eigen::VectorXi::Constant(m_dim, static_cast<int>(m_dim * density)));
+        ReserveSparsityPattern();
     }
 
     // Let the system descriptor load the current matrix
@@ -85,13 +83,20 @@ bool ChDirectSolverLS::Setup(ChSystemDescriptor& sysd, bool analyze) {
 
     // Without an analysis phase, the matrix keeps the sparsity pattern it had at the last analysis (BuildSystemMatrix
     // only zeroes and reloads values), so a structural change can only show up as additional nonzeros. In that case,
-    // fall back to a full setup (re-learning the pattern if it is not locked) so that the factorization never reuses
-    // an analysis done for a different pattern.
+    // fall back to a full setup so that the factorization never reuses an analysis done for a different pattern.
+    // If the pattern is not locked, it is also reset (as a full setup would have done), so that entries no longer
+    // present in the problem are dropped instead of accumulating as explicit zeros. This requires assembling the
+    // matrix a second time, which is acceptable since it only happens when the sparsity pattern changes.
     if (!analyze && m_mat.nonZeros() != m_analyzed_nnz) {
         analyze = true;
-        if (m_use_learner && !m_lock) {
-            call_learner = true;
-            LearnSparsityPattern(sysd);
+        if (!m_lock) {
+            if (m_use_learner) {
+                call_learner = true;
+                LearnSparsityPattern(sysd);
+            } else {
+                call_reserve = true;
+                ReserveSparsityPattern();
+            }
             sysd.BuildSystemMatrix(&m_mat, nullptr, conditioning_factor);
             m_mat.makeCompressed();
         }
@@ -138,6 +143,12 @@ void ChDirectSolverLS::LearnSparsityPattern(ChSystemDescriptor& sysd) {
     sysd.BuildSystemMatrix(&sparsity_pattern, nullptr);
     sparsity_pattern.Apply(m_mat);
     m_force_update = false;
+}
+
+void ChDirectSolverLS::ReserveSparsityPattern() {
+    double density = (m_sparsity > 0) ? 1 - m_sparsity : 1 - SPM_DEF_SPARSITY;
+    m_mat.resize(m_dim, m_dim);
+    m_mat.reserve(Eigen::VectorXi::Constant(m_dim, static_cast<int>(m_dim * density)));
 }
 
 void ChDirectSolverLS::RecordAnalyzedPattern(bool analyzed, bool success) {

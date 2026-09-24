@@ -178,6 +178,67 @@ TEST_P(DirectSolverAnalyze, pattern_change) {
     }
 }
 
+// Simulate the chain with an unlocked sparsity pattern. A stiff bushing load between the first and last links is added
+// before step 3 and replaced by a bushing between the second and second-to-last links before step 6. Neither change
+// alters the problem size or marks the system as modified. Returns the number of matrix nonzeros after the last step.
+static int RunChainSwapLoad(ChTimestepper::Type type, bool learner, bool always_analyze, bool force_update, ChVectorDynamic<>& state) {
+    ChSystemSMC sys;
+    auto bodies = BuildChain(sys, 8);
+
+    auto loads = chrono_types::make_shared<ChLoadContainer>();
+    sys.Add(loads);
+
+    auto solver = chrono_types::make_shared<CountingSparseLU>(always_analyze);
+    solver->LockSparsityPattern(false);
+    solver->UseSparsityPatternLearner(learner);
+    sys.SetSolver(solver);
+    sys.SetTimestepperType(type);
+    if (auto hht = std::dynamic_pointer_cast<ChTimestepperHHT>(sys.GetTimestepper())) {
+        hht->SetAlpha(-0.2);
+        hht->SetMaxIters(50);
+        hht->SetAbsTolerances(1e-4, 1e2);
+        hht->SetStepControl(false);
+    }
+
+    auto add_bushing = [&](int i, int j) {
+        loads->Add(chrono_types::make_shared<ChLoadBodyBodyBushingSpherical>(bodies[i], bodies[j], ChFramed(bodies[j]->GetPos()), ChVector3d(1e3), ChVector3d(1e1)));
+    };
+
+    for (int i = 0; i < 10; i++) {
+        if (i == 3)
+            add_bushing(0, 7);
+        if (i == 6) {
+            loads->GetLoadList().clear();
+            add_bushing(1, 6);
+        }
+        if (force_update)
+            sys.ForceUpdate();
+        sys.DoStepDynamics(1e-3);
+    }
+
+    state = GetState(sys);
+    return static_cast<int>(solver->A().nonZeros());
+}
+
+// With an unlocked sparsity pattern, a pattern change must reset the pattern, so that entries no longer present in the
+// problem do not accumulate in the matrix. This holds with and without the sparsity pattern learner. The number of
+// nonzeros must match that obtained when the system is marked as modified at every step (so that a full setup is
+// requested at every step), and results must be identical to an analysis at every factorization.
+TEST_P(DirectSolverAnalyze, pattern_reset) {
+    for (bool learner : {true, false}) {
+        ChVectorDynamic<> res_state;
+        ChVectorDynamic<> ref_state;
+        ChVectorDynamic<> full_state;
+        int res_nnz = RunChainSwapLoad(GetParam(), learner, false, false, res_state);
+        RunChainSwapLoad(GetParam(), learner, true, false, ref_state);
+        int full_nnz = RunChainSwapLoad(GetParam(), learner, false, true, full_state);
+        EXPECT_EQ(res_nnz, full_nnz) << "learner=" << learner;
+        ASSERT_EQ(res_state.size(), ref_state.size());
+        for (int i = 0; i < res_state.size(); i++)
+            ASSERT_EQ(res_state[i], ref_state[i]) << "learner=" << learner << " i=" << i;
+    }
+}
+
 INSTANTIATE_TEST_SUITE_P(Timesteppers,
                          DirectSolverAnalyze,
                          ::testing::Values(ChTimestepper::Type::EULER_IMPLICIT,

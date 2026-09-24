@@ -237,6 +237,9 @@ class ChApi ChDirectSolverLS : public ChSolverLS {
     /// Apply the sparsity pattern of the current problem to the matrix, using the sparsity pattern learner.
     void LearnSparsityPattern(ChSystemDescriptor& sysd);
 
+    /// Reset the matrix to an empty pattern, reserving space for nonzeros using the current sparsity level estimate.
+    void ReserveSparsityPattern();
+
     /// Record the matrix structure after a factorization (with or without analysis).
     void RecordAnalyzedPattern(bool analyzed, bool success);
 
