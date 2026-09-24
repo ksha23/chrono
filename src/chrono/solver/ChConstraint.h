@@ -204,6 +204,13 @@ class ChApi ChConstraint {
     /// - a 'boxed constraint': l_i= std::min(std::max(min., l_i), max)
     virtual void Project();
 
+    /// Indicate whether this constraint takes part in the projection step of iterative solvers.
+    /// Return false only if Project() is the identity for this constraint and no other constraint's Project() reads
+    /// or modifies its multiplier. The default returns false for bilateral (LOCK) constraints, for which
+    /// ChConstraint::Project() does nothing. Derived classes that override Project() must also override this function
+    /// and return true, since ChSystemDescriptor::ConstraintsProject() skips constraints for which it returns false.
+    virtual bool IsProjected() const { return mode != Mode::LOCK; }
+
     /// Return the constraint violation.
     /// The function receives as input the linear map
     /// <pre>

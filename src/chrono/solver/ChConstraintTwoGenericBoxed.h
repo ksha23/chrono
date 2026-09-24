@@ -67,6 +67,9 @@ class ChApi ChConstraintTwoGenericBoxed : public ChConstraintTwoGeneric {
     /// This 'boxed implementation overrides the default do-nothing case.
     virtual void Project() override;
 
+    /// The boxed projection is not the identity, although the constraint mode is LOCK.
+    virtual bool IsProjected() const override { return true; }
+
     /// Given the residual of the constraint computed as the
     /// linear map  mc_i =  [Cq]*q + b_i + cfm*l_i , returns the
     /// violation of the constraint, considering inequalities, etc.

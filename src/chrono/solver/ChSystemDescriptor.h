@@ -299,6 +299,8 @@ class ChApi ChSystemDescriptor {
     /// Note! the 'l_i' data in the ChConstraints of the system descriptor are changed
     /// by this operation (they get the value of 'multipliers' after the projection), so
     /// it may happen that you need to backup them via FromConstraintToVector().
+    /// After EndInsertion() or UpdateCountsAndOffsets(), only the constraints that take part in the projection
+    /// (see ChConstraint::IsProjected) are visited, and the 'l_i' of the other constraints are left unchanged.
     virtual void ConstraintsProject(
         ChVectorDynamic<>& multipliers  ///< system-level vector of 'l_i' multipliers to be projected
     );
@@ -423,6 +425,9 @@ class ChApi ChSystemDescriptor {
     mutable unsigned int n_q;  ///< number of active variables
     mutable unsigned int n_c;  ///< number of active constraints
     bool freeze_count;         ///< cache the number of active variables and constraints
+
+    std::vector<ChConstraint*> m_projected;  ///< active constraints that take part in ConstraintsProject
+    bool m_projected_valid;                  ///< true if m_projected matches the current list of constraints
 
     bool m_use_Minv;
     ChMatrixDynamic<> m_Minv;
