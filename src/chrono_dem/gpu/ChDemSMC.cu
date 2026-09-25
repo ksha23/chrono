@@ -278,22 +278,25 @@ __host__ void ChSystemDem_impl::defragment_friction_history(unsigned int history
     // sort sphere ids by owner SD
     std::sort(sphere_ids.begin(), sphere_ids.end(), [&](std::size_t i, std::size_t j) { return sphere_owner_SDs.at(i) < sphere_owner_SDs.at(j); });
 
-    std::vector<float3, gpuallocator<float3>> history_tmp;
-    std::vector<unsigned int, gpuallocator<unsigned int>> partners_tmp;
+    // the maps live in device memory: reorder host copies and copy them back
+    std::vector<float3> history_old;
+    std::vector<unsigned int> partners_old;
+    contact_history_map.CopyToHost(history_old);
+    contact_partners_map.CopyToHost(partners_old);
 
-    history_tmp.resize(history_offset * nSpheres);
-    partners_tmp.resize(history_offset * nSpheres);
+    std::vector<float3> history_tmp(history_offset * nSpheres);
+    std::vector<unsigned int> partners_tmp(history_offset * nSpheres);
 
     // reorder values into new sorted
     for (unsigned int i = 0; i < nSpheres; i++) {
         for (unsigned int j = 0; j < history_offset; j++) {
-            history_tmp.at(history_offset * i + j) = contact_history_map.at(history_offset * sphere_ids.at(i) + j);
-            partners_tmp.at(history_offset * i + j) = contact_partners_map.at(history_offset * sphere_ids.at(i) + j);
+            history_tmp.at(history_offset * i + j) = history_old.at(history_offset * sphere_ids.at(i) + j);
+            partners_tmp.at(history_offset * i + j) = partners_old.at(history_offset * sphere_ids.at(i) + j);
         }
     }
 
-    contact_history_map.swap(history_tmp);
-    contact_partners_map.swap(partners_tmp);
+    contact_history_map.CopyFromHost(history_tmp.data(), 0, history_tmp.size());
+    contact_partners_map.CopyFromHost(partners_tmp.data(), 0, partners_tmp.size());
 }
 
 __host__ void ChSystemDem_impl::setupSphereDataStructures() {
@@ -448,11 +451,7 @@ __host__ void ChSystemDem_impl::setupSphereDataStructures() {
         // Hope that using .at (instead of []) gives better err msg when things go wrong,
         // at the cost of some speed which is not important in I/O
         if (user_provided_partner_map) {
-            for (unsigned int i = 0; i < nSpheres; i++) {
-                for (unsigned int j = 0; j < MAX_SPHERES_TOUCHED_BY_SPHERE; j++) {
-                    contact_partners_map.at(MAX_SPHERES_TOUCHED_BY_SPHERE * i + j) = user_partner_map.at(MAX_SPHERES_TOUCHED_BY_SPHERE * i + j);
-                }
-            }
+            contact_partners_map.CopyFromHost(user_partner_map.data(), 0, user_partner_map.size());
         }
 
         user_provided_internal_data = user_provided_internal_data || user_provided_partner_map;
@@ -470,15 +469,17 @@ __host__ void ChSystemDem_impl::setupSphereDataStructures() {
                         nSpheres);
 
         if (user_provided_friction_history) {
+            std::vector<float3> history_host(MAX_SPHERES_TOUCHED_BY_SPHERE * nSpheres);
             for (unsigned int i = 0; i < nSpheres; i++) {
                 for (unsigned int j = 0; j < MAX_SPHERES_TOUCHED_BY_SPHERE; j++) {
                     float3 history_UU = user_friction_history[MAX_SPHERES_TOUCHED_BY_SPHERE * i + j];
                     float3 history_SU = make_float3(history_UU.x / (float)LENGTH_SU2UU,  //
                                                     history_UU.y / (float)LENGTH_SU2UU,  //
                                                     history_UU.z / (float)LENGTH_SU2UU);
-                    contact_history_map.at(MAX_SPHERES_TOUCHED_BY_SPHERE * i + j) = history_SU;
+                    history_host.at(MAX_SPHERES_TOUCHED_BY_SPHERE * i + j) = history_SU;
                 }
             }
+            contact_history_map.CopyFromHost(history_host.data(), 0, history_host.size());
         }
 
         user_provided_internal_data = user_provided_internal_data || user_provided_friction_history;

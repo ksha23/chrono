@@ -278,6 +278,14 @@ void ChSystemDem_impl::WriteCsvParticles(std::ofstream& ptFile) const {
         outstrstream << ",fx,fy,fz";
     }
 
+    // accelerations live in device memory
+    std::vector<float> acc_X, acc_Y, acc_Z;
+    if (GET_OUTPUT_SETTING(FORCE_COMPONENTS)) {
+        sphere_acc_X.CopyToHost(acc_X);
+        sphere_acc_Y.CopyToHost(acc_Y);
+        sphere_acc_Z.CopyToHost(acc_Z);
+    }
+
     outstrstream << "\n";
     for (unsigned int n = 0; n < nSpheres; n++) {
         unsigned int ownerSD = sphere_owner_SDs.at(n);
@@ -320,9 +328,9 @@ void ChSystemDem_impl::WriteCsvParticles(std::ofstream& ptFile) const {
         }
 
         if (GET_OUTPUT_SETTING(FORCE_COMPONENTS)) {
-            double fx = (sphere_acc_X.at(n) - gran_params->gravAcc_X_SU) * gran_params->sphere_mass_SU * FORCE_SU2UU;
-            double fy = (sphere_acc_Y.at(n) - gran_params->gravAcc_Y_SU) * gran_params->sphere_mass_SU * FORCE_SU2UU;
-            double fz = (sphere_acc_Z.at(n) - gran_params->gravAcc_Z_SU) * gran_params->sphere_mass_SU * FORCE_SU2UU;
+            double fx = (acc_X.at(n) - gran_params->gravAcc_X_SU) * gran_params->sphere_mass_SU * FORCE_SU2UU;
+            double fy = (acc_Y.at(n) - gran_params->gravAcc_Y_SU) * gran_params->sphere_mass_SU * FORCE_SU2UU;
+            double fz = (acc_Z.at(n) - gran_params->gravAcc_Z_SU) * gran_params->sphere_mass_SU * FORCE_SU2UU;
             outstrstream << "," << fx << "," << fy << "," << fz;
         }
 
@@ -451,10 +459,12 @@ float3 ChSystemDem_impl::getRollingFrictionTorque(unsigned int i, unsigned int j
     }
 
     unsigned int bodyAoffset = i * MAX_SPHERES_TOUCHED_BY_SPHERE;
+    unsigned int partners[MAX_SPHERES_TOUCHED_BY_SPHERE];
+    contact_partners_map.CopyToHost(partners, bodyAoffset, MAX_SPHERES_TOUCHED_BY_SPHERE);
     // go through all possible neighbors
     for (unsigned int neighborID = 0; neighborID < MAX_SPHERES_TOUCHED_BY_SPHERE; neighborID++) {
         unsigned int theirSphereMappingID = bodyAoffset + neighborID;
-        unsigned int theirSphereID = contact_partners_map[theirSphereMappingID];
+        unsigned int theirSphereID = partners[neighborID];
 
         if (theirSphereID == j) {
             return make_float3(rolling_friction_torque[theirSphereMappingID].x * FORCE_SU2UU * LENGTH_SU2UU,
@@ -467,10 +477,11 @@ float3 ChSystemDem_impl::getRollingFrictionTorque(unsigned int i, unsigned int j
 
 void ChSystemDem_impl::getNeighbors(unsigned int ID, std::vector<unsigned int>& neighborList) {
     unsigned int bodyAoffset = ID * MAX_SPHERES_TOUCHED_BY_SPHERE;
+    unsigned int partners[MAX_SPHERES_TOUCHED_BY_SPHERE];
+    contact_partners_map.CopyToHost(partners, bodyAoffset, MAX_SPHERES_TOUCHED_BY_SPHERE);
     // go through all possible neighbors
     for (unsigned int neighborID = 0; neighborID < MAX_SPHERES_TOUCHED_BY_SPHERE; neighborID++) {
-        unsigned int theirSphereMappingID = bodyAoffset + neighborID;
-        unsigned int theirSphereID = contact_partners_map[theirSphereMappingID];
+        unsigned int theirSphereID = partners[neighborID];
 
         if (theirSphereID != -1) {
             neighborList.push_back(theirSphereID);
@@ -490,10 +501,12 @@ float3 ChSystemDem_impl::getRollingVrot(unsigned int i, unsigned int j) {
     }
 
     unsigned int bodyAoffset = i * MAX_SPHERES_TOUCHED_BY_SPHERE;
+    unsigned int partners[MAX_SPHERES_TOUCHED_BY_SPHERE];
+    contact_partners_map.CopyToHost(partners, bodyAoffset, MAX_SPHERES_TOUCHED_BY_SPHERE);
     // go through all possible neighbors
     for (unsigned int neighborID = 0; neighborID < MAX_SPHERES_TOUCHED_BY_SPHERE; neighborID++) {
         unsigned int theirSphereMappingID = bodyAoffset + neighborID;
-        unsigned int theirSphereID = contact_partners_map[theirSphereMappingID];
+        unsigned int theirSphereID = partners[neighborID];
 
         if (theirSphereID == j) {
             return make_float3(v_rot_array[theirSphereMappingID].x * LENGTH_SU2UU / TIME_SU2UU, v_rot_array[theirSphereMappingID].y * LENGTH_SU2UU / TIME_SU2UU,
@@ -515,10 +528,12 @@ float ChSystemDem_impl::getRollingCharContactTime(unsigned int i, unsigned int j
     }
 
     unsigned int bodyAoffset = i * MAX_SPHERES_TOUCHED_BY_SPHERE;
+    unsigned int partners[MAX_SPHERES_TOUCHED_BY_SPHERE];
+    contact_partners_map.CopyToHost(partners, bodyAoffset, MAX_SPHERES_TOUCHED_BY_SPHERE);
     // go through all possible neighbors
     for (unsigned int neighborID = 0; neighborID < MAX_SPHERES_TOUCHED_BY_SPHERE; neighborID++) {
         unsigned int theirSphereMappingID = bodyAoffset + neighborID;
-        unsigned int theirSphereID = contact_partners_map[theirSphereMappingID];
+        unsigned int theirSphereID = partners[neighborID];
 
         if (theirSphereID == j) {
             return char_collision_time[theirSphereMappingID] * TIME_SU2UU;
@@ -541,10 +556,12 @@ float3 ChSystemDem_impl::getSlidingFrictionForce(unsigned int i, unsigned int j)
     }
 
     unsigned int bodyAoffset = i * MAX_SPHERES_TOUCHED_BY_SPHERE;
+    unsigned int partners[MAX_SPHERES_TOUCHED_BY_SPHERE];
+    contact_partners_map.CopyToHost(partners, bodyAoffset, MAX_SPHERES_TOUCHED_BY_SPHERE);
     // go through all possible neighbors
     for (unsigned int neighborID = 0; neighborID < MAX_SPHERES_TOUCHED_BY_SPHERE; neighborID++) {
         unsigned int theirSphereMappingID = bodyAoffset + neighborID;
-        unsigned int theirSphereID = contact_partners_map[theirSphereMappingID];
+        unsigned int theirSphereID = partners[neighborID];
 
         if (theirSphereID == j) {
             return make_float3(tangential_friction_force[theirSphereMappingID].x * FORCE_SU2UU, tangential_friction_force[theirSphereMappingID].y * FORCE_SU2UU,
@@ -571,10 +588,12 @@ float3 ChSystemDem_impl::getNormalForce(unsigned int i, unsigned int j) {
     }
 
     unsigned int bodyAoffset = i * MAX_SPHERES_TOUCHED_BY_SPHERE;
+    unsigned int partners[MAX_SPHERES_TOUCHED_BY_SPHERE];
+    contact_partners_map.CopyToHost(partners, bodyAoffset, MAX_SPHERES_TOUCHED_BY_SPHERE);
     // go through all possible neighbors
     for (unsigned int neighborID = 0; neighborID < MAX_SPHERES_TOUCHED_BY_SPHERE; neighborID++) {
         unsigned int theirSphereMappingID = bodyAoffset + neighborID;
-        unsigned int theirSphereID = contact_partners_map[theirSphereMappingID];
+        unsigned int theirSphereID = partners[neighborID];
 
         if (theirSphereID == j) {
             return make_float3(normal_contact_force[theirSphereMappingID].x * FORCE_SU2UU, normal_contact_force[theirSphereMappingID].y * FORCE_SU2UU,
@@ -604,12 +623,14 @@ void ChSystemDem_impl::WriteContactInfoFile(const std::string& outfilename) cons
             outstrstream << ", mx, my, mz";
         }
         outstrstream << "\n";
+        std::vector<unsigned int> partners;
+        contact_partners_map.CopyToHost(partners);
         for (unsigned int n = 0; n < nSpheres; n++) {
             unsigned int bodyAoffset = n * MAX_SPHERES_TOUCHED_BY_SPHERE;
             // go through all possible neighbors
             for (unsigned int neighborID = 0; neighborID < MAX_SPHERES_TOUCHED_BY_SPHERE; neighborID++) {
                 unsigned int theirSphereMappingID = bodyAoffset + neighborID;
-                unsigned int theirSphereID = contact_partners_map[theirSphereMappingID];
+                unsigned int theirSphereID = partners[theirSphereMappingID];
                 // only write when bi < bj
                 if (theirSphereID >= n && theirSphereID < nSpheres) {
                     outstrstream << n << ", " << theirSphereID;
@@ -1288,9 +1309,9 @@ float3 ChSystemDem_impl::GetParticleAngVelocity(int nSphere) const {
 
 // get particle acceleration
 float3 ChSystemDem_impl::GetParticleLinAcc(int nSphere) const {
-    double acc_x = sphere_acc_X.at(nSphere) * LENGTH_SU2UU / (TIME_SU2UU * TIME_SU2UU);
-    double acc_y = sphere_acc_Y.at(nSphere) * LENGTH_SU2UU / (TIME_SU2UU * TIME_SU2UU);
-    double acc_z = sphere_acc_Z.at(nSphere) * LENGTH_SU2UU / (TIME_SU2UU * TIME_SU2UU);
+    double acc_x = sphere_acc_X.Get(nSphere) * LENGTH_SU2UU / (TIME_SU2UU * TIME_SU2UU);
+    double acc_y = sphere_acc_Y.Get(nSphere) * LENGTH_SU2UU / (TIME_SU2UU * TIME_SU2UU);
+    double acc_z = sphere_acc_Z.Get(nSphere) * LENGTH_SU2UU / (TIME_SU2UU * TIME_SU2UU);
 
     return make_float3(acc_x, acc_y, acc_z);
 }
@@ -1302,10 +1323,12 @@ bool ChSystemDem_impl::IsFixed(int nSphere) const {
 
 // Return number of particle-particle contacts
 unsigned int ChSystemDem_impl::GetNumContacts() const {
-    auto contact_itr = contact_partners_map.begin();
+    std::vector<unsigned int> partners;
+    contact_partners_map.CopyToHost(partners);
+    auto contact_itr = partners.begin();
     int total_nc = 0;
 
-    while (contact_itr != contact_partners_map.end()) {
+    while (contact_itr != partners.end()) {
         int body_j = *contact_itr;
         contact_itr++;
 

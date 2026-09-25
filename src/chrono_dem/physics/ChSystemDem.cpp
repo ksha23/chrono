@@ -1475,6 +1475,14 @@ void ChSystemDem::WriteHstHistory(std::ofstream& histFile) const {
         outstrstream << " history " << MAX_SPHERES_TOUCHED_BY_SPHERE;
     outstrstream << "\n";
 
+    // The maps live in device memory; copy them to the host once.
+    std::vector<unsigned int> partners;
+    std::vector<float3> history;
+    if (formatMode & 1)
+        m_sys->contact_partners_map.CopyToHost(partners);
+    if (formatMode & 2)
+        m_sys->contact_history_map.CopyToHost(history);
+
     // We'll use space-separated formatting, as I found it more convenient to parse in and looks better.
     // Forget about CSV conventions, history info is not meant to be used by third-party tools anyway.
     float3 history_UU;
@@ -1482,14 +1490,14 @@ void ChSystemDem::WriteHstHistory(std::ofstream& histFile) const {
         // Write contact_partners_map
         if (formatMode & 1) {
             for (unsigned int i = 0; i < MAX_SPHERES_TOUCHED_BY_SPHERE; i++)
-                outstrstream << m_sys->contact_partners_map[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i] << " ";
+                outstrstream << partners[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i] << " ";
         }
         // Write contact_history_map
         if (formatMode & 2) {
             for (unsigned int i = 0; i < MAX_SPHERES_TOUCHED_BY_SPHERE; i++) {
-                history_UU.x = m_sys->contact_history_map[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i].x * m_sys->LENGTH_SU2UU;
-                history_UU.y = m_sys->contact_history_map[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i].y * m_sys->LENGTH_SU2UU;
-                history_UU.z = m_sys->contact_history_map[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i].z * m_sys->LENGTH_SU2UU;
+                history_UU.x = history[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i].x * m_sys->LENGTH_SU2UU;
+                history_UU.y = history[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i].y * m_sys->LENGTH_SU2UU;
+                history_UU.z = history[MAX_SPHERES_TOUCHED_BY_SPHERE * n + i].z * m_sys->LENGTH_SU2UU;
                 outstrstream << history_UU.x << " " << history_UU.y << " " << history_UU.z << " ";
             }
         }

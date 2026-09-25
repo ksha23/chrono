@@ -579,32 +579,32 @@ class ChSystemDem_impl {
     /// Store Z angular velocity (axis and magnitude in one vector) in unified memory
     std::vector<float, gpuallocator<float>> sphere_Omega_Z;
 
-    /// Store X acceleration in unified memory
-    std::vector<float, gpuallocator<float>> sphere_acc_X;
-    /// Store Y acceleration in unified memory
-    std::vector<float, gpuallocator<float>> sphere_acc_Y;
-    /// Store Z acceleration in unified memory
-    std::vector<float, gpuallocator<float>> sphere_acc_Z;
+    /// Store X acceleration in device memory
+    gpudevicevector<float> sphere_acc_X;
+    /// Store Y acceleration in device memory
+    gpudevicevector<float> sphere_acc_Y;
+    /// Store Z acceleration in device memory
+    gpudevicevector<float> sphere_acc_Z;
 
-    /// Store X angular acceleration (axis and magnitude in one vector) in unified memory
-    std::vector<float, gpuallocator<float>> sphere_ang_acc_X;
-    /// Store Y angular acceleration (axis and magnitude in one vector) in unified memory
-    std::vector<float, gpuallocator<float>> sphere_ang_acc_Y;
-    /// Store Z angular acceleration (axis and magnitude in one vector) in unified memory
-    std::vector<float, gpuallocator<float>> sphere_ang_acc_Z;
+    /// Store X angular acceleration (axis and magnitude in one vector) in device memory
+    gpudevicevector<float> sphere_ang_acc_X;
+    /// Store Y angular acceleration (axis and magnitude in one vector) in device memory
+    gpudevicevector<float> sphere_ang_acc_Y;
+    /// Store Z angular acceleration (axis and magnitude in one vector) in device memory
+    gpudevicevector<float> sphere_ang_acc_Z;
 
-    /// X acceleration history used for the Chung integrator in unified memory
-    std::vector<float, gpuallocator<float>> sphere_acc_X_old;
-    /// Y acceleration history used for the Chung integrator in unified memory
-    std::vector<float, gpuallocator<float>> sphere_acc_Y_old;
-    /// Z acceleration history used for the Chung integrator in unified memory
-    std::vector<float, gpuallocator<float>> sphere_acc_Z_old;
-    /// X angular acceleration history used for the Chung integrator in unified memory
-    std::vector<float, gpuallocator<float>> sphere_ang_acc_X_old;
-    /// Y angular acceleration history used for the Chung integrator in unified memory
-    std::vector<float, gpuallocator<float>> sphere_ang_acc_Y_old;
-    /// Z angular acceleration history used for the Chung integrator in unified memory
-    std::vector<float, gpuallocator<float>> sphere_ang_acc_Z_old;
+    /// X acceleration history used for the Chung integrator in device memory
+    gpudevicevector<float> sphere_acc_X_old;
+    /// Y acceleration history used for the Chung integrator in device memory
+    gpudevicevector<float> sphere_acc_Y_old;
+    /// Z acceleration history used for the Chung integrator in device memory
+    gpudevicevector<float> sphere_acc_Z_old;
+    /// X angular acceleration history used for the Chung integrator in device memory
+    gpudevicevector<float> sphere_ang_acc_X_old;
+    /// Y angular acceleration history used for the Chung integrator in device memory
+    gpudevicevector<float> sphere_ang_acc_Y_old;
+    /// Z angular acceleration history used for the Chung integrator in device memory
+    gpudevicevector<float> sphere_ang_acc_Z_old;
 
     /// Fixity of each sphere
     std::vector<not_stupid_bool, gpuallocator<not_stupid_bool>> sphere_fixed;
@@ -616,13 +616,13 @@ class ChSystemDem_impl {
     std::vector<unsigned int, gpuallocator<unsigned int>> sphere_stats_buffer_int;
 
     /// Set of contact partners for each sphere. Only used in frictional simulations
-    std::vector<unsigned int, gpuallocator<unsigned int>> contact_partners_map;
+    gpudevicevector<unsigned int> contact_partners_map;
     /// Whether the frictional contact at an index is active
-    std::vector<not_stupid_bool, gpuallocator<not_stupid_bool>> contact_active_map;
+    gpudevicevector<not_stupid_bool> contact_active_map;
     /// Tracks the tangential history vector for a given contact pair. Only used in multistep friction
-    std::vector<float3, gpuallocator<float3>> contact_history_map;
+    gpudevicevector<float3> contact_history_map;
     /// Tracks the duration of contact between contact pairs. Only used in multistep friction
-    std::vector<float, gpuallocator<float>> contact_duration;
+    gpudevicevector<float> contact_duration;
     /// Tracks the normal contact force for a given contact pair
     std::vector<float3, gpuallocator<float3>> normal_contact_force;
     /// Tracks the tangential contact force for a given contact pair
