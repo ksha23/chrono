@@ -136,7 +136,7 @@ class ChSystemDemMesh_impl : public ChSystemDem_impl {
     void cleanupTriMesh();
 
     /// Broadphase CD for triangles
-    void runTriangleBroadphase();
+    void runTriangleBroadphase(unsigned int numTriangles);
 
     virtual double get_max_K() const override;
 

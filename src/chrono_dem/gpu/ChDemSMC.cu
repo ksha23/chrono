@@ -539,7 +539,6 @@ __host__ void ChSystemDem_impl::runSphereBroadphase() {
     // Starting the second stage of this function call - the prefix scan operation
     unsigned int* out_ptr = SD_SphereCompositeOffsets.data();
     unsigned int* in_ptr = SD_NumSpheresTouching.data();
-    demErrchk(gpuMemcpy(out_ptr, in_ptr, nSDs * sizeof(unsigned int), gpuMemcpyDeviceToDevice));
 
     // cold run; CUB determines the amount of storage it needs (since first argument is NULL pointer)
     size_t temp_storage_bytes = 0;
@@ -555,10 +554,18 @@ __host__ void ChSystemDem_impl::runSphereBroadphase() {
     demErrchk(gpuPeekAtLastError());
 
     // Beginning of the last stage of computation in this function: assembling the big composite array.
-    // num_entries: total number of sphere entries to record in the big fat composite array
-    unsigned int num_entries = out_ptr[nSDs - 1] + in_ptr[nSDs - 1];
-    spheres_in_SD_composite.resize(num_entries, NULL_CHDEM_ID);
-    sphere_data->spheres_in_SD_composite = spheres_in_SD_composite.data();
+    // num_entries: total number of sphere entries to record in the big fat composite array. Copy the two values it
+    // needs instead of reading the managed arrays on the host, which would move their pages to the host.
+    unsigned int last_offset, last_count;
+    demErrchk(gpuMemcpy(&last_offset, out_ptr + nSDs - 1, sizeof(unsigned int), gpuMemcpyDeviceToHost));
+    demErrchk(gpuMemcpy(&last_count, in_ptr + nSDs - 1, sizeof(unsigned int), gpuMemcpyDeviceToHost));
+    unsigned int num_entries = last_offset + last_count;
+    // Only grow the composite array: its entries are addressed through the offsets, and resizing on the host writes to
+    // the managed array
+    if (num_entries > spheres_in_SD_composite.size()) {
+        spheres_in_SD_composite.resize(num_entries, NULL_CHDEM_ID);
+        packSphereDataPointers();
+    }
 
     // Copy the offsets in the scratch pad; the subsequent kernel call would step on the outcome of the prefix scan
     demErrchk(gpuMemcpy(SD_SphereCompositeOffsets_ScratchPad.data(), SD_SphereCompositeOffsets.data(), nSDs * sizeof(unsigned int), gpuMemcpyDeviceToDevice));
@@ -572,8 +579,11 @@ __host__ void ChSystemDem_impl::runSphereBroadphase() {
 }
 
 __host__ void ChSystemDem_impl::updateBCPositions() {
-    for (unsigned int i = 0; i < BC_params_list_UU.size(); i++) {
-        auto bc_type = BC_type_list.at(i);
+    for (unsigned int i = 0; i < BC_updated_each_step.size(); i++) {
+        // a fixed BC stays at the position set in convertBCUnits; skipping it avoids writing the managed BC list
+        if (!BC_updated_each_step[i])
+            continue;
+        auto bc_type = BC_type_list_host[i];
         const BC_params_t<float, float3>& params_UU = BC_params_list_UU.at(i);
         BC_params_t<int64_t, int64_t3>& params_SU = BC_params_list_SU.at(i);
         auto offset_function = BC_offset_function_list.at(i);

@@ -16,6 +16,7 @@
 #include <vector>
 #include <algorithm>
 #include <climits>
+#include <cstring>
 
 #include "chrono/core/ChVector3.h"
 #include "chrono/utils/ChUtils.h"
@@ -140,72 +141,82 @@ size_t ChSystemDem_impl::EstimateMemUsage() const {
 }
 
 void ChSystemDem_impl::packSphereDataPointers() {
-    // Set data from system
-    sphere_data->sphere_local_pos_X = sphere_local_pos_X.data();
-    sphere_data->sphere_local_pos_Y = sphere_local_pos_Y.data();
-    sphere_data->sphere_local_pos_Z = sphere_local_pos_Z.data();
-    sphere_data->pos_X_dt = pos_X_dt.data();
-    sphere_data->pos_Y_dt = pos_Y_dt.data();
-    sphere_data->pos_Z_dt = pos_Z_dt.data();
+    // Pack the pointers into a copy of the host structure. The device reads sphere_data at every step, so the managed
+    // structure is written only when a pointer changed.
+    SphereData packed = sphere_data_host;
 
-    sphere_data->sphere_owner_SDs = sphere_owner_SDs.data();
+    // Set data from system
+    packed.sphere_local_pos_X = sphere_local_pos_X.data();
+    packed.sphere_local_pos_Y = sphere_local_pos_Y.data();
+    packed.sphere_local_pos_Z = sphere_local_pos_Z.data();
+    packed.pos_X_dt = pos_X_dt.data();
+    packed.pos_Y_dt = pos_Y_dt.data();
+    packed.pos_Z_dt = pos_Z_dt.data();
+
+    packed.sphere_owner_SDs = sphere_owner_SDs.data();
 
     if (gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS) {
-        sphere_data->sphere_Omega_X = sphere_Omega_X.data();
-        sphere_data->sphere_Omega_Y = sphere_Omega_Y.data();
-        sphere_data->sphere_Omega_Z = sphere_Omega_Z.data();
-        sphere_data->sphere_ang_acc_X = sphere_ang_acc_X.data();
-        sphere_data->sphere_ang_acc_Y = sphere_ang_acc_Y.data();
-        sphere_data->sphere_ang_acc_Z = sphere_ang_acc_Z.data();
+        packed.sphere_Omega_X = sphere_Omega_X.data();
+        packed.sphere_Omega_Y = sphere_Omega_Y.data();
+        packed.sphere_Omega_Z = sphere_Omega_Z.data();
+        packed.sphere_ang_acc_X = sphere_ang_acc_X.data();
+        packed.sphere_ang_acc_Y = sphere_ang_acc_Y.data();
+        packed.sphere_ang_acc_Z = sphere_ang_acc_Z.data();
     }
 
-    sphere_data->sphere_acc_X = sphere_acc_X.data();
-    sphere_data->sphere_acc_Y = sphere_acc_Y.data();
-    sphere_data->sphere_acc_Z = sphere_acc_Z.data();
+    packed.sphere_acc_X = sphere_acc_X.data();
+    packed.sphere_acc_Y = sphere_acc_Y.data();
+    packed.sphere_acc_Z = sphere_acc_Z.data();
 
     if (time_integrator == CHDEM_TIME_INTEGRATOR::CHUNG) {
-        sphere_data->sphere_acc_X_old = sphere_acc_X_old.data();
-        sphere_data->sphere_acc_Y_old = sphere_acc_Y_old.data();
-        sphere_data->sphere_acc_Z_old = sphere_acc_Z_old.data();
+        packed.sphere_acc_X_old = sphere_acc_X_old.data();
+        packed.sphere_acc_Y_old = sphere_acc_Y_old.data();
+        packed.sphere_acc_Z_old = sphere_acc_Z_old.data();
         if (gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS) {
-            sphere_data->sphere_ang_acc_X_old = sphere_ang_acc_X_old.data();
-            sphere_data->sphere_ang_acc_Y_old = sphere_ang_acc_Y_old.data();
-            sphere_data->sphere_ang_acc_Z_old = sphere_ang_acc_Z_old.data();
+            packed.sphere_ang_acc_X_old = sphere_ang_acc_X_old.data();
+            packed.sphere_ang_acc_Y_old = sphere_ang_acc_Y_old.data();
+            packed.sphere_ang_acc_Z_old = sphere_ang_acc_Z_old.data();
         }
     }
 
-    sphere_data->sphere_fixed = sphere_fixed.data();
+    packed.sphere_fixed = sphere_fixed.data();
 
-    sphere_data->sphere_stats_buffer = sphere_stats_buffer.data();
-    sphere_data->sphere_stats_buffer_int = sphere_stats_buffer_int.data();
+    packed.sphere_stats_buffer = sphere_stats_buffer.data();
+    packed.sphere_stats_buffer_int = sphere_stats_buffer_int.data();
 
-    sphere_data->SD_NumSpheresTouching = SD_NumSpheresTouching.data();
-    sphere_data->SD_SphereCompositeOffsets = SD_SphereCompositeOffsets.data();
-    sphere_data->SD_SphereCompositeOffsets_SP = SD_SphereCompositeOffsets_ScratchPad.data();
-    sphere_data->spheres_in_SD_composite = spheres_in_SD_composite.data();
+    packed.SD_NumSpheresTouching = SD_NumSpheresTouching.data();
+    packed.SD_SphereCompositeOffsets = SD_SphereCompositeOffsets.data();
+    packed.SD_SphereCompositeOffsets_SP = SD_SphereCompositeOffsets_ScratchPad.data();
+    packed.spheres_in_SD_composite = spheres_in_SD_composite.data();
 
     if (gran_params->friction_mode == CHDEM_FRICTION_MODE::MULTI_STEP || gran_params->friction_mode == CHDEM_FRICTION_MODE::SINGLE_STEP) {
-        sphere_data->contact_partners_map = contact_partners_map.data();
-        sphere_data->contact_active_map = contact_active_map.data();
+        packed.contact_partners_map = contact_partners_map.data();
+        packed.contact_active_map = contact_active_map.data();
     }
 
     if (gran_params->friction_mode == CHDEM_FRICTION_MODE::MULTI_STEP) {
-        sphere_data->contact_history_map = contact_history_map.data();
-        sphere_data->contact_duration = contact_duration.data();
+        packed.contact_history_map = contact_history_map.data();
+        packed.contact_duration = contact_duration.data();
     }
 
     if (gran_params->recording_contactInfo == true) {
-        sphere_data->normal_contact_force = normal_contact_force.data();
+        packed.normal_contact_force = normal_contact_force.data();
 
         if (gran_params->friction_mode != CHDEM_FRICTION_MODE::FRICTIONLESS) {
-            sphere_data->tangential_friction_force = tangential_friction_force.data();
+            packed.tangential_friction_force = tangential_friction_force.data();
         }
 
         if (gran_params->rolling_mode != CHDEM_ROLLING_MODE::NO_RESISTANCE) {
-            sphere_data->rolling_friction_torque = rolling_friction_torque.data();
-            sphere_data->char_collision_time = char_collision_time.data();
-            sphere_data->v_rot_array = v_rot_array.data();
+            packed.rolling_friction_torque = rolling_friction_torque.data();
+            packed.char_collision_time = char_collision_time.data();
+            packed.v_rot_array = v_rot_array.data();
         }
+    }
+
+    if (!sphere_data_host_valid || std::memcmp(&packed, &sphere_data_host, sizeof(SphereData)) != 0) {
+        sphere_data_host = packed;
+        sphere_data_host_valid = true;
+        demErrchk(gpuMemcpy(sphere_data, &sphere_data_host, sizeof(SphereData), gpuMemcpyHostToDevice));
     }
 }
 
@@ -636,12 +647,12 @@ void ChSystemDem_impl::WriteContactInfoFile(const std::string& outfilename) cons
 
 // Reset broadphase data structures
 void ChSystemDem_impl::resetBCForces() {
-    // zero out reaction forces on each BC
-    for (unsigned int i = 0; i < BC_params_list_SU.size(); i++) {
-        if (BC_params_list_SU.at(i).track_forces) {
+    // zero out reaction forces on each BC that tracks them (the host flags avoid reading the managed BC lists)
+    for (unsigned int i = 0; i < BC_track_forces_host.size(); i++) {
+        if (BC_track_forces_host[i]) {
             BC_params_list_SU.at(i).reaction_forces = {0, 0, 0};
 
-            if (BC_type_list.at(i) == BC_type::SPHERE) {
+            if (BC_type_list_host[i] == BC_type::SPHERE) {
                 BC_params_list_SU.at(i).sphere_params.reaction_torques = {0, 0, 0};
             }
         }
@@ -1123,7 +1134,17 @@ void ChSystemDem_impl::convertBCUnits() {
         }
 
         // always start at rest
-        params_SU.vel_SU = {0, 0, 0};
+        BC_params_list_SU.back().vel_SU = {0, 0, 0};
+    }
+
+    // Host copies of what the host needs at every step. A BC that is fixed and not a sphere is already at its position
+    // (zero offset) and at rest, so it does not need to be updated at every step.
+    BC_type_list_host.assign(BC_type_list.begin(), BC_type_list.end());
+    BC_track_forces_host.resize(BC_type_list_host.size());
+    BC_updated_each_step.resize(BC_type_list_host.size());
+    for (size_t i = 0; i < BC_type_list_host.size(); i++) {
+        BC_track_forces_host[i] = BC_params_list_UU[i].track_forces;
+        BC_updated_each_step[i] = BC_type_list_host[i] == BC_type::SPHERE || !BC_params_list_UU[i].fixed;
     }
 }
 
