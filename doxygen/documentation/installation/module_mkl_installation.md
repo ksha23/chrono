@@ -38,9 +38,11 @@ Intel MKL 2023 is known to work fine with Eigen (and therefore Chrono) on both L
     - `C:/Program Files (x86)/Intel/oneAPI/mkl/2023.0.0/lib/cmake/mkl` (Windows)
 	- `/opt/intel/oneapi/mkl/latest/lib/cmake/mkl` (Linux)
 
-3. Press 'Configure' again and then 'Generate'
+3. The MKL threading layer is selected with the advanced CMake variable `MKL_THREADING`. It must use the same OpenMP runtime as the rest of Chrono, otherwise two OpenMP runtimes end up in the same process and multithreaded Pardiso may fail (for example, ANALYZE returning `InvalidInput`) or crash. By default, `MKL_THREADING` is set to `gnu_thread` if Chrono uses the GNU OpenMP runtime (libgomp, e.g. GCC builds) and to `intel_thread` otherwise. The selected layer is printed during configuration. Use `sequential` to disable MKL threading altogether.
 
-4. Building this module will produce an additional shared library, called **Chrono_pardisomkl**, which can be linked to your application.
+4. Press 'Configure' again and then 'Generate'
+
+5. Building this module will produce an additional shared library, called **Chrono_pardisomkl**, which can be linked to your application.
 
 ## How to use it
 
@@ -67,6 +69,7 @@ The following unofficial method needs that you set the environmental variable of
 	`MKL_INTERFACE_LAYER` = `LP64`<br>
 	`MKL_THREADING_LAYER` = `INTEL`<br>
 	or, more in general, you can have [different options](https://software.intel.com/en-us/mkl-linux-developer-guide-dynamically-selecting-the-interface-and-threading-layer), depending on your Architecture and the desired Threading Layer.
+	These variables are only read by the single dynamic library runtime (`MKL_LINK=sdl`, i.e. `mkl_rt`). `MKL_THREADING_LAYER` must match the OpenMP runtime used by Chrono: use `GNU` for GCC builds that use the GNU OpenMP runtime (libgomp), and `INTEL` otherwise (see `MKL_THREADING` above).
 
 2. reboot your IDE, close any open CMake
 
