@@ -129,6 +129,53 @@ TEST_P(SolveFailure, setup_fails) {
     EXPECT_EQ(solver->num_unfactored_solves, 0);
 }
 
+// Transient setup failure after a few healthy steps: the exception must leave the system at the state and time of the
+// beginning of the failed step, and a caller that catches it and steps again must reproduce the trajectory of a run
+// without the failure.
+TEST_P(SolveFailure, recover_after_setup_failure) {
+    const double step = 1e-3;
+
+    // Reference run without failure
+    ChSystemSMC sys_ref;
+    CreatePendulum(sys_ref, GetParam());
+    for (int i = 0; i < 5; i++)
+        ASSERT_NO_THROW(sys_ref.DoStepDynamics(step));
+    auto pend_ref = sys_ref.GetBodies()[1];
+
+    // Run with a failed setup at the third step
+    ChSystemSMC sys;
+    auto solver = CreatePendulum(sys, GetParam());
+    auto pend = sys.GetBodies()[1];
+    ASSERT_NO_THROW(sys.DoStepDynamics(step));
+    ASSERT_NO_THROW(sys.DoStepDynamics(step));
+
+    double time = sys.GetChTime();
+    ChVector3d pos = pend->GetPos();
+    ChQuaterniond rot = pend->GetRot();
+    ChVector3d vel = pend->GetPosDt();
+    ChVector3d angvel = pend->GetAngVelLocal();
+
+    solver->fail_next = true;
+    EXPECT_THROW(sys.DoStepDynamics(step), std::runtime_error);
+    EXPECT_EQ(solver->num_failed_setups, 1);
+
+    // State and time are those at the beginning of the failed step
+    EXPECT_EQ(sys.GetChTime(), time);
+    EXPECT_EQ(pend->GetPos(), pos);
+    EXPECT_EQ(pend->GetRot(), rot);
+    EXPECT_EQ(pend->GetPosDt(), vel);
+    EXPECT_EQ(pend->GetAngVelLocal(), angvel);
+
+    // Stepping again reproduces the reference run
+    for (int i = 0; i < 3; i++)
+        ASSERT_NO_THROW(sys.DoStepDynamics(step));
+    EXPECT_EQ(solver->num_unfactored_solves, 0);
+    EXPECT_EQ(solver->num_unanalyzed_setups, 0);
+    EXPECT_NEAR(sys.GetChTime(), sys_ref.GetChTime(), 1e-15);
+    EXPECT_NEAR((pend->GetPos() - pend_ref->GetPos()).Length(), 0, 1e-12);
+    EXPECT_NEAR((pend->GetPosDt() - pend_ref->GetPosDt()).Length(), 0, 1e-12);
+}
+
 INSTANTIATE_TEST_SUITE_P(CH_timestepper,
                          SolveFailure,
                          ::testing::Values(ChTimestepper::Type::EULER_IMPLICIT,
@@ -148,10 +195,12 @@ TEST(CH_timestepper, HHT_recover_after_setup_failure) {
 
     ASSERT_NO_THROW(sys.DoStepDynamics(1e-3));
     ASSERT_NO_THROW(sys.DoStepDynamics(1e-3));
+    double time = sys.GetChTime();
 
     solver->fail_next = true;
     EXPECT_THROW(sys.DoStepDynamics(1e-3), std::runtime_error);
     EXPECT_EQ(solver->num_failed_setups, 1);
+    EXPECT_EQ(sys.GetChTime(), time);  // HHT scatters its predictor at T + h before the solve; T must be restored
 
     EXPECT_NO_THROW(sys.DoStepDynamics(1e-3));
     EXPECT_EQ(solver->num_unfactored_solves, 0);

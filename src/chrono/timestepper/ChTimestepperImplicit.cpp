@@ -289,7 +289,10 @@ void ChTimestepperImplicit::OnAdvance(double dt) {
     call_setup = false;
 }
 
-void ChTimestepperImplicit::OnSolveFailure() {
+void ChTimestepperImplicit::OnSolveFailure(ChIntegrableIIorder* intgr, const ChState& x, const ChStateDelta& v, double t) {
+    // Restore the last accepted state (the system may hold a Newton iterate at the end of the step)
+    intgr->StateScatter(x, v, t, UpdateFlags::UPDATE_ALL_NO_VISUAL);
+
     // Force a full solver setup (including the analyze phase) if the caller attempts another step
     solve_failed = true;
 
@@ -424,7 +427,7 @@ void ChTimestepperEulerImplicit::OnAdvance(double dt) {
             true                                          // always call the solver's Setup analyze phase
         );
         if (!success)
-            OnSolveFailure();
+            OnSolveFailure(integrable, X, V, T);
 
         num_step_iters++;
         num_step_setups++;
@@ -522,7 +525,7 @@ void ChTimestepperEulerImplicitLinearized::OnAdvance(double dt) {
         true                                          // always call the solver's Setup analyze phase
     );
     if (!success)
-        OnSolveFailure();
+        OnSolveFailure(integrable, X, Vold, T);
 
     L *= (1.0 / dt);  // Note it is not -(1.0/dt) because we assume StateSolveCorrection already flips sign of Dl
 
@@ -600,9 +603,14 @@ void ChTimestepperEulerImplicitProjected::OnAdvance(double dt) {
         true                                          // always call the solver's Setup analyze phase
     );
     if (!success)
-        OnSolveFailure();
+        OnSolveFailure(integrable, X, Vold, T);
 
     L *= (1.0 / dt);  // Note it is not -(1.0/dt) because we assume StateSolveCorrection already flips sign of Dl
+
+    // Keep the state at the beginning of the step, to restore it if the stabilization solve fails
+    ChState X0 = X;
+    ChStateDelta V0 = Vold;
+    double T0 = T;
 
     X += V * dt;
 
@@ -639,7 +647,7 @@ void ChTimestepperEulerImplicitProjected::OnAdvance(double dt) {
         true                                     // always call the solver's Setup analyze phase
     );
     if (!success)
-        OnSolveFailure();
+        OnSolveFailure(integrable, X0, V0, T0);
 
     X += Vold;  // here we used 'Vold' as 'dpos' to recycle Vold and avoid allocating a new vector dpos
 
@@ -739,7 +747,7 @@ void ChTimestepperTrapezoidal::OnAdvance(double dt) {
             true                                          // always call the solver's Setup analyze phase
         );
         if (!success)
-            OnSolveFailure();
+            OnSolveFailure(integrable, X, V, T);
 
         num_step_iters++;
         num_step_setups++;
@@ -842,7 +850,7 @@ void ChTimestepperTrapezoidalLinearized::OnAdvance(double dt) {
         true                                          // always call the solver's Setup analyze phase
     );
     if (!success)
-        OnSolveFailure();
+        OnSolveFailure(integrable, X, V, T);
 
     num_step_iters = 1;
     num_step_setups = 1;
@@ -982,7 +990,7 @@ void ChTimestepperNewmark::OnAdvance(double dt) {
             call_analyze                                  // if true, call the solver's Setup analyze phase
         );
         if (!success)
-            OnSolveFailure();
+            OnSolveFailure(integrable, X, V, T);
 
         num_step_iters++;
         num_step_solves++;

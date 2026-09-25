@@ -147,7 +147,7 @@ void ChTimestepperHHT::Increment() {
                                                     call_analyze                        // if true, call the solver's Setup analyze phase
     );
     if (!success)
-        OnSolveFailure();
+        OnSolveFailure(integrable, X, V, T);
 
     // Update estimate of state at T+h
     Lnew += Dl;  // not -= Dl because we assume StateSolveCorrection flips sign of Dl
