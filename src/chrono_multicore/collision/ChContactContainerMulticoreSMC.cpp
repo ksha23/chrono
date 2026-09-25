@@ -129,9 +129,10 @@ void ChContactContainerMulticoreSMC::AddContact(int index, int b1, int s1, int b
     auto shape1 = modelA->m_shapes[s1_index].get();
     auto shape2 = modelB->m_shapes[s2_index].get();
 
-    // Contact materials of the two colliding shapes
-    auto mat1 = std::static_pointer_cast<ChContactMaterialSMC>(shape1->GetMaterial());
-    auto mat2 = std::static_pointer_cast<ChContactMaterialSMC>(shape2->GetMaterial());
+    // Contact materials of the two colliding shapes.
+    // Use raw pointers: copying the shared_ptrs would update the (typically shared) control block from every thread.
+    auto mat1 = static_cast<const ChContactMaterialSMC*>(shape1->GetMaterial().get());
+    auto mat2 = static_cast<const ChContactMaterialSMC*>(shape2->GetMaterial().get());
 
     // Composite material
     ChContactMaterialCompositeSMC cmat(data_manager->composition_strategy.get(), mat1, mat2);
