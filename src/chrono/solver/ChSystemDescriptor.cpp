@@ -654,25 +654,14 @@ void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const 
     const int nblocks = (int)m_KRMblocks.size();
     const int nthreads = std::min(m_num_threads, nblocks);
 
-    // Total number of KRM matrix entries, and the range of rows [row_begin, row_end) touched by the KRM blocks
     size_t num_entries = 0;
-    Eigen::Index row_begin = result.size();
-    Eigen::Index row_end = 0;
     if (nthreads > 1) {
-        for (const auto& krm_block : m_KRMblocks) {
+        for (const auto& krm_block : m_KRMblocks)
             num_entries += krm_block->GetMatrix().size();
-            for (unsigned int iv = 0; iv < krm_block->GetNumVariables(); iv++) {
-                const auto var = krm_block->GetVariable(iv);
-                if (var->IsActive()) {
-                    row_begin = std::min(row_begin, (Eigen::Index)var->GetOffset());
-                    row_end = std::max(row_end, (Eigen::Index)(var->GetOffset() + var->GetDOF()));
-                }
-            }
-        }
     }
 
-    if (nthreads <= 1 || num_entries < KRM_PARALLEL_MIN_ENTRIES || row_end <= row_begin) {
-        m_thread_results.clear();  // release the per-thread buffers if the parallel path is no longer used
+    if (nthreads <= 1 || num_entries < KRM_PARALLEL_MIN_ENTRIES) {
+        m_thread_results.clear();  // release the per-thread buffers if the parallel path is not used
         for (const auto& krm_block : m_KRMblocks)
             krm_block->AddMatrixTimesVectorInto(result, x);
         return;
@@ -681,34 +670,61 @@ void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const 
     // KRM blocks share variables, so they cannot write directly into 'result' concurrently.
     // Each thread accumulates a fixed, contiguous range of blocks into its own buffer; the buffers are then summed in
     // thread order. For a given number of threads, the result is therefore deterministic.
-    // Only the rows touched by KRM blocks are cleared and reduced, so the overhead scales with that range and not with
-    // the size of the whole system.
+    // Each thread clears only the rows [row_begin, row_end) touched by its blocks, and the reduction only visits those
+    // rows, so the overhead scales with the part of the system coupled by KRM blocks, not with the whole system.
     const Eigen::Index n = result.size();
     if ((int)m_thread_results.size() < nthreads)
         m_thread_results.resize(nthreads);
+    std::vector<Eigen::Index> row_begin(nthreads, n);
+    std::vector<Eigen::Index> row_end(nthreads, 0);
 
 #pragma omp parallel num_threads(nthreads)
     {
         const int nt = ChOMP::GetNumThreads();
         const int t = ChOMP::GetThreadNum();
+        const int b_start = (int)((long long)nblocks * t / nt);
+        const int b_end = (int)((long long)nblocks * (t + 1) / nt);
+
+        // Rows touched by this thread's blocks
+        Eigen::Index lo = n;
+        Eigen::Index hi = 0;
+        for (int ib = b_start; ib < b_end; ib++) {
+            const auto& krm_block = m_KRMblocks[ib];
+            for (unsigned int iv = 0; iv < krm_block->GetNumVariables(); iv++) {
+                const auto var = krm_block->GetVariable(iv);
+                if (var->IsActive()) {
+                    lo = std::min(lo, (Eigen::Index)var->GetOffset());
+                    hi = std::max(hi, (Eigen::Index)(var->GetOffset() + var->GetDOF()));
+                }
+            }
+        }
+        row_begin[t] = lo;
+        row_end[t] = hi;
 
         // Partial products over a contiguous range of blocks
         auto& buffer = m_thread_results[t];
         buffer.resize(n);
-        buffer.segment(row_begin, row_end - row_begin).setZero();
-        const int b_start = (int)((long long)nblocks * t / nt);
-        const int b_end = (int)((long long)nblocks * (t + 1) / nt);
+        if (hi > lo)
+            buffer.segment(lo, hi - lo).setZero();
         for (int ib = b_start; ib < b_end; ib++)
             m_KRMblocks[ib]->AddMatrixTimesVectorInto(buffer, x);
 
 #pragma omp barrier
 
-        // Ordered reduction of the per-thread buffers, parallel over rows
+        // Ordered reduction of the per-thread buffers, parallel over the rows touched by any thread
+        Eigen::Index i_start = n;
+        Eigen::Index i_end = 0;
+        for (int k = 0; k < nt; k++) {
+            i_start = std::min(i_start, row_begin[k]);
+            i_end = std::max(i_end, row_end[k]);
+        }
 #pragma omp for schedule(static)
-        for (Eigen::Index i = row_begin; i < row_end; i++) {
+        for (Eigen::Index i = i_start; i < i_end; i++) {
             double sum = 0;
-            for (int k = 0; k < nt; k++)
-                sum += m_thread_results[k](i);
+            for (int k = 0; k < nt; k++) {
+                if (i >= row_begin[k] && i < row_end[k])
+                    sum += m_thread_results[k](i);
+            }
             result(i) += sum;
         }
     }
