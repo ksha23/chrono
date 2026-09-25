@@ -17,6 +17,7 @@
 //
 // =============================================================================
 
+#include <algorithm>
 #include <cstdio>
 #include <cmath>
 #include <queue>
@@ -1522,72 +1523,96 @@ void SCMLoader::ComputeInternalForces() {
         // Map-reduce approach (to eliminate critical section)
 
         const int nthreads = GetSystem()->GetNumThreadsChrono();
-        std::vector<std::unordered_map<ChVector2i, HitRecord, CoordHash> > t_hits(nthreads);
 
-        // Loop through all active domains (user-defined or default one)
-        for (auto& p : m_active_domains) {
-            m_timer_ray_testing.start();
+        // Concatenate the node ranges of all active domains into a single index space and cast all rays in one
+        // parallel loop. Dynamic scheduling balances the load across threads: rays inside the footprint of the
+        // tracked body are much more expensive than rejected rays, and they are concentrated in a few grid rows.
+        const int num_domains = (int)m_active_domains.size();
+        m_ray_domain_offsets.resize(num_domains + 1);
+        m_ray_domain_offsets[0] = 0;
+        for (int id = 0; id < num_domains; id++)
+            m_ray_domain_offsets[id + 1] = m_ray_domain_offsets[id] + (int)m_active_domains[id].m_range.size();
+        const int num_nodes = m_ray_domain_offsets[num_domains];
 
-            // Loop through all vertices in the patch range
-            int num_ray_casts = 0;
-    #pragma omp parallel for num_threads(nthreads) reduction(+ : num_ray_casts)
-            for (int k = 0; k < p.m_range.size(); k++) {
-                int t_num = ChOMP::GetThreadNum();
-                ChVector2i ij = p.m_range[k];
+        // Per-thread hit buffers (persistent, to avoid reallocation at each step)
+        if ((int)m_ray_thread_hits.size() < nthreads)
+            m_ray_thread_hits.resize(nthreads);
+        for (auto& t_hits : m_ray_thread_hits)
+            t_hits.hits.clear();
 
-                // Move from (i, j) to (x, y, z) representation in the world frame
-                double x = ij.x() * m_delta;
-                double y = ij.y() * m_delta;
-                double z = GetHeight(ij);
+        m_timer_ray_testing.start();
 
-                // If enabled, check if current grid node in user-specified boundary
-                if (m_boundary) {
-                    if (x > m_aabb.max.x() || x < m_aabb.min.x() || y > m_aabb.max.y() || y < m_aabb.min.y())
-                        continue;
-                }
+        int num_ray_casts = 0;
+    #pragma omp parallel for num_threads(nthreads) schedule(dynamic, 64) reduction(+ : num_ray_casts)
+        for (int k = 0; k < num_nodes; k++) {
+            int t_num = ChOMP::GetThreadNum();
 
-                ChVector3d vertex_abs = m_frame.TransformPointLocalToParent(ChVector3d(x, y, z));
+            // Find the active domain for this node
+            int id = (int)(std::upper_bound(m_ray_domain_offsets.begin(), m_ray_domain_offsets.end(), k) -
+                           m_ray_domain_offsets.begin()) -
+                     1;
+            const auto& p = m_active_domains[id];
+            ChVector2i ij = p.m_range[k - m_ray_domain_offsets[id]];
 
-                // Create ray at current grid location
-                ChCollisionSystem::ChRayhitResult mrayhit_result;
-                ChVector3d to = vertex_abs + m_Z * m_test_offset_up;
-                ChVector3d from = to - m_Z * m_test_offset_down;
+            // Move from (i, j) to (x, y, z) representation in the world frame
+            double x = ij.x() * m_delta;
+            double y = ij.y() * m_delta;
+            double z = GetHeight(ij);
 
-                // Ray-OBB test (quick rejection)
-                if (m_user_domains && !RayOBBtest(p, from, m_Z))
+            // If enabled, check if current grid node in user-specified boundary
+            if (m_boundary) {
+                if (x > m_aabb.max.x() || x < m_aabb.min.x() || y > m_aabb.max.y() || y < m_aabb.min.y())
                     continue;
-
-                // Cast ray into collision system
-                GetSystem()->GetCollisionSystem()->RayHit(from, to, mrayhit_result);
-                num_ray_casts++;
-
-                if (mrayhit_result.hit) {
-                    // Add to our map of hits to process
-                    HitRecord record = {mrayhit_result.hitModel->GetContactable(), mrayhit_result.abs_hitPoint, -1};
-                    t_hits[t_num].insert(std::make_pair(ij, record));
-                }
             }
 
-            m_timer_ray_testing.stop();
+            ChVector3d vertex_abs = m_frame.TransformPointLocalToParent(ChVector3d(x, y, z));
 
-            m_num_ray_casts += num_ray_casts;
+            // Create ray at current grid location
+            ChCollisionSystem::ChRayhitResult mrayhit_result;
+            ChVector3d to = vertex_abs + m_Z * m_test_offset_up;
+            ChVector3d from = to - m_Z * m_test_offset_down;
 
-            // Sequential insertion in global hits
-            for (int t_num = 0; t_num < nthreads; t_num++) {
-                for (auto& h : t_hits[t_num]) {
-                    // If this is the first hit from this node, initialize the node record
-                    if (m_grid_map.find(h.first) == m_grid_map.end()) {
-                        double z = GetInitHeight(h.first);
-                        m_grid_map.insert(std::make_pair(h.first, NodeRecord(z, z, GetInitNormal(h.first))));
-                    }
-                    ////hits.insert(h);
-                }
+            // Ray-OBB test (quick rejection)
+            if (m_user_domains && !RayOBBtest(p, from, m_Z))
+                continue;
 
-                hits.insert(t_hits[t_num].begin(), t_hits[t_num].end());
-                t_hits[t_num].clear();
+            // Cast ray into collision system
+            GetSystem()->GetCollisionSystem()->RayHit(from, to, mrayhit_result);
+            num_ray_casts++;
+
+            if (mrayhit_result.hit) {
+                // Add to the list of hits found by this thread
+                RaycastHit rh = {ij, mrayhit_result.hitModel->GetContactable(), mrayhit_result.abs_hitPoint};
+                m_ray_thread_hits[t_num].hits.push_back(std::make_pair(k, rh));
             }
-            m_num_ray_hits = (int)hits.size();
         }
+
+        m_timer_ray_testing.stop();
+
+        m_num_ray_casts += num_ray_casts;
+
+        // Merge the per-thread hits, sorted by index in the concatenated node range (i.e., in order of active
+        // domains and, within a domain, in grid order). This makes the global map of hits, and all quantities
+        // computed from it, independent of the number of threads and of the loop scheduling. As before, if a
+        // node is covered by more than one active domain, the hit from the first such domain is used.
+        m_ray_merged_hits.clear();
+        for (const auto& t_hits : m_ray_thread_hits)
+            m_ray_merged_hits.insert(m_ray_merged_hits.end(), t_hits.hits.begin(), t_hits.hits.end());
+        std::sort(m_ray_merged_hits.begin(), m_ray_merged_hits.end(),
+                  [](const std::pair<int, RaycastHit>& a, const std::pair<int, RaycastHit>& b) { return a.first < b.first; });
+
+        // Sequential insertion in global hits
+        for (const auto& h : m_ray_merged_hits) {
+            const auto& rh = h.second;
+            // If this is the first hit from this node, initialize the node record
+            if (m_grid_map.find(rh.ij) == m_grid_map.end()) {
+                double z = GetInitHeight(rh.ij);
+                m_grid_map.insert(std::make_pair(rh.ij, NodeRecord(z, z, GetInitNormal(rh.ij))));
+            }
+            HitRecord record = {rh.contactable, rh.abs_point, -1};
+            hits.insert(std::make_pair(rh.ij, record));
+        }
+        m_num_ray_hits = (int)hits.size();
 
 #endif
 

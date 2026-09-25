@@ -681,6 +681,15 @@ class CH_VEHICLE_API SCMLoader : public ChLoadContainer {
     std::vector<ActiveDomainInfo> m_active_domains;  ///< set of active domains
     bool m_user_domains;                             ///< user-specified active domains?
 
+    // Per-thread ray-cast hits, each tagged with its index in the concatenated active-domain node ranges.
+    // Aligned to separate cache lines, since the buffers are written concurrently.
+    struct alignas(64) ThreadRayHits {
+        std::vector<std::pair<int, RaycastHit>> hits;
+    };
+    std::vector<int> m_ray_domain_offsets;                   ///< start of each active domain in the node index space
+    std::vector<ThreadRayHits> m_ray_thread_hits;            ///< per-thread ray-cast hits (reused across steps)
+    std::vector<std::pair<int, RaycastHit>> m_ray_merged_hits;  ///< ray-cast hits of all threads, sorted
+
     double m_test_offset_down;  ///< offset for ray start
     double m_test_offset_up;    ///< offset for ray end
 
