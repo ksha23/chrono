@@ -31,6 +31,7 @@ ChTimestepperImplicit::ChTimestepperImplicit()
       call_setup(true),
       call_analyze(true),
       jacobian_is_current(false),
+      solve_failed(false),
       max_iters(6),
       reltol(1e-4),
       abstolS(1e-10),
@@ -101,11 +102,12 @@ void ChTimestepperImplicit::OnAdvance(double dt) {
     // - at the first iteration on the first step
     // - after a call to SetJacobianUpdateMethod(JacobianUpdate::NEVER)
 
-    // If the integrable object was modified, force a call to setup (including the analyze phase).
-    // Otherwise, a potential call to setup need not include the analyze phase.
-    if (GetIntegrable()->StateModified()) {
+    // If the integrable object was modified or if the solver setup failed in a previous attempt, force a call to setup
+    // (including the analyze phase). Otherwise, a potential call to setup need not include the analyze phase.
+    if (GetIntegrable()->StateModified() || solve_failed) {
         call_setup = true;
         call_analyze = true;
+        solve_failed = false;
         if (verbose)
             cout << "  Force full Setup" << endl;
     } else {
@@ -287,6 +289,17 @@ void ChTimestepperImplicit::OnAdvance(double dt) {
     call_setup = false;
 }
 
+void ChTimestepperImplicit::OnSolveFailure(ChIntegrableIIorder* intgr, const ChState& x, const ChStateDelta& v, double t) {
+    // Restore the last accepted state (the system may hold a Newton iterate at the end of the step)
+    intgr->StateScatter(x, v, t, UpdateFlags::UPDATE_ALL_NO_VISUAL);
+
+    // Force a full solver setup (including the analyze phase) if the caller attempts another step
+    solve_failed = true;
+
+    cerr << "  [ERROR] Linear solve failed in " << GetTypeAsString() << " integrator at T = " << T << ". Exiting." << endl;
+    throw std::runtime_error("Linear solve failed in " + GetTypeAsString() + " integrator.");
+}
+
 // Check convergence of Newton process.
 bool ChTimestepperImplicit::CheckConvergence(int it) {
     bool pass = false;
@@ -402,17 +415,19 @@ void ChTimestepperEulerImplicit::OnAdvance(double dt) {
         if ((R.lpNorm<Eigen::Infinity>() < abstolS) && (Qc.lpNorm<Eigen::Infinity>() < abstolL))
             break;
 
-        integrable->StateSolveCorrection(       //
-            Ds, Dl, R, Qc,                      //
-            1.0,                                // factor for M
-            -dt,                                // factor for dF/dv
-            -dt * dt,                           // factor for dF/dx
-            Xnew, Vnew, T + dt,                 // not used here (scatter = false)
-            false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
-            UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-            true,                               // always call the solver's Setup
-            true                                // always call the solver's Setup analyze phase
+        bool success = integrable->StateSolveCorrection(  //
+            Ds, Dl, R, Qc,                                //
+            1.0,                                          // factor for M
+            -dt,                                          // factor for dF/dv
+            -dt * dt,                                     // factor for dF/dx
+            Xnew, Vnew, T + dt,                           // not used here (scatter = false)
+            false,                                        // do not scatter update to Xnew Vnew T+dt before computing correction
+            UpdateFlags::UPDATE_ALL_NO_VISUAL,            // no need for full update, since no scatter
+            true,                                         // always call the solver's Setup
+            true                                          // always call the solver's Setup analyze phase
         );
+        if (!success)
+            OnSolveFailure(integrable, X, V, T);
 
         num_step_iters++;
         num_step_setups++;
@@ -498,17 +513,19 @@ void ChTimestepperEulerImplicitLinearized::OnAdvance(double dt) {
                                  Qc_clamping);  // Qc = C/dt  (sign will be flipped later in StateSolveCorrection) (for vel constr. Qc = C)
     integrable->LoadConstraint_Ct(Qc, 1.0, dt); // Qc += Ct  (sign will be flipped later in StateSolveCorrection) (for vel constr. Qc += Ct*h)
 
-    integrable->StateSolveCorrection(       //
-        V, L, R, Qc,                        //
-        1.0,                                // factor for  M
-        -dt,                                // factor for  dF/dv
-        -dt * dt,                           // factor for  dF/dx
-        X, V, T + dt,                       // not needed
-        false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
-        UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-        true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+    bool success = integrable->StateSolveCorrection(  //
+        V, L, R, Qc,                                  //
+        1.0,                                          // factor for  M
+        -dt,                                          // factor for  dF/dv
+        -dt * dt,                                     // factor for  dF/dx
+        X, V, T + dt,                                 // not needed
+        false,                                        // do not scatter update to Xnew Vnew T+dt before computing correction
+        UpdateFlags::UPDATE_ALL_NO_VISUAL,            // no need for full update, since no scatter
+        true,                                         // always call the solver's Setup
+        true                                          // always call the solver's Setup analyze phase
     );
+    if (!success)
+        OnSolveFailure(integrable, X, Vold, T);
 
     L *= (1.0 / dt);  // Note it is not -(1.0/dt) because we assume StateSolveCorrection already flips sign of Dl
 
@@ -574,19 +591,26 @@ void ChTimestepperEulerImplicitProjected::OnAdvance(double dt) {
     integrable->LoadConstraint_C(Qc, 1.0 / dt, 1.0, Qc_do_clamp, 0);  // Qc = C/dt  ...may be avoided...
     integrable->LoadConstraint_Ct(Qc, 1.0, dt);  // Qc += Ct    (sign will be flipped later by StateSolveCorrection)
 
-    integrable->StateSolveCorrection(       //
-        V, L, R, Qc,                        //
-        1.0,                                // factor for M
-        -dt,                                // factor for dF/dv
-        -dt * dt,                           // factor for dF/dx
-        X, V, T + dt,                       // not needed
-        false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
-        UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-        true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+    bool success = integrable->StateSolveCorrection(  //
+        V, L, R, Qc,                                  //
+        1.0,                                          // factor for M
+        -dt,                                          // factor for dF/dv
+        -dt * dt,                                     // factor for dF/dx
+        X, V, T + dt,                                 // not needed
+        false,                                        // do not scatter update to Xnew Vnew T+dt before computing correction
+        UpdateFlags::UPDATE_ALL_NO_VISUAL,            // no need for full update, since no scatter
+        true,                                         // always call the solver's Setup
+        true                                          // always call the solver's Setup analyze phase
     );
+    if (!success)
+        OnSolveFailure(integrable, X, Vold, T);
 
     L *= (1.0 / dt);  // Note it is not -(1.0/dt) because we assume StateSolveCorrection already flips sign of Dl
+
+    // Keep the state at the beginning of the step, to restore it if the stabilization solve fails
+    ChState X0 = X;
+    ChStateDelta V0 = Vold;
+    double T0 = T;
 
     X += V * dt;
 
@@ -611,17 +635,19 @@ void ChTimestepperEulerImplicitProjected::OnAdvance(double dt) {
 
     integrable->LoadConstraint_C(Qc, 1.0, 0.0, false, 0);
 
-    integrable->StateSolveCorrection(       //
-        Vold, L, R, Qc,                     //
-        1.0,                                // factor for M
-        0,                                  // factor for dF/dv
-        0,                                  // factor for dF/dx
-        X, V, T,                            // not needed
-        false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
-        UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-        true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+    success = integrable->StateSolveCorrection(  //
+        Vold, L, R, Qc,                          //
+        1.0,                                     // factor for M
+        0,                                       // factor for dF/dv
+        0,                                       // factor for dF/dx
+        X, V, T,                                 // not needed
+        false,                                   // do not scatter update to Xnew Vnew T+dt before computing correction
+        UpdateFlags::UPDATE_ALL_NO_VISUAL,       // no need for full update, since no scatter
+        true,                                    // always call the solver's Setup
+        true                                     // always call the solver's Setup analyze phase
     );
+    if (!success)
+        OnSolveFailure(integrable, X0, V0, T0);
 
     X += Vold;  // here we used 'Vold' as 'dpos' to recycle Vold and avoid allocating a new vector dpos
 
@@ -709,17 +735,19 @@ void ChTimestepperTrapezoidal::OnAdvance(double dt) {
         if ((R.lpNorm<Eigen::Infinity>() < abstolS) && (Qc.lpNorm<Eigen::Infinity>() < abstolL))
             break;
 
-        integrable->StateSolveCorrection(       //
-            Ds, Dl, R, Qc,                      //
-            1.0,                                // factor for M
-            -dt * 0.5,                          // factor for dF/dv
-            -dt * dt * 0.25,                    // factor for dF/dx
-            Xnew, Vnew, T + dt,                 // not used here (scatter = false)
-            false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
-            UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-            true,                               // always call the solver's Setup
-            true                                // always call the solver's Setup analyze phase
+        bool success = integrable->StateSolveCorrection(  //
+            Ds, Dl, R, Qc,                                //
+            1.0,                                          // factor for M
+            -dt * 0.5,                                    // factor for dF/dv
+            -dt * dt * 0.25,                              // factor for dF/dx
+            Xnew, Vnew, T + dt,                           // not used here (scatter = false)
+            false,                                        // do not scatter update to Xnew Vnew T+dt before computing correction
+            UpdateFlags::UPDATE_ALL_NO_VISUAL,            // no need for full update, since no scatter
+            true,                                         // always call the solver's Setup
+            true                                          // always call the solver's Setup analyze phase
         );
+        if (!success)
+            OnSolveFailure(integrable, X, V, T);
 
         num_step_iters++;
         num_step_setups++;
@@ -810,17 +838,19 @@ void ChTimestepperTrapezoidalLinearized::OnAdvance(double dt) {
     integrable->LoadConstraint_C(Qc, 1.0 / dt, 1.0, Qc_do_clamp,
                                  Qc_clamping);  // Qc= C/dt  (sign will be flipped later in StateSolveCorrection)
 
-    integrable->StateSolveCorrection(       //
-        Ds, Dl, R, Qc,                      //
-        1.0,                                // factor for M
-        -dt * 0.5,                          // factor for dF/dv
-        -dt * dt * 0.25,                    // factor for dF/dx
-        Xnew, Vnew, T + dt,                 // not used here (scatter = false)
-        false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
-        UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-        true,                               // always call the solver's Setup
-        true                                // always call the solver's Setup analyze phase
+    bool success = integrable->StateSolveCorrection(  //
+        Ds, Dl, R, Qc,                                //
+        1.0,                                          // factor for M
+        -dt * 0.5,                                    // factor for dF/dv
+        -dt * dt * 0.25,                              // factor for dF/dx
+        Xnew, Vnew, T + dt,                           // not used here (scatter = false)
+        false,                                        // do not scatter update to Xnew Vnew T+dt before computing correction
+        UpdateFlags::UPDATE_ALL_NO_VISUAL,            // no need for full update, since no scatter
+        true,                                         // always call the solver's Setup
+        true                                          // always call the solver's Setup analyze phase
     );
+    if (!success)
+        OnSolveFailure(integrable, X, V, T);
 
     num_step_iters = 1;
     num_step_setups = 1;
@@ -948,17 +978,19 @@ void ChTimestepperNewmark::OnAdvance(double dt) {
         if (verbose && jacobian_update_method != JacobianUpdate::EVERY_ITERATION && call_setup)
             cout << " Newmark call Setup." << endl;
 
-        integrable->StateSolveCorrection(       //
-            Ds, Dl, R, Qc,                      //
-            1.0,                                // factor for M
-            -dt * gamma,                        // factor for dF/dv
-            -dt * dt * beta,                    // factor for dF/dx
-            Xnew, Vnew, T + dt,                 // not used here (scatter = false)
-            false,                              // do not scatter update to Xnew Vnew T+dt before computing correction
-            UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-            call_setup,                         // if true, call the solver's Setup function
-            call_analyze                        // if true, call the solver's Setup analyze phase
+        bool success = integrable->StateSolveCorrection(  //
+            Ds, Dl, R, Qc,                                //
+            1.0,                                          // factor for M
+            -dt * gamma,                                  // factor for dF/dv
+            -dt * dt * beta,                              // factor for dF/dx
+            Xnew, Vnew, T + dt,                           // not used here (scatter = false)
+            false,                                        // do not scatter update to Xnew Vnew T+dt before computing correction
+            UpdateFlags::UPDATE_ALL_NO_VISUAL,            // no need for full update, since no scatter
+            call_setup,                                   // if true, call the solver's Setup function
+            call_analyze                                  // if true, call the solver's Setup analyze phase
         );
+        if (!success)
+            OnSolveFailure(integrable, X, V, T);
 
         num_step_iters++;
         num_step_solves++;

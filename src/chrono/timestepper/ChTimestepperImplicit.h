@@ -204,6 +204,13 @@ class ChApi ChTimestepperImplicit : public ChTimestepper {
     /// Check convergence of Newton process.
     bool CheckConvergence(int iteration);
 
+    /// Handle a failed StateSolveCorrection (e.g., the linear solver setup failed).
+    /// The Newton correction is unusable, so the step cannot be completed. Scatter the given state (the last accepted
+    /// state, i.e., the state at the beginning of the failed step) back to the integrable object, so that a caller that
+    /// catches the exception sees that state and time instead of a Newton iterate. Force a full solver setup (including
+    /// the analyze phase) if another step is attempted and throw an exception.
+    [[noreturn]] void OnSolveFailure(ChIntegrableIIorder* intgr, const ChState& x, const ChStateDelta& v, double t);
+
     /// Calculate error weights based on the given state and tolerances.
     void CalcErrorWeights(const ChVectorDynamic<>& x, double rtol, double atol, ChVectorDynamic<>& ewt);
 
@@ -211,6 +218,7 @@ class ChApi ChTimestepperImplicit : public ChTimestepper {
     bool call_setup;                        ///< should the solver's Setup function be called?
     bool call_analyze;                      ///< should the solver's Setup analyze phase be called?
     bool jacobian_is_current;               ///< was the Jacobian evaluated at current Newton iteration?
+    bool solve_failed;                      ///< did StateSolveCorrection fail? (reset by the generic OnAdvance)
 
     unsigned int max_iters;  ///< maximum number of iterations
     double reltol;           ///< relative tolerance

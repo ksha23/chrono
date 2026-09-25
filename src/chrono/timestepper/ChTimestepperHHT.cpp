@@ -136,16 +136,18 @@ void ChTimestepperHHT::Increment() {
         Qc_do_clamp, Qc_clamping);  //  (Qc sign will be flipped later in StateSolveCorrection)
 
     // Solve linear system
-    integrable->StateSolveCorrection(Ds, Dl, R, Qc,
-                                     1 / (1 + alpha),    // factor for  M
-                                     -h * gamma,         // factor for  dF/dv
-                                     -h * h * beta,      // factor for  dF/dx
-                                     Xnew, Vnew, T + h,  // not used here (force_scatter = false)
-                                     false,              // do not scatter states
-                                     UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
-                                     call_setup,         // if true, call the solver's Setup function
-                                     call_analyze        // if true, call the solver's Setup analyze phase
+    bool success = integrable->StateSolveCorrection(Ds, Dl, R, Qc,
+                                                    1 / (1 + alpha),                    // factor for  M
+                                                    -h * gamma,                         // factor for  dF/dv
+                                                    -h * h * beta,                      // factor for  dF/dx
+                                                    Xnew, Vnew, T + h,                  // not used here (force_scatter = false)
+                                                    false,                              // do not scatter states
+                                                    UpdateFlags::UPDATE_ALL_NO_VISUAL,  // no need for full update, since no scatter
+                                                    call_setup,                         // if true, call the solver's Setup function
+                                                    call_analyze                        // if true, call the solver's Setup analyze phase
     );
+    if (!success)
+        OnSolveFailure(integrable, X, V, T);
 
     // Update estimate of state at T+h
     Lnew += Dl;  // not -= Dl because we assume StateSolveCorrection flips sign of Dl
