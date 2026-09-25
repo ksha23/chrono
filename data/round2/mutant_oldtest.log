@@ -1,0 +1,18 @@
+Running main() from /home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/chrono_thirdparty/googletest/googletest/src/gtest_main.cc
+Note: Google Test filter = -*RepeatedFrames*
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (106 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (0 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (0 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (0 ms)
+[----------] 4 tests from PhysCamOps (107 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (107 ms total)
+[  PASSED  ] 4 tests.

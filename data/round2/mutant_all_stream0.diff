@@ -1,0 +1,61 @@
+diff --git a/src/chrono_sensor/cuda/phys_cam_ops.cu b/src/chrono_sensor/cuda/phys_cam_ops.cu
+index a5d94672b..11e0296c1 100644
+--- a/src/chrono_sensor/cuda/phys_cam_ops.cu
++++ b/src/chrono_sensor/cuda/phys_cam_ops.cu
+@@ -130,7 +130,7 @@ __host__ void cuda_phys_cam_defocus_blur(void* buf_in, void* buf_out, unsigned i
+     const int blocks_per_grid = (img_w * img_h + threads_per_block - 1) / threads_per_block;
+     
+     // Launch the kernel
+-    cuda_phys_cam_defocus_blur_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
++    cuda_phys_cam_defocus_blur_kernel<<<blocks_per_grid, threads_per_block, 0, 0>>>(
+         (__half*)buf_in, (__half*)buf_out, img_w, img_h, f, U, N, C, defocus_gain, defocus_bias
+     );
+ }
+@@ -168,7 +168,7 @@ __host__ void cuda_phys_cam_vignetting(void* buf_in_out, unsigned int img_w, uns
+     const int blocks_per_grid = (img_w * img_h + threads_per_block - 1) / threads_per_block;
+ 
+     // Launch the kernel
+-    cuda_phys_cam_vignetting_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
++    cuda_phys_cam_vignetting_kernel<<<blocks_per_grid, threads_per_block, 0, 0>>>(
+         (__half*)buf_in_out, img_w, img_h, f, L, G_vignet
+     );
+ }
+@@ -198,7 +198,7 @@ __host__ void cuda_phys_cam_aggregator(void* buf_in_out, unsigned int img_w, uns
+     const int blocks_per_grid = (img_w * img_h + threads_per_block - 1) / threads_per_block;
+ 
+     // Launch the kernel
+-    cuda_phys_cam_aggregator_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
++    cuda_phys_cam_aggregator_kernel<<<blocks_per_grid, threads_per_block, 0, 0>>>(
+         (__half*)buf_in_out, img_w, img_h, N, t, C, P, MakeRGBParams(host_rgb_QEs), G_aggregator
+     );
+ }
+@@ -252,7 +252,7 @@ __host__ void cuda_phys_cam_noise(void* buf_in_out, unsigned int img_w, unsigned
+     const int blocks_per_grid = (img_w * img_h + threads_per_block - 1) / threads_per_block;
+ 
+     // Launch the kernel
+-    cuda_phys_cam_noise_kernel<<<blocks_per_grid, threads_per_block, 0, stream>>>(
++    cuda_phys_cam_noise_kernel<<<blocks_per_grid, threads_per_block, 0, 0>>>(
+         (__half*)buf_in_out, img_w, img_h, t, MakeRGBParams(host_dark_currents), MakeRGBParams(host_noise_gains),
+         MakeRGBParams(host_sigma_reads), rng_shot, rng_FPN
+     );
+@@ -352,17 +352,17 @@ __host__ void cuda_phys_cam_expsr2dv(void* buf_in, void* buf_out, unsigned int i
+ 
+     // Launch the kernel
+     if (crf_type == 0) { // gamma correction function
+-        cuda_phys_cam_expsr2dv_kernel_gamma<<<blocks_per_grid, threads_per_block, 0, stream>>>(
++        cuda_phys_cam_expsr2dv_kernel_gamma<<<blocks_per_grid, threads_per_block, 0, 0>>>(
+             (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, gains, biases, gamma
+         );
+     }
+     else if (crf_type == 1) { // sigmoid function
+-        cuda_phys_cam_expsr2dv_kernel_sigmoid<<<blocks_per_grid, threads_per_block, 0, stream>>>(
++        cuda_phys_cam_expsr2dv_kernel_sigmoid<<<blocks_per_grid, threads_per_block, 0, 0>>>(
+             (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, gains, biases
+         );
+     }
+     else if (crf_type == 2) { // linear function
+-        cuda_phys_cam_expsr2dv_kernel_linear<<<blocks_per_grid, threads_per_block, 0, stream>>>(
++        cuda_phys_cam_expsr2dv_kernel_linear<<<blocks_per_grid, threads_per_block, 0, 0>>>(
+             (__half*)buf_in, (__half*)buf_out, img_w, img_h, ISO, gains, biases
+         );
+     }

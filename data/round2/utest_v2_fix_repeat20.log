@@ -1,0 +1,363 @@
+Running main() from /home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/chrono_thirdparty/googletest/googletest/src/gtest_main.cc
+
+Repeating all tests (iteration 1) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (127 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (290 ms total)
+
+[==========] 4 tests from 1 test suite ran. (290 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 2) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 3) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 4) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 5) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 6) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (60 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (40 ms)
+[----------] 4 tests from PhysCamOps (183 ms total)
+
+[==========] 4 tests from 1 test suite ran. (183 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 7) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (60 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (40 ms)
+[----------] 4 tests from PhysCamOps (183 ms total)
+
+[==========] 4 tests from 1 test suite ran. (183 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 8) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (60 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (60 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (183 ms total)
+
+[==========] 4 tests from 1 test suite ran. (183 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 9) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 10) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 11) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 12) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 13) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 14) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (40 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 15) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (183 ms total)
+
+[==========] 4 tests from 1 test suite ran. (183 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 16) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 17) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 18) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 19) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.
+
+Repeating all tests (iteration 20) . . .
+
+Note: Google Test filter = -*Repeated*
+[==========] Running 4 tests from 1 test suite.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (20 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[----------] 4 tests from PhysCamOps (184 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (184 ms total)
+[  PASSED  ] 4 tests.

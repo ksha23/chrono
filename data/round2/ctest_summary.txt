@@ -1,0 +1,9 @@
+### base load 1.44 6.00 6.82
+13/15 Test #74: utest_SEN_physcam_ops ............***Failed   19.76 sec
+93% tests passed, 1 tests failed out of 15
+Total Test time (real) = 218.20 sec
+	 74 - utest_SEN_physcam_ops (Failed)
+### fix load 2.09 4.00 5.83
+100% tests passed, 0 tests failed out of 15
+Total Test time (real) = 204.46 sec
+CTESTDONE

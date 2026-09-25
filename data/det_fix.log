@@ -1,0 +1,12 @@
+Shader compile time: 9.43327
+PHYSFRAME 1 launch=1 hash=34509054dff193a1
+PHYSFRAME 2 launch=2 hash=1cf1235e06866abb
+PHYSFRAME 3 launch=3 hash=b30b3d2d3c1b1ae6
+PHYSFRAME 50 launch=50 hash=7fd6b8eaa8815d6c
+SENPROF steps=60 warmup=10 timed=50 wall_timed_ms=1017.1 per_step_ms=20.3413 first_update_ms=216.7 setup_to_loop_ms=398.1
+SENPROF update   n=50 mean=11.4580 med=11.5095 p90=11.8171 p99=11.9792 max=11.9792 sum=572.9 (ms)
+SENPROF dynamics n=50 mean=0.0162 med=0.0167 p90=0.0214 p99=0.0267 max=0.0267 sum=0.8 (ms)
+SENPROF other    n=50 mean=8.8671 med=8.7718 p90=9.1752 p99=9.9776 max=9.9776 sum=443.4 (ms)
+SENPROF step     n=50 mean=20.3413 med=20.3707 p90=20.7676 p99=21.4644 max=21.4644 sum=1017.1 (ms)
+HASH phys n=59 0e391a77aa528f60 cam n=59 394b4744c68f52cc lidar n=0 14650fb0739d0383
+LAUNCHES phys=60

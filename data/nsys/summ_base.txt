@@ -1,0 +1,16 @@
+window 1312.6 ms, phys-cam frames 60, phys-cam render thread(s) 1
+API (phys-cam thread)             count    per frame  host ms/frame |    all thr all ms/frame
+cudaDeviceSynchronize               300         5.00        10.6561 |        420      10.7326
+cudaStreamSynchronize               120         2.00         0.1399 |        240       7.4352
+cudaHostAlloc                        60         1.00         1.2261 |        120       1.8493
+cudaFreeHost                          0         0.00         0.0000 |        120       0.7605
+cuMemcpyDtoDAsync                    60         1.00         0.0292 |        120       0.0371
+cudaMemcpy                          360         6.00         0.0209 |        420       0.0295
+cudaLaunchKernel                    360         6.00         0.0225 |        420       0.0269
+cudaMemcpyAsync                     120         2.00         0.0117 |        240       0.0226
+cudaMalloc                          360         6.00         0.0191 |        360       0.0191
+cuEventRecord                       180         3.00         0.0028 |        540       0.0092
+cudaFree                            300         5.00         0.0092 |        300       0.0092
+cuEventQuery                         50         0.83         0.0015 |        149       0.0035
+cuKernelGetName                     360         6.00         0.0009 |        420       0.0011
+phys-cam thread total CUDA API host time per frame: 12.1398 ms

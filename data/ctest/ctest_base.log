@@ -1,0 +1,45 @@
+Internal ctest changing into directory: /home/kyle/chrono-audit/swarm/sensor-physcam-params/build-base
+Test project /home/kyle/chrono-audit/swarm/sensor-physcam-params/build-base
+      Start 62: utest_SEN_gps
+ 1/15 Test #62: utest_SEN_gps ....................   Passed    0.01 sec
+      Start 63: utest_SEN_rng_streams
+ 2/15 Test #63: utest_SEN_rng_streams ............   Passed    0.03 sec
+      Start 64: utest_SEN_data_access
+ 3/15 Test #64: utest_SEN_data_access ............   Passed    5.62 sec
+      Start 65: utest_SEN_interface
+ 4/15 Test #65: utest_SEN_interface ..............   Passed   16.08 sec
+      Start 66: utest_SEN_threadsafety
+ 5/15 Test #66: utest_SEN_threadsafety ...........   Passed    5.55 sec
+      Start 67: utest_SEN_radar
+ 6/15 Test #67: utest_SEN_radar ..................   Passed    0.00 sec
+      Start 68: utest_SEN_analytic_render
+ 7/15 Test #68: utest_SEN_analytic_render ........   Passed    5.59 sec
+      Start 69: utest_SEN_scene_lights
+ 8/15 Test #69: utest_SEN_scene_lights ...........   Passed    0.01 sec
+      Start 70: utest_SEN_camera_convergence
+ 9/15 Test #70: utest_SEN_camera_convergence .....   Passed  129.31 sec
+      Start 71: utest_SEN_optixengine
+10/15 Test #71: utest_SEN_optixengine ............   Passed   26.63 sec
+      Start 72: utest_SEN_optixgeometry
+11/15 Test #72: utest_SEN_optixgeometry ..........   Passed    0.00 sec
+      Start 73: utest_SEN_optixpipeline
+12/15 Test #73: utest_SEN_optixpipeline ..........   Passed    0.00 sec
+      Start 74: utest_SEN_physcam_ops
+13/15 Test #74: utest_SEN_physcam_ops ............***Failed   19.60 sec
+      Start 75: utest_SEN_shader_staging
+14/15 Test #75: utest_SEN_shader_staging .........   Passed    0.00 sec
+      Start 76: utest_SEN_dynamic_sensors
+15/15 Test #76: utest_SEN_dynamic_sensors ........   Passed    6.32 sec
+
+93% tests passed, 1 tests failed out of 15
+
+Label Time Summary:
+sensor    = 214.74 sec*proc (15 tests)
+
+Total Test time (real) = 214.75 sec
+
+The following tests FAILED:
+	 74 - utest_SEN_physcam_ops (Failed)
+Errors while running CTest
+Output from these tests are in: /home/kyle/chrono-audit/swarm/sensor-physcam-params/build-base/Testing/Temporary/LastTest.log
+Use "--rerun-failed --output-on-failure" to re-run the failed cases verbosely.

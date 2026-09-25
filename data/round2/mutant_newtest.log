@@ -1,0 +1,55 @@
+Running main() from /home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/chrono_thirdparty/googletest/googletest/src/gtest_main.cc
+Note: Google Test filter = -*RepeatedFrames*
+[==========] Running 4 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 4 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+/home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/tests/unit_tests/sensor/utest_SEN_physcam_ops.cpp:166: Failure
+The difference between out.Get(i, ch) and ref is 0.17499999888241291, which exceeds HalfTol(ref), where
+out.Get(i, ch) evaluates to 0.25,
+ref evaluates to 0.07500000111758709, and
+HalfTol(ref) evaluates to 0.0040000000000000001.
+pixel 0 channel 0
+
+[  FAILED  ] PhysCamOps.AggregatorAppliesPerChannelQE (197 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+/home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/tests/unit_tests/sensor/utest_SEN_physcam_ops.cpp:192: Failure
+The difference between out.Get(i, ch) and ref is nan, which exceeds HalfTol(ref), where
+out.Get(i, ch) evaluates to nan,
+ref evaluates to 0.10000000149011612, and
+HalfTol(ref) evaluates to 0.0040000000000000001.
+pixel 0 channel 0
+Google Test trace:
+/home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/tests/unit_tests/sensor/utest_SEN_physcam_ops.cpp:177: crf_type 0
+
+[  FAILED  ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (20 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+/home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/tests/unit_tests/sensor/utest_SEN_physcam_ops.cpp:213: Failure
+The difference between mean.Get(i, ch) and ref is 0.5, which exceeds HalfTol(ref), where
+mean.Get(i, ch) evaluates to 0.25,
+ref evaluates to 0.75, and
+HalfTol(ref) evaluates to 0.0040000000000000001.
+pixel 0 channel 0
+
+[  FAILED  ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (20 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+/home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/tests/unit_tests/sensor/utest_SEN_physcam_ops.cpp:261: Failure
+The difference between out.Get(i, ch) and ref is 0.11779624144909084, which exceeds HalfTol(ref), where
+out.Get(i, ch) evaluates to 0.25,
+ref evaluates to 0.13220375855090916, and
+HalfTol(ref) evaluates to 0.0040000000000000001.
+pixel 0 channel 0
+
+[  FAILED  ] PhysCamOps.VignettingAndDefocusPassThrough (20 ms)
+[----------] 4 tests from PhysCamOps (260 ms total)
+
+[----------] Global test environment tear-down
+[==========] 4 tests from 1 test suite ran. (260 ms total)
+[  PASSED  ] 0 tests.
+[  FAILED  ] 4 tests, listed below:
+[  FAILED  ] PhysCamOps.AggregatorAppliesPerChannelQE
+[  FAILED  ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[  FAILED  ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[  FAILED  ] PhysCamOps.VignettingAndDefocusPassThrough
+
+ 4 FAILED TESTS

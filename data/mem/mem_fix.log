@@ -1,0 +1,29 @@
+Shader compile time: 5.2497
+MEM step=0 phys_launches=1 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=500 phys_launches=499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=1000 phys_launches=999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=1500 phys_launches=1499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=2000 phys_launches=1999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=2500 phys_launches=2499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=3000 phys_launches=2999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=3500 phys_launches=3499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=4000 phys_launches=3999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=4500 phys_launches=4499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=5000 phys_launches=4999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=5500 phys_launches=5499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=6000 phys_launches=5999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=6500 phys_launches=6499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=7000 phys_launches=6999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=7500 phys_launches=7499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=8000 phys_launches=7999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=8500 phys_launches=8499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=9000 phys_launches=8999 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=9500 phys_launches=9499 dev_free_delta_MiB=0.00 proc_MiB=636
+MEM step=10000 phys_launches=9999 dev_free_delta_MiB=0.00 proc_MiB=636
+SENPROF steps=10010 warmup=10 timed=10000 wall_timed_ms=39224.6 per_step_ms=3.9225 first_update_ms=203.3 setup_to_loop_ms=253.6
+SENPROF update   n=10000 mean=3.8934 med=3.8790 p90=4.5579 p99=5.2127 max=5.9948 sum=38934.4 (ms)
+SENPROF dynamics n=10000 mean=0.0023 med=0.0019 p90=0.0033 p99=0.0102 max=0.0351 sum=23.3 (ms)
+SENPROF other    n=10000 mean=0.0267 med=0.0003 p90=0.0004 p99=0.0008 max=13.6750 sum=266.9 (ms)
+SENPROF step     n=10000 mean=3.9225 med=3.8827 p90=4.5659 p99=5.2732 max=18.4379 sum=39224.6 (ms)
+HASH phys n=0 14650fb0739d0383 cam n=0 14650fb0739d0383 lidar n=0 14650fb0739d0383
+LAUNCHES phys=10009

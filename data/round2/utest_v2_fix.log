@@ -1,0 +1,20 @@
+Running main() from /home/kyle/chrono-audit/swarm/sensor-physcam-params/fix/src/chrono_thirdparty/googletest/googletest/src/gtest_main.cc
+[==========] Running 5 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 5 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (127 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (40 ms)
+[ RUN      ] PhysCamOps.RepeatedFramesDoNotGrowDeviceMemory
+  attempt 0: device memory grew by 0 KiB over 40000 frames
+[       OK ] PhysCamOps.RepeatedFramesDoNotGrowDeviceMemory (4908 ms)
+[----------] 5 tests from PhysCamOps (5199 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 1 test suite ran. (5199 ms total)
+[  PASSED  ] 5 tests.

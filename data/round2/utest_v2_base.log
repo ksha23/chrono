@@ -1,0 +1,30 @@
+Running main() from /home/kyle/chrono-audit/swarm/sensor-physcam-params/base/src/chrono_thirdparty/googletest/googletest/src/gtest_main.cc
+[==========] Running 5 tests from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 5 tests from PhysCamOps
+[ RUN      ] PhysCamOps.AggregatorAppliesPerChannelQE
+[       OK ] PhysCamOps.AggregatorAppliesPerChannelQE (197 ms)
+[ RUN      ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases
+[       OK ] PhysCamOps.ExpsrToDVAppliesPerChannelGainsAndBiases (61 ms)
+[ RUN      ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma
+[       OK ] PhysCamOps.NoiseAppliesPerChannelDarkCurrentGainAndReadSigma (61 ms)
+[ RUN      ] PhysCamOps.VignettingAndDefocusPassThrough
+[       OK ] PhysCamOps.VignettingAndDefocusPassThrough (41 ms)
+[ RUN      ] PhysCamOps.RepeatedFramesDoNotGrowDeviceMemory
+  attempt 0: device memory grew by 18432 KiB over 40000 frames
+  attempt 1: device memory grew by 20480 KiB over 40000 frames
+  attempt 2: device memory grew by 20480 KiB over 40000 frames
+/home/kyle/chrono-audit/swarm/sensor-physcam-params/base/src/tests/unit_tests/sensor/utest_SEN_physcam_ops.cpp:317: Failure
+Expected: (best) <= (kAllowedBytes), actual: 18874368 vs 4194304
+device memory grows with every phys-cam frame (about 471.85919999999999 bytes per frame); an allocation is not being freed
+
+[  FAILED  ] PhysCamOps.RepeatedFramesDoNotGrowDeviceMemory (19265 ms)
+[----------] 5 tests from PhysCamOps (19626 ms total)
+
+[----------] Global test environment tear-down
+[==========] 5 tests from 1 test suite ran. (19626 ms total)
+[  PASSED  ] 4 tests.
+[  FAILED  ] 1 test, listed below:
+[  FAILED  ] PhysCamOps.RepeatedFramesDoNotGrowDeviceMemory
+
+ 1 FAILED TEST
