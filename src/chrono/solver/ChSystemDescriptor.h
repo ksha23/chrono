@@ -301,6 +301,9 @@ class ChApi ChSystemDescriptor {
     /// it may happen that you need to backup them via FromConstraintToVector().
     /// After EndInsertion() or UpdateCountsAndOffsets(), only the constraints that take part in the projection
     /// (see ChConstraint::IsProjected) are visited, and the 'l_i' of the other constraints are left unchanged.
+    /// That list is built from the constraint modes and active flags at the time of UpdateCountsAndOffsets(). If the
+    /// mode or the active flag of a constraint is changed afterwards (for example from LOCK to UNILATERAL), call
+    /// UpdateCountsAndOffsets() again, or re-insert the constraints, before calling this function.
     virtual void ConstraintsProject(
         ChVectorDynamic<>& multipliers  ///< system-level vector of 'l_i' multipliers to be projected
     );

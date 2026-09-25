@@ -9,6 +9,7 @@ Change Log
   - [\[Added\] Chrono::FEA multiphysics framework](#added-chronofea-multiphysics-framework)
   - [\[Added\] Chrono::PRECICE module](#added-chronoprecice-module)
   - [\[Changed\] Velocity-level constraints and end-of-step state updates](#changed-velocity-level-constraints-and-end-of-step-state-updates)
+  - [\[Changed\] Projection of constraint multipliers in iterative solvers](#changed-projection-of-constraint-multipliers-in-iterative-solvers)
   - [\[Changed\] Refactoring of Chrono output and checkpointing](#changed-refactoring-of-chrono-output-and-checkpointing)
   - [\[Changed\] Chrono::FSI-SPH API and terminology](#changed-chronofsi-sph-api-and-terminology)
   - [\[Added\] AMD GPU support and vendor-agnostic GPU layer](#added-amd-gpu-support-and-vendor-agnostic-gpu-layer)
@@ -293,6 +294,32 @@ New functions `ChIntegrable::StateOnEndStep()`, `ChPhysicsItem::IntStateOnEndSte
 update. This is what constitutive models with internal history - plasticity, damage, creep - need,
 since those must not be advanced during the Newton iterations of an implicit or static solver. The
 default implementations do nothing, so existing elements and physics items are unaffected.
+
+## [Changed] Projection of constraint multipliers in iterative solvers
+
+`ChSystemDescriptor::ConstraintsProject()`, used by the Barzilai-Borwein, APGD and ADMM solvers, now
+visits only the constraints whose projection is not the identity. The list of these constraints is
+built when the descriptor is assembled (`UpdateCountsAndOffsets()`, called by `EndInsertion()`), using
+the new virtual function `ChConstraint::IsProjected()`. By default, it returns false for bilateral
+(`LOCK` mode) constraints. Simulation results are unchanged.
+
+This affects user code that implements custom constraint classes:
+- A custom constraint that uses `LOCK` mode and overrides `Project()`, or whose multiplier is read or
+  modified by the `Project()` of another constraint, must also override `IsProjected()` and return true.
+  Otherwise its projection is silently skipped.
+- If the mode or the active flag of a constraint is changed after the descriptor was assembled, call
+  `ChSystemDescriptor::UpdateCountsAndOffsets()` again before the solve. `ChSystem` assembles the
+  descriptor at every step, so this only matters for descriptors assembled by hand.
+- After `ConstraintsProject()`, the multipliers stored in skipped constraints are no longer
+  overwritten with the projected vector values.
+
+```cpp
+class MyBoxedConstraint : public ChConstraintTwoBodies {
+  public:
+    virtual void Project() override;                           // clamp the multiplier
+    virtual bool IsProjected() const override { return true; }  // required since mode is LOCK
+};
+```
 
 ## [Changed] Refactoring of Chrono output and checkpointing
 
