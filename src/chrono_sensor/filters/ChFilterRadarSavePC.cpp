@@ -25,6 +25,11 @@
 #include "chrono/core/ChDataPath.h"
 #include "chrono/input_output/ChWriterCSV.h"
 
+#include "chrono_sensor/utils/ChAsyncWriter.h"
+
+#include <algorithm>
+#include <cstring>
+
 #ifdef CHRONO_HAS_OPTIX
 #include "chrono_sensor/sensors/ChOptixSensor.h"
 #include "chrono_sensor/utils/CudaMallocHelper.h"
@@ -62,19 +67,44 @@ void EnsureDirectoryTree(const std::string& path) {
 }
 }  // namespace
 
-ChFilterRadarSavePC::ChFilterRadarSavePC(std::string data_path, std::string name) : ChFilter(name), m_path(data_path) {}
-ChFilterRadarSavePC::~ChFilterRadarSavePC() {}
+ChFilterRadarSavePC::ChFilterRadarSavePC(std::string data_path, std::string name) : ChFilter(name), m_path(data_path), m_num_writer_threads(ChAsyncWriter::DefaultNumThreads()) {}
+
+// Destroying the writer waits for every pending frame to be written.
+ChFilterRadarSavePC::~ChFilterRadarSavePC() {
+    m_writer.reset();
+}
+
+void ChFilterRadarSavePC::SetNumWriterThreads(unsigned int num_threads) {
+    if (m_writer) {
+        std::cerr << "ChFilterRadarSavePC::SetNumWriterThreads: ignored, the filter is already initialized\n";
+        return;
+    }
+    m_num_writer_threads = num_threads;
+}
+
+void ChFilterRadarSavePC::Flush() {
+    if (m_writer)
+        m_writer->Flush();
+}
 
 void ChFilterRadarSavePC::Apply() {
     std::string filename = m_path + "frame_" + std::to_string(m_frame_number) + ".csv";
     ++m_frame_number;
-    ChWriterCSV csv_writer(",");
-    for (int i = 0; i < m_buffer_in->Beam_return_count; i++) {
-        csv_writer << m_buffer_in->Buffer[i].x << m_buffer_in->Buffer[i].y << m_buffer_in->Buffer[i].z
-                   << m_buffer_in->Buffer[i].vel_x << m_buffer_in->Buffer[i].vel_y << m_buffer_in->Buffer[i].vel_z
-                   << m_buffer_in->Buffer[i].amplitude << m_buffer_in->Buffer[i].objectId << std::endl;
-    }
-    csv_writer.WriteToFile(filename);
+    size_t max_returns = static_cast<size_t>(m_buffer_in->Width) * m_buffer_in->Height;  // staging buffer capacity
+    int count = static_cast<int>(std::min<size_t>(std::max(0, m_buffer_in->Beam_return_count), max_returns));
+
+    // Copy the returns into a free staging buffer (waits while all are in use), then format and write the CSV file on
+    // a writer thread so that it does not stall the render thread.
+    void* staging = m_writer->Acquire();
+    std::memcpy(staging, m_buffer_in->Buffer.get(), count * sizeof(RadarXYZReturn));
+    m_writer->Submit(staging, [filename, count](const void* data) {
+        const RadarXYZReturn* ret = static_cast<const RadarXYZReturn*>(data);
+        ChWriterCSV csv_writer(",");
+        for (int i = 0; i < count; i++) {
+            csv_writer << ret[i].x << ret[i].y << ret[i].z << ret[i].vel_x << ret[i].vel_y << ret[i].vel_z << ret[i].amplitude << ret[i].objectId << std::endl;
+        }
+        csv_writer.WriteToFile(filename);
+    });
 }
 
 void ChFilterRadarSavePC::Initialize(std::shared_ptr<ChSensor> pSensor,
@@ -93,6 +123,12 @@ void ChFilterRadarSavePC::Initialize(std::shared_ptr<ChSensor> pSensor,
     } else {
         InvalidFilterGraphSensorTypeMismatch(pSensor);
     }
+
+    // Staging buffers, two per writer thread, all allocated here. Each holds a full buffer of returns.
+    size_t max_returns = static_cast<size_t>(m_buffer_in->Width) * m_buffer_in->Height;
+    unsigned int num_buffers = std::max(1u, 2 * m_num_writer_threads);
+    m_writer = chrono_types::make_shared<ChAsyncWriter>(
+        m_num_writer_threads, num_buffers, [max_returns]() { return std::shared_ptr<void>(new RadarXYZReturn[max_returns], std::default_delete<RadarXYZReturn[]>()); });
 
     EnsureDirectoryTree(m_path);
 }
