@@ -64,13 +64,15 @@ class ChConstraintTuple_1vars : public ChConstraintTuple {
         }
     }
     virtual double ComputeJacobianTimesState() override {
+        assert(variables_1->GetDOF() == N);
         if (variables_1->IsActive())
-            return Cq_1 * variables_1->State();
+            return Cq_1 * variables_1->State().template head<N>();
         return 0;
     }
     virtual void IncrementState(double deltal) override {
+        assert(variables_1->GetDOF() == N);
         if (variables_1->IsActive())
-            variables_1->State() += Eq_1 * deltal;
+            variables_1->State().template head<N>() += Eq_1 * deltal;
     }
     virtual void AddJacobianTimesVectorInto(double& result, ChVectorConstRef vect) override {
         if (variables_1->IsActive())
@@ -132,18 +134,22 @@ class ChConstraintTuple_2vars : public ChConstraintTuple {
         }
     }
     virtual double ComputeJacobianTimesState() override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
         double result = 0;
         if (variables_1->IsActive())
-            result += Cq_1 * variables_1->State();
+            result += Cq_1 * variables_1->State().template head<N1>();
         if (variables_2->IsActive())
-            result += Cq_2 * variables_2->State();
+            result += Cq_2 * variables_2->State().template head<N2>();
         return result;
     }
     virtual void IncrementState(double deltal) override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
         if (variables_1->IsActive())
-            variables_1->State() += Eq_1 * deltal;
+            variables_1->State().template head<N1>() += Eq_1 * deltal;
         if (variables_2->IsActive())
-            variables_2->State() += Eq_2 * deltal;
+            variables_2->State().template head<N2>() += Eq_2 * deltal;
     }
     virtual void AddJacobianTimesVectorInto(double& result, ChVectorConstRef vect) override {
         if (variables_1->IsActive())
@@ -226,22 +232,28 @@ class ChConstraintTuple_3vars : public ChConstraintTuple {
         }
     }
     virtual double ComputeJacobianTimesState() override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
+        assert(variables_3->GetDOF() == N3);
         double result = 0;
         if (variables_1->IsActive())
-            result += Cq_1 * variables_1->State();
+            result += Cq_1 * variables_1->State().template head<N1>();
         if (variables_2->IsActive())
-            result += Cq_2 * variables_2->State();
+            result += Cq_2 * variables_2->State().template head<N2>();
         if (variables_3->IsActive())
-            result += Cq_3 * variables_3->State();
+            result += Cq_3 * variables_3->State().template head<N3>();
         return result;
     }
     virtual void IncrementState(double deltal) override {
+        assert(variables_1->GetDOF() == N1);
+        assert(variables_2->GetDOF() == N2);
+        assert(variables_3->GetDOF() == N3);
         if (variables_1->IsActive())
-            variables_1->State() += Eq_1 * deltal;
+            variables_1->State().template head<N1>() += Eq_1 * deltal;
         if (variables_2->IsActive())
-            variables_2->State() += Eq_2 * deltal;
+            variables_2->State().template head<N2>() += Eq_2 * deltal;
         if (variables_3->IsActive())
-            variables_3->State() += Eq_3 * deltal;
+            variables_3->State().template head<N3>() += Eq_3 * deltal;
     }
     virtual void AddJacobianTimesVectorInto(double& result, ChVectorConstRef vect) override {
         if (variables_1->IsActive())

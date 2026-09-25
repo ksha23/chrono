@@ -61,7 +61,7 @@ void ChConstraintThreeBBShaft::SetVariables(ChVariables* mvariables_a,
                                             ChVariables* mvariables_c) {
     assert(dynamic_cast<ChVariablesBody*>(mvariables_a));
     assert(dynamic_cast<ChVariablesBody*>(mvariables_b));
-    assert(dynamic_cast<ChVariablesBody*>(mvariables_c));
+    assert(mvariables_c && mvariables_c->GetDOF() == 1);
 
     if (!mvariables_a || !mvariables_b || !mvariables_c) {
         SetValid(false);
@@ -111,11 +111,13 @@ double ChConstraintThreeBBShaft::ComputeJacobianTimesState() {
     double ret = 0;
 
     if (variables_a->IsActive()) {
-        ret += Cq_a * variables_a->State();
+        assert(variables_a->GetDOF() == 6);
+        ret += Cq_a * variables_a->State().head<6>();
     }
 
     if (variables_b->IsActive()) {
-        ret += Cq_b * variables_b->State();
+        assert(variables_b->GetDOF() == 6);
+        ret += Cq_b * variables_b->State().head<6>();
     }
 
     if (variables_c->IsActive()) {
@@ -127,11 +129,13 @@ double ChConstraintThreeBBShaft::ComputeJacobianTimesState() {
 
 void ChConstraintThreeBBShaft::IncrementState(double deltal) {
     if (variables_a->IsActive()) {
-        variables_a->State() += Eq_a * deltal;
+        assert(variables_a->GetDOF() == 6);
+        variables_a->State().head<6>() += Eq_a * deltal;
     }
 
     if (variables_b->IsActive()) {
-        variables_b->State() += Eq_b * deltal;
+        assert(variables_b->GetDOF() == 6);
+        variables_b->State().head<6>() += Eq_b * deltal;
     }
 
     if (variables_c->IsActive()) {
