@@ -5,6 +5,7 @@ SET(TESTS
     utest_DEM_ballistic
     utest_DEM_stack
     utest_DEM_pyramid
+    utest_DEM_contact_forces
 )
 
 SET(LIBS
