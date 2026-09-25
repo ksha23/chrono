@@ -43,7 +43,11 @@ class ChAsyncWriter;
 /// encoded and written by background writer threads, so PNG compression does not stall the sensor pipeline. At most
 /// twice the number of writer threads frames are held in staging buffers; when all of them are in use the render thread
 /// waits for a writer instead of dropping the frame. File names are the same as for a synchronous save. All pending
-/// files are written by the time the filter is destroyed (i.e. when the sensor is released).
+/// files are written by the time the filter is destroyed (i.e. when the sensor is released), or when Flush() returns.
+/// If the process is killed or crashes, frames still waiting in the staging buffers (at most twice the number of
+/// writer threads) are lost; use SetNumWriterThreads(0) when every frame must be on disk as soon as Apply returns.
+/// Writer threads and staging buffers belong to each filter, so a setup with many save filters may want fewer
+/// threads per filter.
 class CH_SENSOR_API ChFilterSave : public ChFilter {
   public:
     /// Class constructor
@@ -67,9 +71,13 @@ class CH_SENSOR_API ChFilterSave : public ChFilter {
     void ChangeDataPath(std::string data_path);
 
     /// Set the number of background writer threads (OptiX backend only). Must be called before the sensor is added
-    /// to the sensor manager. 0 writes each frame synchronously on the render thread. The default is
-    /// min(4, half the hardware threads).
-    void SetNumWriterThreads(unsigned int num_threads) { m_num_writer_threads = num_threads; }
+    /// to the sensor manager; a later call has no effect and prints a warning. 0 writes each frame synchronously on
+    /// the render thread. The default is min(4, half the hardware threads).
+    void SetNumWriterThreads(unsigned int num_threads);
+
+    /// Block until every frame that this filter received before the call is written to disk. Frames that arrive
+    /// while waiting are not waited for. Can be called from any thread, e.g. to read saved frames back during a run.
+    void Flush();
 
   private:
     std::string m_path;               ///< path to where data should be saved

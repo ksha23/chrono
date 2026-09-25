@@ -23,8 +23,16 @@
 namespace chrono {
 namespace sensor {
 
-ChAsyncWriter::ChAsyncWriter(unsigned int num_threads, unsigned int num_buffers, Allocator allocator)
-    : m_allocator(std::move(allocator)), m_max_buffers(std::max(1u, num_buffers)) {
+ChAsyncWriter::ChAsyncWriter(unsigned int num_threads, unsigned int num_buffers, Allocator allocator) {
+    // allocate the whole pool here so that Acquire() never allocates on the producer's thread
+    num_buffers = std::max(1u, num_buffers);
+    m_buffers.reserve(num_buffers);
+    m_free.reserve(num_buffers);
+    m_checked_out.reserve(num_buffers);
+    for (unsigned int i = 0; i < num_buffers; i++) {
+        m_buffers.push_back(allocator());
+        m_free.push_back(m_buffers.back().get());
+    }
     m_threads.reserve(num_threads);
     for (unsigned int i = 0; i < num_threads; i++)
         m_threads.emplace_back(&ChAsyncWriter::WorkerLoop, this);
@@ -43,29 +51,25 @@ ChAsyncWriter::~ChAsyncWriter() {
 
 void* ChAsyncWriter::Acquire() {
     std::unique_lock<std::mutex> lock(m_mutex);
-    if (m_free.empty() && m_buffers.size() < m_max_buffers) {
-        m_buffers.push_back(m_allocator());
-        m_free.push_back(m_buffers.back().get());
-    }
     // back-pressure: wait for a writer to release a buffer rather than dropping the frame
     m_cv_free.wait(lock, [this] { return !m_free.empty(); });
     void* staging = m_free.back();
     m_free.pop_back();
-    m_in_use++;
-    m_peak_in_use = std::max(m_peak_in_use, m_in_use);
+    m_checked_out.emplace_back(staging, m_next_ticket++);
+    m_peak_in_use = std::max(m_peak_in_use, static_cast<unsigned int>(m_checked_out.size()));
     return staging;
 }
 
 void ChAsyncWriter::Submit(void* staging, Job job) {
     if (m_threads.empty()) {
-        job(staging);
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_free.push_back(staging);
-            m_in_use--;
+        // return the buffer even if the job throws, so that a caught exception cannot deadlock a later Flush()
+        try {
+            job(staging);
+        } catch (...) {
+            Release(staging);
+            throw;
         }
-        m_cv_idle.notify_all();
-        m_cv_free.notify_one();
+        Release(staging);
         return;
     }
     {
@@ -77,12 +81,39 @@ void ChAsyncWriter::Submit(void* staging, Job job) {
 
 void ChAsyncWriter::Flush() {
     std::unique_lock<std::mutex> lock(m_mutex);
-    m_cv_idle.wait(lock, [this] { return m_in_use == 0; });
+    // Wait only for the buffers that were already checked out when Flush was called. Waiting for the pool to go idle
+    // instead could wait forever while another thread keeps submitting frames.
+    unsigned long long ticket = m_next_ticket;
+    m_cv_idle.wait(lock, [this, ticket] { return !HasPendingBefore(ticket); });
+}
+
+bool ChAsyncWriter::HasPendingBefore(unsigned long long ticket) const {
+    for (const auto& c : m_checked_out)
+        if (c.second < ticket)
+            return true;
+    return false;
+}
+
+void ChAsyncWriter::Release(void* staging) {
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        auto it = std::find_if(m_checked_out.begin(), m_checked_out.end(), [staging](const std::pair<void*, unsigned long long>& c) { return c.first == staging; });
+        if (it != m_checked_out.end())
+            m_checked_out.erase(it);
+        m_free.push_back(staging);
+    }
+    m_cv_idle.notify_all();
+    m_cv_free.notify_one();
 }
 
 unsigned int ChAsyncWriter::GetNumAllocated() {
     std::lock_guard<std::mutex> lock(m_mutex);
     return static_cast<unsigned int>(m_buffers.size());
+}
+
+unsigned int ChAsyncWriter::GetNumInUse() {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return static_cast<unsigned int>(m_checked_out.size());
 }
 
 unsigned int ChAsyncWriter::GetPeakInUse() {
@@ -112,16 +143,11 @@ void ChAsyncWriter::WorkerLoop() {
             task.job(task.staging);
         } catch (const std::exception& e) {
             std::cerr << "ChAsyncWriter: write failed: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "ChAsyncWriter: write failed with an unknown exception" << std::endl;
         }
 
-        {
-            std::lock_guard<std::mutex> lock(m_mutex);
-            m_free.push_back(task.staging);
-            m_in_use--;
-            if (m_in_use == 0)
-                m_cv_idle.notify_all();
-        }
-        m_cv_free.notify_one();
+        Release(task.staging);
     }
 }
 

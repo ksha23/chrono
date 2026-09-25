@@ -118,6 +118,13 @@ CH_SENSOR_API void ChFilterSave::ChangeDataPath(std::string data_path) {
     m_path = data_path;
 }
 
+// frames are written synchronously on this backend
+CH_SENSOR_API void ChFilterSave::SetNumWriterThreads(unsigned int num_threads) {
+    m_num_writer_threads = num_threads;
+}
+
+CH_SENSOR_API void ChFilterSave::Flush() {}
+
 }  // namespace sensor
 }  // namespace chrono
 
@@ -326,8 +333,8 @@ CH_SENSOR_API void ChFilterSave::Initialize(std::shared_ptr<ChSensor> pSensor,
         InvalidFilterGraphBufferTypeMismatch(pSensor);
     }
 
-    // Pinned staging buffers, two per writer thread, allocated on first use. This bounds the host memory held by
-    // frames waiting to be written.
+    // Pinned staging buffers, two per writer thread, all allocated here rather than on the render thread. This bounds
+    // the host memory held by frames waiting to be written.
     unsigned int num_buffers = std::max(1u, 2 * m_num_writer_threads);
     m_writer = chrono_types::make_shared<ChAsyncWriter>(m_num_writer_threads, num_buffers, [staging_bytes]() {
         return std::shared_ptr<void>(cudaHostMallocHelper<unsigned char>(static_cast<unsigned int>(staging_bytes)), cudaHostFreeHelper<unsigned char>);
@@ -369,6 +376,19 @@ CH_SENSOR_API void ChFilterSave::Initialize(std::shared_ptr<ChSensor> pSensor,
 
 CH_SENSOR_API void ChFilterSave::ChangeDataPath(std::string data_path) {
     m_path = data_path;
+}
+
+CH_SENSOR_API void ChFilterSave::SetNumWriterThreads(unsigned int num_threads) {
+    if (m_writer) {
+        std::cerr << "ChFilterSave::SetNumWriterThreads: ignored, the filter is already initialized\n";
+        return;
+    }
+    m_num_writer_threads = num_threads;
+}
+
+CH_SENSOR_API void ChFilterSave::Flush() {
+    if (m_writer)
+        m_writer->Flush();
 }
 
 }  // namespace sensor

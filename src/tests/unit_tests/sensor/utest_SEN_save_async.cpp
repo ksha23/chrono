@@ -13,9 +13,13 @@
 // Unit tests for the background writer behind the save filters:
 // - ChAsyncWriter runs every job, never holds more than its pool of staging
 //   buffers, and finishes all pending jobs in its destructor.
+// - A job that throws neither leaks its buffer (synchronous path) nor kills a
+//   worker thread (asynchronous path).
+// - Flush returns while another thread keeps submitting jobs.
 // - ChFilterSave, ChFilterSavePtCloud and ChFilterRadarSavePC with writer threads
 //   produce exactly the same files (names, count and bytes) as the synchronous
-//   path, and every file exists once the sensor has been released.
+//   path, Flush makes every frame received so far complete on disk, and every
+//   file exists once the sensor has been released.
 //
 // =============================================================================
 
@@ -25,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -87,6 +92,17 @@ void ExpectSameFiles(const fs::path& ref_dir, const fs::path& test_dir, size_t m
     EXPECT_GT(total_bytes, 0u) << ref_dir;
 }
 
+// After Flush on the asynchronous filter: the first n-1 frames of the synchronous reference (n files seen before the
+// Flush) exist in the asynchronous directory with identical bytes.
+void ExpectFramesFlushed(const fs::path& ref_dir, const fs::path& test_dir, size_t n, const std::string& ext, size_t min_count) {
+    ASSERT_GE(n, min_count + 1) << ref_dir;
+    for (size_t i = 0; i + 1 < n; i++) {
+        std::string name = "frame_" + std::to_string(i) + ext;
+        ASSERT_TRUE(fs::exists(test_dir / name)) << "not written after Flush: " << (test_dir / name);
+        EXPECT_TRUE(ReadFile(ref_dir / name) == ReadFile(test_dir / name)) << "incomplete after Flush: " << name;
+    }
+}
+
 }  // namespace
 
 // Every job runs, jobs see the buffer they were given, and no more than the pool size is ever allocated or in use.
@@ -96,6 +112,7 @@ TEST(ChAsyncWriter, bounded_pool) {
     std::vector<int> seen(num_jobs, -1);
     {
         ChAsyncWriter writer(2, num_buffers, AllocInt);
+        EXPECT_EQ(writer.GetNumAllocated(), num_buffers);  // the whole pool exists before the first frame
         for (int i = 0; i < num_jobs; i++) {
             int* staging = static_cast<int*>(writer.Acquire());
             *staging = i;
@@ -142,6 +159,73 @@ TEST(ChAsyncWriter, destructor_flushes) {
         EXPECT_LT(done.load(), num_jobs);  // work is still pending when the writer goes out of scope
     }
     EXPECT_EQ(done.load(), num_jobs);
+}
+
+// A job that throws on the synchronous path propagates the exception but still returns its buffer, so the writer can be
+// used again and its destructor (which flushes) does not deadlock.
+TEST(ChAsyncWriter, synchronous_exception) {
+    ChAsyncWriter writer(0, 1, AllocInt);
+    void* staging = writer.Acquire();
+    EXPECT_THROW(writer.Submit(staging, [](const void*) { throw std::runtime_error("write failed"); }), std::runtime_error);
+    ASSERT_EQ(writer.GetNumInUse(), 0u);
+    staging = writer.Acquire();
+    EXPECT_THROW(writer.Submit(staging, [](const void*) { throw 42; }), int);
+    ASSERT_EQ(writer.GetNumInUse(), 0u);
+    bool ran = false;
+    staging = writer.Acquire();
+    writer.Submit(staging, [&ran](const void*) { ran = true; });
+    EXPECT_TRUE(ran);
+    writer.Flush();
+}
+
+// A job that throws (std::exception or anything else) on a worker thread does not stop that worker or lose its buffer.
+TEST(ChAsyncWriter, worker_survives_exception) {
+    std::atomic<int> done{0};
+    {
+        ChAsyncWriter writer(1, 2, AllocInt);
+        for (int i = 0; i < 10; i++) {
+            void* staging = writer.Acquire();
+            if (i % 3 == 0)
+                writer.Submit(staging, [](const void*) { throw 7; });
+            else if (i % 3 == 1)
+                writer.Submit(staging, [](const void*) { throw std::runtime_error("write failed"); });
+            else
+                writer.Submit(staging, [&done](const void*) { done++; });
+        }
+        writer.Flush();
+        EXPECT_EQ(writer.GetNumInUse(), 0u);
+    }
+    EXPECT_EQ(done.load(), 3);
+}
+
+// Flush waits for the jobs acquired before the call, and returns even though another thread keeps the pool busy.
+TEST(ChAsyncWriter, flush_while_producing) {
+    std::atomic<bool> stop{false};
+    std::atomic<int> acquired{0};
+    std::atomic<int> done{0};
+    std::vector<int> finished(100000, 0);
+    ChAsyncWriter writer(2, 4, AllocInt);  // declared last: its destructor runs the remaining jobs, which use the above
+    std::thread producer([&]() {
+        for (int i = 0; !stop && i < (int)finished.size(); i++) {
+            void* staging = writer.Acquire();
+            acquired++;
+            writer.Submit(staging, [&finished, &done, i](const void*) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                finished[i] = 1;
+                done++;
+            });
+        }
+    });
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    int before = acquired.load();  // every job with index < before was acquired before Flush
+    writer.Flush();
+    int after_flush = done.load();
+    stop = true;
+    producer.join();
+    EXPECT_GT(before, 0);
+    for (int i = 0; i < before; i++)
+        EXPECT_EQ(finished[i], 1) << "job " << i << " still pending after Flush";
+    EXPECT_GE(after_flush, before);
 }
 
 // Camera, lidar and radar frames written by background writers are identical to the synchronous reference, and all of
@@ -195,6 +279,24 @@ TEST(ChFilterSave, async_matches_sync) {
     manager->AddSensor(radar);
 
     const double step = 1e-3;
+    while (sys.GetChTime() < 0.25) {
+        manager->Update();
+        sys.DoStepDynamics(step);
+    }
+
+    // Mid-run Flush. The synchronous filter runs just before the asynchronous one on the same frame, so if the
+    // synchronous directory holds frames 0..n-1, frames 0..n-2 have already been handed to the asynchronous filter
+    // and must be complete on disk once its Flush returns, while the sensors keep rendering.
+    auto cam_n = ListFiles(root / "cam_sync").size();
+    auto pc_n = ListFiles(root / "lidar_sync").size();
+    auto radar_n = ListFiles(root / "radar_sync").size();
+    cam_async->Flush();
+    pc_async->Flush();
+    radar_async->Flush();
+    ExpectFramesFlushed(root / "cam_sync", root / "cam_async", cam_n, ".png", 5);
+    ExpectFramesFlushed(root / "lidar_sync", root / "lidar_async", pc_n, ".csv", 1);
+    ExpectFramesFlushed(root / "radar_sync", root / "radar_async", radar_n, ".csv", 1);
+
     while (sys.GetChTime() < 0.5) {
         manager->Update();
         sys.DoStepDynamics(step);

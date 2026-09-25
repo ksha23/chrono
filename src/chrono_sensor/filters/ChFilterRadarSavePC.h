@@ -58,9 +58,13 @@ class CH_SENSOR_API ChFilterRadarSavePC : public ChFilter {
     /// @param bufferInOut A buffer that is passed into the filter.
     virtual void Initialize(std::shared_ptr<ChSensor> pSensor, std::shared_ptr<SensorBuffer>& bufferInOut);
 
-    /// Set the number of background writer threads. Must be called before the sensor is added to the sensor manager.
-    /// 0 writes each frame synchronously on the render thread. The default is min(4, half the hardware threads).
-    void SetNumWriterThreads(unsigned int num_threads) { m_num_writer_threads = num_threads; }
+    /// Set the number of background writer threads. Must be called before the sensor is added to the sensor manager;
+    /// a later call has no effect and prints a warning. 0 writes each frame synchronously on the render thread. The
+    /// default is min(4, half the hardware threads).
+    void SetNumWriterThreads(unsigned int num_threads);
+
+    /// Block until every frame that this filter received before the call is written to disk (see ChFilterSave::Flush).
+    void Flush();
 
   private:
     std::string m_path;                                     ///< path to saved data

@@ -74,9 +74,29 @@ ChFilterSavePtCloud::ChFilterSavePtCloud(std::string data_path, std::string name
 ChFilterSavePtCloud::~ChFilterSavePtCloud() {
     m_writer.reset();
 }
+
+void ChFilterSavePtCloud::SetNumWriterThreads(unsigned int num_threads) {
+    if (m_writer) {
+        std::cerr << "ChFilterSavePtCloud::SetNumWriterThreads: ignored, the filter is already initialized\n";
+        return;
+    }
+    m_num_writer_threads = num_threads;
+}
+
+void ChFilterSavePtCloud::Flush() {
+    if (m_writer)
+        m_writer->Flush();
+}
 #else
 ChFilterSavePtCloud::ChFilterSavePtCloud(std::string data_path, std::string name) : ChFilter(name), m_path(data_path), m_num_writer_threads(0) {}
 ChFilterSavePtCloud::~ChFilterSavePtCloud() {}
+
+// frames are written synchronously on this backend
+void ChFilterSavePtCloud::SetNumWriterThreads(unsigned int num_threads) {
+    m_num_writer_threads = num_threads;
+}
+
+void ChFilterSavePtCloud::Flush() {}
 #endif
 
 namespace {
@@ -125,7 +145,7 @@ void ChFilterSavePtCloud::Initialize(std::shared_ptr<ChSensor> pSensor, std::sha
     }
 
 #ifdef CHRONO_HAS_OPTIX
-    // Pinned staging buffers, two per writer thread, allocated on first use.
+    // Pinned staging buffers, two per writer thread, all allocated here rather than on the render thread.
     unsigned int num_points = m_buffer_in->Width * m_buffer_in->Height * (m_buffer_in->Dual_return + 1);
     unsigned int num_buffers = std::max(1u, 2 * m_num_writer_threads);
     m_writer = chrono_types::make_shared<ChAsyncWriter>(

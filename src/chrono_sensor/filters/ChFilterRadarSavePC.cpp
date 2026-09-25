@@ -74,6 +74,19 @@ ChFilterRadarSavePC::~ChFilterRadarSavePC() {
     m_writer.reset();
 }
 
+void ChFilterRadarSavePC::SetNumWriterThreads(unsigned int num_threads) {
+    if (m_writer) {
+        std::cerr << "ChFilterRadarSavePC::SetNumWriterThreads: ignored, the filter is already initialized\n";
+        return;
+    }
+    m_num_writer_threads = num_threads;
+}
+
+void ChFilterRadarSavePC::Flush() {
+    if (m_writer)
+        m_writer->Flush();
+}
+
 void ChFilterRadarSavePC::Apply() {
     std::string filename = m_path + "frame_" + std::to_string(m_frame_number) + ".csv";
     ++m_frame_number;
@@ -111,7 +124,7 @@ void ChFilterRadarSavePC::Initialize(std::shared_ptr<ChSensor> pSensor,
         InvalidFilterGraphSensorTypeMismatch(pSensor);
     }
 
-    // Staging buffers, two per writer thread, allocated on first use. Each holds a full buffer of returns.
+    // Staging buffers, two per writer thread, all allocated here. Each holds a full buffer of returns.
     size_t max_returns = static_cast<size_t>(m_buffer_in->Width) * m_buffer_in->Height;
     unsigned int num_buffers = std::max(1u, 2 * m_num_writer_threads);
     m_writer = chrono_types::make_shared<ChAsyncWriter>(

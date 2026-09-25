@@ -41,9 +41,12 @@ namespace sensor {
 /// calls Submit() with a job that reads the buffer and writes a file. The job runs on one of the worker threads and the
 /// buffer returns to the pool when the job finishes. Acquire() blocks while every buffer is in use, so memory stays
 /// bounded and no frame is ever dropped: a producer that outruns the writers is slowed down to their pace.
-/// Staging buffers are created lazily, up to the pool size, with the user-supplied allocator.
+/// All staging buffers are created up front, in the constructor, with the user-supplied allocator, so no allocation
+/// happens on the producer's thread while frames are being written.
 ///
-/// With zero worker threads the writer is synchronous: Submit() runs the job on the calling thread before returning.
+/// With zero worker threads the writer is synchronous: Submit() runs the job on the calling thread before returning,
+/// and an exception thrown by the job propagates to the caller after the buffer is returned to the pool. On a worker
+/// thread, an exception thrown by a job is reported on std::cerr and the worker moves on to the next job.
 /// The destructor waits for every submitted job to finish.
 class CH_SENSOR_API ChAsyncWriter {
   public:
@@ -72,14 +75,18 @@ class CH_SENSOR_API ChAsyncWriter {
     /// Queue a job that consumes a staging buffer obtained from Acquire().
     void Submit(void* staging, Job job);
 
-    /// Block until every job submitted so far has finished.
+    /// Block until every job whose staging buffer was acquired before this call has finished. Jobs started by
+    /// other threads after the call do not delay it. Safe to call from any thread.
     void Flush();
 
     /// Number of worker threads (0 = synchronous).
     unsigned int GetNumThreads() const { return static_cast<unsigned int>(m_threads.size()); }
 
-    /// Number of staging buffers allocated so far (never more than the pool size given at construction).
+    /// Number of staging buffers allocated (the pool size given at construction).
     unsigned int GetNumAllocated();
+
+    /// Number of staging buffers currently checked out (acquired, queued or being written).
+    unsigned int GetNumInUse();
 
     /// Largest number of staging buffers that were checked out at the same time.
     unsigned int GetPeakInUse();
@@ -90,23 +97,27 @@ class CH_SENSOR_API ChAsyncWriter {
   private:
     void WorkerLoop();
 
+    /// Return a staging buffer to the pool once its job has finished (or thrown).
+    void Release(void* staging);
+
+    /// True if a buffer acquired before the given ticket is still checked out (caller holds the mutex).
+    bool HasPendingBefore(unsigned long long ticket) const;
+
     struct Task {
         void* staging;
         Job job;
     };
 
-    Allocator m_allocator;
-    unsigned int m_max_buffers;
-
     std::mutex m_mutex;
     std::condition_variable m_cv_task;             ///< signals workers that a task is queued (or stop)
     std::condition_variable m_cv_free;             ///< signals producers that a staging buffer was released
-    std::condition_variable m_cv_idle;             ///< signals Flush that the writer went idle
+    std::condition_variable m_cv_idle;             ///< signals Flush that a staging buffer was released
     std::deque<Task> m_tasks;                      ///< tasks waiting for a worker
-    std::vector<std::shared_ptr<void>> m_buffers;  ///< every staging buffer allocated so far
+    std::vector<std::shared_ptr<void>> m_buffers;  ///< all staging buffers
     std::vector<void*> m_free;                     ///< staging buffers not currently checked out
-    unsigned int m_in_use = 0;                     ///< staging buffers checked out (acquired, queued or running)
     unsigned int m_peak_in_use = 0;
+    unsigned long long m_next_ticket = 0;                             ///< sequence number of the next Acquire()
+    std::vector<std::pair<void*, unsigned long long>> m_checked_out;  ///< buffers acquired, queued or being written
     bool m_stop = false;
 
     std::vector<std::thread> m_threads;
