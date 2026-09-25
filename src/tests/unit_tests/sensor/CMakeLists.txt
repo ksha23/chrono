@@ -56,6 +56,7 @@ if(CH_USE_SENSOR_OPTIX)
     utest_SEN_optixengine
     utest_SEN_optixgeometry
     utest_SEN_optixpipeline
+    utest_SEN_physcam_ops      # phys-cam CUDA filter ops: per-channel parameters, no per-frame leak
   )
   # Only meaningful when NVRTC reads shaders from the build tree. With NVRTC off the shaders are
   # compiled to PTX at build time and nothing is staged for this test to compare against.
