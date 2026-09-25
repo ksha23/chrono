@@ -16,6 +16,7 @@
 
 #include "chrono/utils/ChConstants.h"
 #include "chrono/solver/ChSystemDescriptor.h"
+#include "chrono/utils/ChOpenMP.h"
 
 namespace chrono {
 
@@ -25,7 +26,7 @@ CH_FACTORY_REGISTER(ChSystemDescriptor)
 
 #define CH_SPINLOCK_HASHSIZE 203
 
-ChSystemDescriptor::ChSystemDescriptor() : n_q(0), n_c(0), c_a(1.0), freeze_count(false), m_use_Minv(false) {
+ChSystemDescriptor::ChSystemDescriptor() : c_a(1.0), m_num_threads(1), n_q(0), n_c(0), freeze_count(false), m_use_Minv(false) {
     m_constraints.clear();
     m_variables.clear();
     m_KRMblocks.clear();
@@ -645,6 +646,90 @@ void ChSystemDescriptor::SchurComplementRHS(ChVectorDynamic<>& result, ChVectorD
     result -= b;
 }
 
+// Minimum total number of entries in the KRM block matrices for which the KRM product is done in parallel.
+// Below this, the cost of the parallel region and of the reduction outweighs the gain.
+static const size_t KRM_PARALLEL_MIN_ENTRIES = 20000;
+
+void ChSystemDescriptor::AddKRMTimesVectorInto(ChVectorDynamic<>& result, const ChVectorDynamic<>& x) {
+    const int nblocks = (int)m_KRMblocks.size();
+    const int nthreads = std::min(m_num_threads, nblocks);
+
+    size_t num_entries = 0;
+    if (nthreads > 1) {
+        for (const auto& krm_block : m_KRMblocks)
+            num_entries += krm_block->GetMatrix().size();
+    }
+
+    if (nthreads <= 1 || num_entries < KRM_PARALLEL_MIN_ENTRIES) {
+        m_thread_results.clear();  // release the per-thread buffers if the parallel path is not used
+        for (const auto& krm_block : m_KRMblocks)
+            krm_block->AddMatrixTimesVectorInto(result, x);
+        return;
+    }
+
+    // KRM blocks share variables, so they cannot write directly into 'result' concurrently.
+    // Each thread accumulates a fixed, contiguous range of blocks into its own buffer; the buffers are then summed in
+    // thread order. For a given number of threads, the result is therefore deterministic.
+    // Each thread clears only the rows [row_begin, row_end) touched by its blocks, and the reduction only visits those
+    // rows, so the overhead scales with the part of the system coupled by KRM blocks, not with the whole system.
+    const Eigen::Index n = result.size();
+    if ((int)m_thread_results.size() < nthreads)
+        m_thread_results.resize(nthreads);
+    std::vector<Eigen::Index> row_begin(nthreads, n);
+    std::vector<Eigen::Index> row_end(nthreads, 0);
+
+#pragma omp parallel num_threads(nthreads)
+    {
+        const int nt = ChOMP::GetNumThreads();
+        const int t = ChOMP::GetThreadNum();
+        const int b_start = (int)((long long)nblocks * t / nt);
+        const int b_end = (int)((long long)nblocks * (t + 1) / nt);
+
+        // Rows touched by this thread's blocks
+        Eigen::Index lo = n;
+        Eigen::Index hi = 0;
+        for (int ib = b_start; ib < b_end; ib++) {
+            const auto& krm_block = m_KRMblocks[ib];
+            for (unsigned int iv = 0; iv < krm_block->GetNumVariables(); iv++) {
+                const auto var = krm_block->GetVariable(iv);
+                if (var->IsActive()) {
+                    lo = std::min(lo, (Eigen::Index)var->GetOffset());
+                    hi = std::max(hi, (Eigen::Index)(var->GetOffset() + var->GetDOF()));
+                }
+            }
+        }
+        row_begin[t] = lo;
+        row_end[t] = hi;
+
+        // Partial products over a contiguous range of blocks
+        auto& buffer = m_thread_results[t];
+        buffer.resize(n);
+        if (hi > lo)
+            buffer.segment(lo, hi - lo).setZero();
+        for (int ib = b_start; ib < b_end; ib++)
+            m_KRMblocks[ib]->AddMatrixTimesVectorInto(buffer, x);
+
+#pragma omp barrier
+
+        // Ordered reduction of the per-thread buffers, parallel over the rows touched by any thread
+        Eigen::Index i_start = n;
+        Eigen::Index i_end = 0;
+        for (int k = 0; k < nt; k++) {
+            i_start = std::min(i_start, row_begin[k]);
+            i_end = std::max(i_end, row_end[k]);
+        }
+#pragma omp for schedule(static)
+        for (Eigen::Index i = i_start; i < i_end; i++) {
+            double sum = 0;
+            for (int k = 0; k < nt; k++) {
+                if (i >= row_begin[k] && i < row_end[k])
+                    sum += m_thread_results[k](i);
+            }
+            result(i) += sum;
+        }
+    }
+}
+
 void ChSystemDescriptor::SystemProduct(ChVectorDynamic<>& result, const ChVectorDynamic<>& x) {
     n_q = CountActiveVariables();
     n_c = CountActiveConstraints();
@@ -660,10 +745,8 @@ void ChSystemDescriptor::SystemProduct(ChVectorDynamic<>& result, const ChVector
         }
     }
 
-    // 1.2)  add also K*x.q  (NOT straight parallelizable - risk of concurrency in writing)
-    for (const auto& krm_block : m_KRMblocks) {
-        krm_block->AddMatrixTimesVectorInto(result, x);
-    }
+    // 1.2)  add also K*x.q
+    AddKRMTimesVectorInto(result, x);
 
     // 1.3)  add also [Cq]'*x.l  (NOT straight parallelizable - risk of concurrency in writing)
     for (const auto& constr : m_constraints) {
@@ -701,10 +784,8 @@ void ChSystemDescriptor::SystemProductUpper(ChVectorDynamic<>& result,
         }
     }
 
-    // 2. add also K*x.q  (NON straight parallelizable - risk of concurrency in writing)
-    for (const auto& krm_block : m_KRMblocks) {
-        krm_block->AddMatrixTimesVectorInto(result, v);
-    }
+    // 2. add also K*x.q
+    AddKRMTimesVectorInto(result, v);
 
     // 3. add also [Cq]'*x.l  (NON straight parallelizable - risk of concurrency in writing)
     for (const auto& constr : m_constraints) {

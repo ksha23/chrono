@@ -15,6 +15,7 @@
 #ifndef CHSYSTEMDESCRIPTOR_H
 #define CHSYSTEMDESCRIPTOR_H
 
+#include <algorithm>
 #include <vector>
 
 #include "chrono/solver/ChConstraint.h"
@@ -118,6 +119,17 @@ class ChApi ChSystemDescriptor {
 
     /// Get the c_a coefficient (default=1) used for scaling the M masses of the m_variables.
     virtual double GetMassFactor() { return c_a; }
+
+    /// Set the number of OpenMP threads used for the KRM part of SystemProduct() and SystemProductUpper().
+    /// This is set automatically by ChSystem::SetNumThreads (number of Chrono threads). Default: 1.
+    /// Note that ChSystem::SetSystemDescriptor also overwrites this value with the ChSystem's number of Chrono threads,
+    /// so a custom value must be set after the descriptor is attached to the system.
+    /// The per-thread buffers used by the parallel product have the size of the system vector and are kept between
+    /// calls; they are released when the product falls back to the serial path.
+    void SetNumThreads(int num_threads) { m_num_threads = std::max(1, num_threads); }
+
+    /// Get the number of OpenMP threads used for the KRM part of SystemProduct() and SystemProductUpper().
+    int GetNumThreads() const { return m_num_threads; }
 
     /// Gather all 'fb' known terms from all variables into a column vector.
     /// The column vector will be automatically reset and resized to the proper length if necessary.
@@ -420,6 +432,12 @@ class ChApi ChSystemDescriptor {
     double c_a;  ///< coefficient form M mass matrices in m_variables
 
   private:
+    /// Add K*x.q for all KRM blocks into result (parallel over blocks for large systems).
+    void AddKRMTimesVectorInto(ChVectorDynamic<>& result, const ChVectorDynamic<>& x);
+
+    int m_num_threads;                                ///< number of threads for the KRM product
+    std::vector<ChVectorDynamic<>> m_thread_results;  ///< per-thread buffers for the parallel KRM product
+
     mutable unsigned int n_q;  ///< number of active variables
     mutable unsigned int n_c;  ///< number of active constraints
     bool freeze_count;         ///< cache the number of active variables and constraints

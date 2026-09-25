@@ -271,7 +271,8 @@ class ChApi ChSystem : public ChIntegrableIIorder {
 
     /// Set the number of OpenMP threads used by Chrono itself, Eigen, and the collision detection system.
     /// <pre>
-    ///   num_threads_chrono    - used in FEA (parallel evaluation of internal forces and Jacobians) and
+    ///   num_threads_chrono    - used in FEA (parallel evaluation of internal forces and Jacobians),
+    ///                           in the matrix-free system product of the iterative linear solvers, and
     ///                           in SCM deformable terrain calculations.
     ///   num_threads_collision - used in parallelization of collision detection (if applicable).
     ///                           If passing 0, then num_threads_collision = num_threads_chrono.
