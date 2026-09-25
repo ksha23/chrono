@@ -70,6 +70,9 @@ class ChApi ChConstraintContactNormal : public ChConstraintTwoTuples {
     /// This projection onto the friction cone will also modify the l_i values of the two tangential friction
     /// constraints.
     virtual void Project() override;
+
+    /// Indicate that this constraint takes part in the projection step.
+    virtual bool IsProjected() const override { return true; }
 };
 
 }  // end namespace chrono

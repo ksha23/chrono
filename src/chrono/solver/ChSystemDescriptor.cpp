@@ -25,7 +25,7 @@ CH_FACTORY_REGISTER(ChSystemDescriptor)
 
 #define CH_SPINLOCK_HASHSIZE 203
 
-ChSystemDescriptor::ChSystemDescriptor() : n_q(0), n_c(0), c_a(1.0), freeze_count(false), m_use_Minv(false) {
+ChSystemDescriptor::ChSystemDescriptor() : n_q(0), n_c(0), c_a(1.0), freeze_count(false), m_projected_valid(false), m_use_Minv(false) {
     m_constraints.clear();
     m_variables.clear();
     m_KRMblocks.clear();
@@ -41,6 +41,8 @@ void ChSystemDescriptor::BeginInsertion() {
     m_constraints.clear();
     m_variables.clear();
     m_KRMblocks.clear();
+    m_projected.clear();
+    m_projected_valid = false;
 }
 
 void ChSystemDescriptor::EndInsertion() {
@@ -119,6 +121,14 @@ void ChSystemDescriptor::UpdateCountsAndOffsets() {
     CountActiveVariables();
     CountActiveConstraints();
     freeze_count = true;
+
+    // Cache the active constraints whose projection is not trivially the identity
+    m_projected.clear();
+    for (const auto& constr : m_constraints) {
+        if (constr->IsActive() && constr->IsProjected())
+            m_projected.push_back(constr);
+    }
+    m_projected_valid = true;
 }
 
 void ChSystemDescriptor::PasteMassKRMMatrixInto(ChSparseMatrix& Z,
@@ -734,6 +744,19 @@ void ChSystemDescriptor::SystemProductLower(ChVectorDynamic<>& result,
 }
 
 void ChSystemDescriptor::ConstraintsProject(ChVectorDynamic<>& multipliers) {
+    // If the counts and offsets are frozen, only process the cached list of projected constraints.
+    // All other active constraints have an identity projection, so their multipliers are left unchanged.
+    if (freeze_count && m_projected_valid) {
+        assert(n_c == multipliers.size());
+        for (const auto& constr : m_projected)
+            constr->SetLagrangeMultiplier(multipliers(constr->GetOffset()));
+        for (const auto& constr : m_projected)
+            constr->Project();
+        for (const auto& constr : m_projected)
+            multipliers(constr->GetOffset()) = constr->GetLagrangeMultiplier();
+        return;
+    }
+
     FromVectorToConstraints(multipliers);
 
     for (const auto& constr : m_constraints) {
