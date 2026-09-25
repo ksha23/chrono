@@ -131,4 +131,36 @@ TEST(SchurSpMVSegments, accumulate) {
         ASSERT_EQ(out_full(i), out_ref(i));
 }
 
+TEST(SchurSpMVSegments, overwrite) {
+    // y = A * x on a segment overwrites it, as the Schur product relies on for o_b, o_n, o_t and o_s
+    int rows = 30000, cols = 9000;
+    SparseMatrixType A = RandomMatrix(rows, cols, 10, true, 4u);
+    VectorType x_full = RandomVector(cols + 100, 6u);
+    VectorType out_ref = RandomVector(rows + 200, 10u);
+    ConstSubVectorType x = static_cast<const VectorType&>(x_full).segment(50, cols);
+    VectorType x_copy = x;
+    int saved_threads = ChOMP::GetMaxThreads();
+
+    VectorType out_serial;
+    for (int nthreads : {1, 8}) {
+        ChOMP::SetNumThreads(nthreads);
+        VectorType out_full = out_ref;
+        SubVectorType out = out_full.segment(100, rows);
+        ChSchurProduct::SpMV(A, x, out);
+
+        CheckAgainstEigen(A, x_copy, VectorType::Zero(rows), out_full.segment(100, rows));
+        for (int i = 0; i < 100; i++)
+            ASSERT_EQ(out_full(i), out_ref(i));
+        for (int i = 100 + rows; i < rows + 200; i++)
+            ASSERT_EQ(out_full(i), out_ref(i));
+
+        if (nthreads == 1)
+            out_serial = out_full;
+        for (int i = 0; i < rows + 200; i++)
+            ASSERT_EQ(out_full(i), out_serial(i)) << "threads " << nthreads << " entry " << i;
+    }
+
+    ChOMP::SetNumThreads(saved_threads);
+}
+
 INSTANTIATE_TEST_SUITE_P(MCORE, SchurSpMV, ::testing::Values(true, false));

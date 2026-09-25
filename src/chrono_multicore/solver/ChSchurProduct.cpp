@@ -12,6 +12,8 @@
 // Authors: Hammad Mazhar
 // =============================================================================
 
+#include <functional>
+
 #include "chrono_multicore/solver/ChSolverMulticore.h"
 
 using namespace chrono;
@@ -62,6 +64,8 @@ void ChSchurProduct::SpMV(const SparseMatrixType& A, Eigen::Ref<const VectorType
     // Chrono_multicore is built with EIGEN_DONT_PARALLELIZE (Eigen must not spawn threads inside Chrono's own OpenMP
     // regions), so an Eigen product would run serially here. The Schur product is called outside any parallel region.
     assert(x.size() == A.cols() && y.size() == A.rows());
+    // x and y must not overlap: other threads could read x entries while they are being written as y entries
+    assert(std::less_equal<const real*>()(x.data() + x.size(), y.data()) || std::less_equal<const real*>()(y.data() + y.size(), x.data()));
 
     using Index = SparseMatrixType::StorageIndex;
     const Index num_rows = (Index)A.rows();
@@ -72,7 +76,9 @@ void ChSchurProduct::SpMV(const SparseMatrixType& A, Eigen::Ref<const VectorType
     const real* xp = x.data();
     real* yp = y.data();
 
-    // Same per-row operation order as Eigen's serial row-major product, so results are bitwise identical to it
+    // Each row is reduced by one thread in storage order, so the result does not depend on the number of threads.
+    // This is also the operation order of Eigen 3.4's serial row-major product (newer Eigen versions split each row
+    // over two accumulators, so results then differ from an Eigen product at the rounding level).
 #pragma omp parallel for schedule(static) if (A.nonZeros() > spmv_parallel_min_nnz)
     for (Index i = 0; i < num_rows; i++) {
         const Index end = inner_nnz ? outer[i] + inner_nnz[i] : outer[i + 1];
@@ -98,7 +104,14 @@ void ChSchurProduct::operator()(const VectorType& x, VectorType& output) {
 
     if (data_manager->settings.solver.local_solver_mode == data_manager->settings.solver.solver_mode) {
         if (data_manager->settings.solver.compute_N) {
-            SpMV(Nschur, x, output);
+            if (&x == &output) {
+                // Aliased call (e.g. the APGD step-length estimate); SpMV requires distinct input and output
+                m_tmp.resize(Nschur.rows());
+                SpMV(Nschur, x, m_tmp);
+                output = m_tmp;
+            } else {
+                SpMV(Nschur, x, output);
+            }
             output += E.cwiseProduct(x);
         } else {
             m_tmp.resize(data_manager->host_data.M_invD.rows());

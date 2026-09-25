@@ -68,6 +68,7 @@ class CH_MULTICORE_API ChSchurProduct {
     /// Sparse matrix-vector product y = A * x, or y += A * x if accumulate is true.
     /// The rows of the row-major matrix A are distributed over OpenMP threads (large matrices only). Each row is
     /// reduced by one thread in storage order, so the result does not depend on the number of threads.
+    /// x and y must not overlap in memory.
     static void SpMV(const SparseMatrixType& A, Eigen::Ref<const VectorType> x, Eigen::Ref<VectorType> y, bool accumulate = false);
 
     ChMulticoreDataManager* data_manager;  ///< Pointer to the system's data manager
