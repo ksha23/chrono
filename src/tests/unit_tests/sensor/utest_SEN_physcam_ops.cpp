@@ -15,8 +15,10 @@
 // 1. Every per-channel (R, G, B) parameter array reaches the right channel of the right kernel.
 //    Each operation is run on a known half4 image and compared with a host evaluation of the same
 //    formula, using distinct values per channel so a swapped or dropped channel is caught.
-//    The operations are launched on a user stream and read back through that same stream only,
-//    so the results also confirm the operations are correctly ordered on the stream they are given.
+//    The operations are launched on a non-blocking user stream whose input upload is held back by a
+//    host callback, so an operation that ran on any other stream (including the legacy default
+//    stream) would read a zeroed buffer and fail the comparison. The results therefore also confirm
+//    the operations are ordered on the stream they are given.
 //
 // 2. Repeated calls do not grow device memory. cuda_phys_cam_noise once allocated three small
 //    device arrays per call and freed only two, leaking one allocation per rendered frame.
@@ -28,6 +30,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -62,6 +65,11 @@ struct HostImage {
 };
 
 // Smoothly varying, strictly positive test image with a distinct value per channel.
+// Host callback that holds a stream long enough for a wrongly ordered launch to run first.
+void CUDART_CB HoldStream(void*) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+}
+
 HostImage MakeInput(float alpha) {
     HostImage img;
     for (unsigned int i = 0; i < kPixels; ++i) {
@@ -77,33 +85,60 @@ HostImage MakeInput(float alpha) {
 class PhysCamOps : public ::testing::Test {
   protected:
     void SetUp() override {
-        ASSERT_EQ(cudaStreamCreate(&m_stream), cudaSuccess);
+        // Non-blocking: no implicit ordering with the legacy default stream.
+        ASSERT_EQ(cudaStreamCreateWithFlags(&m_stream, cudaStreamNonBlocking), cudaSuccess);
+        ASSERT_EQ(cudaMallocHost((void**)&m_stage, kBytes), cudaSuccess);
         ASSERT_EQ(cudaMalloc(&m_buf_a, sizeof(__half) * 4 * kPixels), cudaSuccess);
         ASSERT_EQ(cudaMalloc(&m_buf_b, sizeof(__half) * 4 * kPixels), cudaSuccess);
         ASSERT_EQ(cudaMalloc(&m_rng_shot, sizeof(curandState_t) * kPixels), cudaSuccess);
         ASSERT_EQ(cudaMalloc(&m_rng_fpn, sizeof(curandState_t) * kPixels), cudaSuccess);
         init_cuda_rng(1234ull, m_rng_shot, kPixels);
         init_cuda_rng(5678ull, m_rng_fpn, kPixels);
+        // Launch every kernel once before any check. With lazy module loading (the default since
+        // CUDA 12.2) the first launch of a kernel can wait for other streams, which would hide a launch
+        // on the wrong stream behind the held upload below.
+        float p[3] = {1.f, 1.f, 1.f};
+        float zero[3] = {0.f, 0.f, 0.f};
+        cuda_phys_cam_defocus_blur(m_buf_a, m_buf_b, kW, kH, 0.012f, 10.f, 4.f, 3.45e-6f, 10.f, 0.f, m_stream);
+        cuda_phys_cam_vignetting(m_buf_a, kW, kH, 0.01f, 0.02f, 0.6f, m_stream);
+        cuda_phys_cam_aggregator(m_buf_a, kW, kH, 2.f, 0.5f, 1.f, 3.f, p, 4.f, m_stream);
+        cuda_phys_cam_noise(m_buf_a, kW, kH, 0.5f, p, zero, zero, m_rng_shot, m_rng_fpn, m_stream);
+        for (int crf = 0; crf < 3; ++crf)
+            cuda_phys_cam_expsr2dv(m_buf_a, m_buf_b, kW, kH, 1.f, p, zero, 1.f, crf, m_stream);
         ASSERT_EQ(cudaDeviceSynchronize(), cudaSuccess);
+        ASSERT_EQ(cudaGetLastError(), cudaSuccess);
     }
     void TearDown() override {
         cudaFree(m_buf_a);
         cudaFree(m_buf_b);
         cudaFree(m_rng_shot);
         cudaFree(m_rng_fpn);
+        cudaFreeHost(m_stage);
         cudaStreamDestroy(m_stream);
     }
 
-    // Upload and download go through the test stream only (no device-wide synchronization), so a
-    // result read here is only correct if the operation was ordered on that stream.
-    void Upload(const HostImage& img, void* dst) { ASSERT_EQ(cudaMemcpyAsync(dst, img.px.data(), sizeof(__half) * 4 * kPixels, cudaMemcpyHostToDevice, m_stream), cudaSuccess); }
+    // Upload and download go through the test stream only (no device-wide synchronization). The
+    // destination is zeroed first and the copy is queued behind a host callback that holds the stream,
+    // so the upload is still pending when the operation is launched. A result read here is only
+    // correct if the operation was ordered on that stream.
+    void Upload(const HostImage& img, void* dst) {
+        ASSERT_EQ(cudaMemsetAsync(dst, 0, kBytes, m_stream), cudaSuccess);
+        ASSERT_EQ(cudaStreamSynchronize(m_stream), cudaSuccess);
+        std::copy(img.px.begin(), img.px.end(), m_stage);
+        ASSERT_EQ(cudaLaunchHostFunc(m_stream, HoldStream, nullptr), cudaSuccess);
+        ASSERT_EQ(cudaMemcpyAsync(dst, m_stage, kBytes, cudaMemcpyHostToDevice, m_stream), cudaSuccess);
+    }
     void Download(const void* src, HostImage& img) {
-        ASSERT_EQ(cudaMemcpyAsync(img.px.data(), src, sizeof(__half) * 4 * kPixels, cudaMemcpyDeviceToHost, m_stream), cudaSuccess);
+        ASSERT_EQ(cudaMemcpyAsync(m_stage, src, kBytes, cudaMemcpyDeviceToHost, m_stream), cudaSuccess);
         ASSERT_EQ(cudaStreamSynchronize(m_stream), cudaSuccess);
         ASSERT_EQ(cudaGetLastError(), cudaSuccess);
+        std::copy(m_stage, m_stage + 4 * kPixels, img.px.begin());
     }
 
+    static constexpr size_t kBytes = sizeof(__half) * 4 * kPixels;
+
     CUstream m_stream = nullptr;
+    __half* m_stage = nullptr;  // pinned, so the queued copies stay asynchronous
     void* m_buf_a = nullptr;
     void* m_buf_b = nullptr;
     curandState_t* m_rng_shot = nullptr;
