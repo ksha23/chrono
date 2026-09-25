@@ -423,7 +423,8 @@ double ChSolverADMM::_SolveBasic(ChSystemDescriptor& sysd) {
                 for (int i = 0; i < nc; ++i)
                     LS_solver->A().coeffRef(nv + i, nv + i) += -(sigma + vrho(i));
 
-                LS_solver->SetupCurrent();  // LU decomposition ++++++++++++++++++++++++++++++++++++++
+                // Only diagonal values changed, so the analysis of the matrix structure can be reused
+                LS_solver->SetupCurrent(false);  // LU re-factorization +++++++++++++++++++++++++++++++++++++
 
                 m_timer_refactorize.stop();
                 if (verbose)
@@ -836,7 +837,8 @@ double ChSolverADMM::_SolveFast(ChSystemDescriptor& sysd) {
                 for (int i = 0; i < nc; ++i)
                     LS_solver->A().coeffRef(nv + i, nv + i) += -(sigma + vrho(i));
 
-                LS_solver->SetupCurrent();  // LU decomposition ++++++++++++++++++++++++++++++++++++++
+                // Only diagonal values changed, so the analysis of the matrix structure can be reused
+                LS_solver->SetupCurrent(false);  // LU re-factorization +++++++++++++++++++++++++++++++++++++
 
                 m_timer_refactorize.stop();
                 if (verbose)

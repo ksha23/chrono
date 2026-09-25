@@ -160,7 +160,10 @@ class ChApi ChDirectSolverLS : public ChSolverLS {
     /// in cases where a sparse matrix has been already assembled.
     /// Performs the solver setup operations, assuming someone
     /// has already filled A() matrix before calling this.
-    virtual bool SetupCurrent();
+    /// If `analyze` is false, the analysis phase of the previous setup is reused. This is only valid if the caller
+    /// modified values of existing nonzeros of A() since that setup; a change in the matrix size or number of
+    /// nonzeros always triggers a new analysis.
+    virtual bool SetupCurrent(bool analyze = true);
 
     /// Generic setup-solve without passing through the ChSystemDescriptor,
     /// in cases where the a sparse matrix has been already assembled.
@@ -214,6 +217,9 @@ class ChApi ChDirectSolverLS : public ChSolverLS {
     unsigned int m_solve_call;  ///< counter for calls to Solve
     unsigned int m_setup_call;  ///< counter for calls to Setup
 
+    int m_analyzed_dim;  ///< matrix size at the last analysis (-1 if none)
+    int m_analyzed_nnz;  ///< number of matrix nonzeros at the last analysis (-1 if none)
+
     bool m_lock;          ///< is the matrix sparsity pattern locked?
     bool m_use_learner;   ///< use the sparsity pattern learner?
     bool m_force_update;  ///< force a call to the sparsity pattern learner?
@@ -228,6 +234,15 @@ class ChApi ChDirectSolverLS : public ChSolverLS {
     ChTimer m_timer_solve_solvercall;  ///< timer for solution
 
   private:
+    /// Apply the sparsity pattern of the current problem to the matrix, using the sparsity pattern learner.
+    void LearnSparsityPattern(ChSystemDescriptor& sysd);
+
+    /// Reset the matrix to an empty pattern, reserving space for nonzeros using the current sparsity level estimate.
+    void ReserveSparsityPattern();
+
+    /// Record the matrix structure after a factorization (with or without analysis).
+    void RecordAnalyzedPattern(bool analyzed, bool success);
+
     void WriteMatrix(const std::string& filename, const ChSparseMatrix& M);
     void WriteVector(const std::string& filename, const ChVectorDynamic<double>& v);
 };

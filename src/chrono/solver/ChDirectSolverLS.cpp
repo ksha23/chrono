@@ -36,7 +36,9 @@ ChDirectSolverLS::ChDirectSolverLS()
       m_dim(0),
       m_sparsity(-1),
       m_solve_call(0),
-      m_setup_call(0) {}
+      m_setup_call(0),
+      m_analyzed_dim(-1),
+      m_analyzed_nnz(-1) {}
 
 void ChDirectSolverLS::ResetTimers() {
     m_timer_setup_assembly.reset();
@@ -52,6 +54,10 @@ bool ChDirectSolverLS::Setup(ChSystemDescriptor& sysd, bool analyze) {
     // Note that ChSystemDescriptor::UpdateCountsAndOffsets was already called at the beginning of the step.
     m_dim = sysd.CountActiveVariables() + sysd.CountActiveConstraints();
 
+    // A full setup (including the analysis phase) is also required if the problem size changed since the last
+    // analysis or if an update of the sparsity pattern was explicitly requested.
+    analyze = analyze || m_dim != m_analyzed_dim || (m_use_learner && m_force_update);
+
     // If the sparsity pattern learner is enabled and a full setup is required (analyze=true), call the learner if:
     //  (a) an explicit update was requested (by default this is true at the first call), or
     //  (b) the sparsity pattern is not locked and so has to be re-evaluated at each call
@@ -64,14 +70,9 @@ bool ChDirectSolverLS::Setup(ChSystemDescriptor& sysd, bool analyze) {
     bool call_reserve = !m_use_learner && analyze && (m_setup_call == 0 || !m_lock);
 
     if (call_learner) {
-        ChSparsityPatternLearner sparsity_pattern(m_dim, m_dim);
-        sysd.BuildSystemMatrix(&sparsity_pattern, nullptr);
-        sparsity_pattern.Apply(m_mat);
-        m_force_update = false;
+        LearnSparsityPattern(sysd);
     } else if (call_reserve) {
-        double density = (m_sparsity > 0) ? 1 - m_sparsity : 1 - SPM_DEF_SPARSITY;
-        m_mat.resize(m_dim, m_dim);
-        m_mat.reserve(Eigen::VectorXi::Constant(m_dim, static_cast<int>(m_dim * density)));
+        ReserveSparsityPattern();
     }
 
     // Let the system descriptor load the current matrix
@@ -79,6 +80,27 @@ bool ChDirectSolverLS::Setup(ChSystemDescriptor& sysd, bool analyze) {
 
     // Allow the matrix to be compressed
     m_mat.makeCompressed();
+
+    // Without an analysis phase, the matrix keeps the sparsity pattern it had at the last analysis (BuildSystemMatrix
+    // only zeroes and reloads values), so a structural change can only show up as additional nonzeros. In that case,
+    // fall back to a full setup so that the factorization never reuses an analysis done for a different pattern.
+    // If the pattern is not locked, it is also reset (as a full setup would have done), so that entries no longer
+    // present in the problem are dropped instead of accumulating as explicit zeros. This requires assembling the
+    // matrix a second time, which is acceptable since it only happens when the sparsity pattern changes.
+    if (!analyze && m_mat.nonZeros() != m_analyzed_nnz) {
+        analyze = true;
+        if (!m_lock) {
+            if (m_use_learner) {
+                call_learner = true;
+                LearnSparsityPattern(sysd);
+            } else {
+                call_reserve = true;
+                ReserveSparsityPattern();
+            }
+            sysd.BuildSystemMatrix(&m_mat, nullptr, conditioning_factor);
+            m_mat.makeCompressed();
+        }
+    }
 
     m_timer_setup_assembly.stop();
 
@@ -89,6 +111,7 @@ bool ChDirectSolverLS::Setup(ChSystemDescriptor& sysd, bool analyze) {
     m_timer_setup_solvercall.start();
     bool result = FactorizeMatrix(analyze);
     m_timer_setup_solvercall.stop();
+    RecordAnalyzedPattern(analyze, result);
 
     if (write_matrix)
         WriteMatrix(output_dir + "/LS_" + frame_id + "_F.dat", m_mat);
@@ -113,6 +136,30 @@ bool ChDirectSolverLS::Setup(ChSystemDescriptor& sysd, bool analyze) {
     }
 
     return result;
+}
+
+void ChDirectSolverLS::LearnSparsityPattern(ChSystemDescriptor& sysd) {
+    ChSparsityPatternLearner sparsity_pattern(m_dim, m_dim);
+    sysd.BuildSystemMatrix(&sparsity_pattern, nullptr);
+    sparsity_pattern.Apply(m_mat);
+    m_force_update = false;
+}
+
+void ChDirectSolverLS::ReserveSparsityPattern() {
+    double density = (m_sparsity > 0) ? 1 - m_sparsity : 1 - SPM_DEF_SPARSITY;
+    m_mat.resize(m_dim, m_dim);
+    m_mat.reserve(Eigen::VectorXi::Constant(m_dim, static_cast<int>(m_dim * density)));
+}
+
+void ChDirectSolverLS::RecordAnalyzedPattern(bool analyzed, bool success) {
+    if (!success) {
+        // Force a full analysis at the next setup
+        m_analyzed_dim = -1;
+        m_analyzed_nnz = -1;
+    } else if (analyzed) {
+        m_analyzed_dim = static_cast<int>(m_mat.rows());
+        m_analyzed_nnz = static_cast<int>(m_mat.nonZeros());
+    }
 }
 
 double ChDirectSolverLS::Solve(ChSystemDescriptor& sysd) {
@@ -156,18 +203,22 @@ double ChDirectSolverLS::Solve(ChSystemDescriptor& sysd) {
     return result;
 }
 
-bool ChDirectSolverLS::SetupCurrent() {
+bool ChDirectSolverLS::SetupCurrent(bool analyze) {
     m_timer_setup_assembly.start();
 
     // Allow the matrix to be compressed, if not yet compressed
     m_mat.makeCompressed();
 
+    // The analysis phase can only be skipped if the matrix structure did not change since the last analysis
+    analyze = analyze || m_mat.rows() != m_analyzed_dim || m_mat.nonZeros() != m_analyzed_nnz;
+
     m_timer_setup_assembly.stop();
 
     // Let the concrete solver perform the factorization
     m_timer_setup_solvercall.start();
-    bool result = FactorizeMatrix(true);
+    bool result = FactorizeMatrix(analyze);
     m_timer_setup_solvercall.stop();
+    RecordAnalyzedPattern(analyze, result);
 
     if (verbose) {
         cout << "  Solver setup [" << m_setup_call << "] n = " << m_dim << "  nnz = " << (int)m_mat.nonZeros() << endl;
