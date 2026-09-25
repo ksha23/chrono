@@ -69,6 +69,7 @@ The following unofficial method needs that you set the environmental variable of
 	`MKL_INTERFACE_LAYER` = `LP64`<br>
 	`MKL_THREADING_LAYER` = `INTEL`<br>
 	or, more in general, you can have [different options](https://software.intel.com/en-us/mkl-linux-developer-guide-dynamically-selecting-the-interface-and-threading-layer), depending on your Architecture and the desired Threading Layer.
+	These variables are only read by the single dynamic library runtime (`MKL_LINK=sdl`, i.e. `mkl_rt`). `MKL_THREADING_LAYER` must match the OpenMP runtime used by Chrono: use `GNU` for GCC builds that use the GNU OpenMP runtime (libgomp), and `INTEL` otherwise (see `MKL_THREADING` above).
 
 2. reboot your IDE, close any open CMake
 

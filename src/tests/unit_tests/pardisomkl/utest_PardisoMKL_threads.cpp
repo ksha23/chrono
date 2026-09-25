@@ -23,6 +23,7 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <iostream>
 #include <string>
 #include <vector>
 
@@ -86,6 +87,13 @@ TEST(PardisoMKL, single_openmp_runtime) {
 }
 
 // Check that a GCC build with OpenMP does not use the MKL threading layer for the Intel OpenMP runtime.
+// This is the check that detects a mismatched configuration regardless of the library load order. The
+// runtime collision itself only shows up when libgomp is loaded before libiomp5/libomp (as in the vehicle
+// demos, or with LD_PRELOAD); in that case the other two tests fail as well. In the load order of this test
+// executable alone, the collision may not occur (or libgomp may be an alias of the LLVM runtime).
+// CMake also selects gnu_thread for Clang builds that link libgomp. Those are not checked here, since a
+// Clang build usually links the LLVM runtime (libomp), for which intel_thread is the correct layer, and
+// the compiler macros do not tell which runtime was linked.
 TEST(PardisoMKL, threading_layer) {
 #if defined(__linux__) && defined(_OPENMP) && defined(__GNUC__) && !defined(__clang__) && !defined(__INTEL_COMPILER)
     auto libs = LoadedLibraries();
