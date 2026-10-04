@@ -7,18 +7,26 @@
 #include "chrono_sensor/filters/ChFilterIMUUpdate.h"
 #include "chrono_sensor/filters/ChFilterTachometerUpdate.h"
 
-#ifdef CHRONO_HAS_OPTIX
+// Image filters: built with every ray-tracing backend.
+#ifdef CHRONO_HAS_SENSOR_RENDER
 
-  #include "chrono_sensor/optix/ChFilterOptixRender.h"
-  #include "chrono_sensor/filters/ChFilterPCfromDepth.h"
   #include "chrono_sensor/filters/ChFilterGrayscale.h"
+  #include "chrono_sensor/filters/ChFilterCameraNoise.h"
+  #include "chrono_sensor/filters/ChFilterSave.h"
+  #include "chrono_sensor/filters/ChFilterVisualize.h"
+  #include "chrono_sensor/filters/ChFilterImageOps.h"
+
+#endif
+
+// Point-cloud, radar and physics-based camera filters: built with OptiX and with Metal RT.
+#if defined(CHRONO_HAS_OPTIX) || defined(CHRONO_HAS_METAL_RT)
+
+  #include "chrono_sensor/filters/ChFilterPCfromDepth.h"
   #include "chrono_sensor/filters/ChFilterRadarProcess.h"
   #include "chrono_sensor/filters/ChFilterRadarXYZReturn.h"
   #include "chrono_sensor/filters/ChFilterRadarSavePC.h"
   #include "chrono_sensor/filters/ChFilterRadarVisualizeCluster.h"
   #include "chrono_sensor/filters/ChFilterRadarXYZVisualize.h"
-  #include "chrono_sensor/filters/ChFilterCameraNoise.h"
-  #include "chrono_sensor/filters/ChFilterCameraExposure.h"
 
   #include "chrono_sensor/filters/ChFilterPhysCameraAggregator.h"
   #include "chrono_sensor/filters/ChFilterPhysCameraDefocusBlur.h"
@@ -26,12 +34,16 @@
   #include "chrono_sensor/filters/ChFilterPhysCameraNoise.h"
   #include "chrono_sensor/filters/ChFilterPhysCameraVignetting.h"
 
-  #include "chrono_sensor/filters/ChFilterSave.h"
   #include "chrono_sensor/filters/ChFilterSavePtCloud.h"
-  #include "chrono_sensor/filters/ChFilterVisualize.h"
-  #include "chrono_sensor/filters/ChFilterImageOps.h"
   #include "chrono_sensor/filters/ChFilterVisualizePointCloud.h"
-  
+
+#endif
+
+#ifdef CHRONO_HAS_OPTIX
+
+  #include "chrono_sensor/optix/ChFilterOptixRender.h"
+  #include "chrono_sensor/filters/ChFilterCameraExposure.h"
+
 #endif
 
 using namespace chrono;
@@ -52,7 +64,7 @@ using namespace chrono::sensor;
 %shared_ptr(chrono::sensor::ChFilterAccess< chrono::sensor::SensorBufferT< std::shared_ptr< chrono::sensor::MagnetData [] > >,std::shared_ptr< chrono::sensor::SensorBufferT< std::shared_ptr< chrono::sensor::MagnetData [] > > > > )
 %shared_ptr(chrono::sensor::ChFilterAccess< chrono::sensor::SensorBufferT< std::shared_ptr< chrono::sensor::GPSData [] > >,std::shared_ptr< chrono::sensor::SensorBufferT< std::shared_ptr< chrono::sensor::GPSData [] > > > > )
 
-#ifdef CHRONO_HAS_OPTIX
+#ifdef CHRONO_HAS_SENSOR_RENDER
 
   %shared_ptr(chrono::sensor::ChFilterAccess< chrono::sensor::LidarBufferT< std::shared_ptr< chrono::sensor::PixelXYZI [] > >,std::shared_ptr< chrono::sensor::LidarBufferT< std::shared_ptr< chrono::sensor::PixelXYZI [] > > > > )
   %shared_ptr(chrono::sensor::ChFilterAccess< chrono::sensor::LidarBufferT< std::shared_ptr< chrono::sensor::PixelDI [] > >,std::shared_ptr< chrono::sensor::LidarBufferT< std::shared_ptr< chrono::sensor::PixelDI [] > > > > )
@@ -104,36 +116,46 @@ using namespace chrono::sensor;
 %include "chrono_sensor/filters/ChFilterIMUUpdate.h"
 
 
-#ifdef CHRONO_HAS_OPTIX
+#ifdef CHRONO_HAS_SENSOR_RENDER
 
   %include "chrono_sensor/filters/ChFilterGrayscale.h"
-  %include "chrono_sensor/optix/ChFilterOptixRender.h"
-  %include "chrono_sensor/filters/ChFilterPCfromDepth.h"
   %include "chrono_sensor/filters/ChFilterSave.h"
-  %include "chrono_sensor/filters/ChFilterSavePtCloud.h"
   %include "chrono_sensor/filters/ChFilterVisualize.h"
-  %include "chrono_sensor/filters/ChFilterVisualizePointCloud.h"
   %include "chrono_sensor/filters/ChFilterImageOps.h"
+  %include "chrono_sensor/filters/ChFilterCameraNoise.h"
+
+#endif
+
+#if defined(CHRONO_HAS_OPTIX) || defined(CHRONO_HAS_METAL_RT)
+
+  %include "chrono_sensor/filters/ChFilterPCfromDepth.h"
+  %include "chrono_sensor/filters/ChFilterSavePtCloud.h"
+  %include "chrono_sensor/filters/ChFilterVisualizePointCloud.h"
   %include "chrono_sensor/filters/ChFilterRadarProcess.h"
   %include "chrono_sensor/filters/ChFilterRadarSavePC.h"
   %include "chrono_sensor/filters/ChFilterRadarVisualizeCluster.h"
   %include "chrono_sensor/filters/ChFilterRadarXYZReturn.h"
   %include "chrono_sensor/filters/ChFilterRadarXYZVisualize.h"
-  %include "chrono_sensor/filters/ChFilterCameraNoise.h"
-  %include "chrono_sensor/filters/ChFilterCameraExposure.h"
 
   %include "chrono_sensor/filters/ChFilterPhysCameraAggregator.h"
   %include "chrono_sensor/filters/ChFilterPhysCameraDefocusBlur.h"
   %include "chrono_sensor/filters/ChFilterPhysCameraExpsrToDV.h"
   %include "chrono_sensor/filters/ChFilterPhysCameraNoise.h"
   %include "chrono_sensor/filters/ChFilterPhysCameraVignetting.h"
-  
+
+#endif
+
+#ifdef CHRONO_HAS_OPTIX
+
+  %include "chrono_sensor/optix/ChFilterOptixRender.h"
+  %include "chrono_sensor/filters/ChFilterCameraExposure.h"
+
 #endif
 
 
 // Filter acces templates instances
 
-#ifdef CHRONO_HAS_OPTIX
+#ifdef CHRONO_HAS_SENSOR_RENDER
 
   // camera
   %template(ChFilterRGBA8Access)      chrono::sensor::ChFilterAccess<  chrono::sensor::SensorBufferT<std::shared_ptr<chrono::sensor::PixelRGBA8[]>>,    std::shared_ptr< chrono::sensor::SensorBufferT<std::shared_ptr<chrono::sensor::PixelRGBA8[]>>    >  >;

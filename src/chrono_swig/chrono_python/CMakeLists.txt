@@ -132,8 +132,15 @@ endif()
 
 if(CH_ENABLE_MODULE_SENSOR)
   set(CMAKE_SWIG_FLAGS "${CMAKE_SWIG_FLAGS};-DCHRONO_SENSOR")
+  # The interface files select what to wrap with the macros of chrono_sensor/ChConfigSensor.h.
+  # SWIG does not read that header, so it is told here which ray-tracing backend the public
+  # sensor headers resolve to: OptiX, else Vulkan RT, else Metal RT.
   if(CH_USE_SENSOR_OPTIX)
-    set(CMAKE_SWIG_FLAGS "${CMAKE_SWIG_FLAGS};-DCHRONO_HAS_OPTIX")
+    set(CMAKE_SWIG_FLAGS "${CMAKE_SWIG_FLAGS};-DCHRONO_HAS_OPTIX;-DCHRONO_HAS_SENSOR_RENDER")
+  elseif(CH_USE_SENSOR_VULKAN_RT)
+    set(CMAKE_SWIG_FLAGS "${CMAKE_SWIG_FLAGS};-DCHRONO_HAS_VULKAN_RT;-DCHRONO_HAS_SENSOR_RENDER")
+  elseif(CH_USE_SENSOR_METAL_RT)
+    set(CMAKE_SWIG_FLAGS "${CMAKE_SWIG_FLAGS};-DCHRONO_HAS_METAL_RT;-DCHRONO_HAS_SENSOR_RENDER")
   endif()
 endif()
 

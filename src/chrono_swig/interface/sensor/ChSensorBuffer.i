@@ -32,7 +32,7 @@ using namespace chrono::sensor;
 
 // BufferT Templates
 
-#ifdef CHRONO_HAS_OPTIX
+#ifdef CHRONO_HAS_SENSOR_RENDER
 
   //camera
   %template(UserR8Buffer) chrono::sensor::SensorBufferT<std::shared_ptr<char[]>>;
@@ -63,7 +63,7 @@ using namespace chrono::sensor;
 // ADDITIONAL C++ FUNCTIONS / CLASSES THAT ARE USED ONLY FOR PYTHON WRAPPER
 //
 
-#ifdef CHRONO_HAS_OPTIX
+#ifdef CHRONO_HAS_SENSOR_RENDER
 
   %extend chrono::sensor::SensorConfig<std::shared_ptr<chrono::sensor::PixelDI[]>> {
           public:

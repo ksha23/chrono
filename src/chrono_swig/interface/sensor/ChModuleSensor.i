@@ -78,17 +78,34 @@
 #include "chrono_sensor/sensors/ChSensorBuffer.h"
 #include "chrono_sensor/sensors/ChNoiseModel.h"
 
-#ifdef CHRONO_HAS_OPTIX
+// Camera, lidar and radar need a ray-tracing backend. The sensor classes are the same for all
+// backends; the base class they derive from and the scene class are the backend's own.
+#ifdef CHRONO_HAS_SENSOR_RENDER
 
-  #include "chrono_sensor/sensors/ChOptixSensor.h"
   #include "chrono_sensor/sensors/ChCameraSensor.h"
   #include "chrono_sensor/sensors/ChSegmentationCamera.h"
   #include "chrono_sensor/sensors/ChDepthCamera.h"
   #include "chrono_sensor/sensors/ChLidarSensor.h"
   #include "chrono_sensor/sensors/ChRadarSensor.h"
+
+#endif
+
+#if defined(CHRONO_HAS_OPTIX)
+
+  #include "chrono_sensor/sensors/ChOptixSensor.h"
   #include "chrono_sensor/optix/ChOptixScene.h"
   #include "chrono_sensor/optix/ChOptixDefinitions.h"
   #include "chrono_sensor/optix/ChOptixUtils.h"
+
+#elif defined(CHRONO_HAS_VULKAN_RT)
+
+  #include "chrono_sensor/sensors/ChVulkanSensor.h"
+  #include "chrono_sensor/vulkan/ChVulkanRTScene.h"
+
+#elif defined(CHRONO_HAS_METAL_RT)
+
+  #include "chrono_sensor/sensors/ChMetalSensor.h"
+  #include "chrono_sensor/metal/ChMetalRTScene.h"
 
 #endif
 
@@ -172,9 +189,16 @@ using namespace chrono::sensor;
 %shared_ptr(chrono::sensor::SensorBufferT<std::shared_ptr<chrono::sensor::MagnetData[]>>)
 %shared_ptr(chrono::sensor::SensorBufferT<std::shared_ptr<chrono::sensor::GPSData[]>>)
 
-#ifdef CHRONO_HAS_OPTIX
-
+#if defined(CHRONO_HAS_OPTIX)
   %shared_ptr(chrono::sensor::ChOptixScene)
+#elif defined(CHRONO_HAS_VULKAN_RT)
+  %shared_ptr(chrono::sensor::ChVulkanRTScene)
+#elif defined(CHRONO_HAS_METAL_RT)
+  %shared_ptr(chrono::sensor::ChMetalRTScene)
+#endif
+
+#ifdef CHRONO_HAS_SENSOR_RENDER
+
   %shared_ptr(chrono::sensor::PixelDI)
   %shared_ptr(chrono::sensor::PixelXYZI)
   %shared_ptr(chrono::sensor::PixelRGBA8)
@@ -234,15 +258,23 @@ using namespace chrono::sensor;
 %include "ChNoiseModel.i"
 %include "ChSensorBuffer.i"
 %include "ChFilter.i"
-#ifdef CHRONO_HAS_OPTIX
+#if defined(CHRONO_HAS_OPTIX)
   %include "ChScene.i"
+#elif defined(CHRONO_HAS_VULKAN_RT)
+  %include "ChVulkanScene.i"
+#elif defined(CHRONO_HAS_METAL_RT)
+  %include "ChMetalScene.i"
 #endif
 %include "ChSensor.i"
 %include "ChGPSSensor.i"
 %include "ChIMUSensor.i"
-#ifdef CHRONO_HAS_OPTIX
+#ifdef CHRONO_HAS_SENSOR_RENDER
   %include "ChOptixSensor.i"
 #endif
+// The Vulkan RT and Metal RT render engines are not wrapped: the manager is driven through
+// Update() and configured through its scene.
+%ignore chrono::sensor::ChSensorManager::GetVulkanEngine;
+%ignore chrono::sensor::ChSensorManager::GetMetalEngine;
 %include "chrono_sensor/ChSensorManager.h"
 
 

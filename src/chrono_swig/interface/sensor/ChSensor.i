@@ -17,7 +17,7 @@ using namespace chrono::sensor;
 %include "../../../chrono_sensor/sensors/ChSensor.h"
 %include "../../../chrono_sensor/sensors/Sensor.h"
 
-#ifdef CHRONO_HAS_OPTIX
+#ifdef CHRONO_HAS_SENSOR_RENDER
   %template(GetMostRecentRGBA8Buffer) chrono::sensor::ChSensor::GetMostRecentBuffer< std::shared_ptr < chrono::sensor::SensorBufferT<std::shared_ptr<chrono::sensor::PixelRGBA8[]>>> > ;
   %template(GetMostRecentR8Buffer)    chrono::sensor::ChSensor::GetMostRecentBuffer< std::shared_ptr < chrono::sensor::SensorBufferT<std::shared_ptr<char[]>>> > ;
 

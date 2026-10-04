@@ -2,7 +2,7 @@ set(TESTS
     pyutest_SEN_gps
 )
 
-if(CH_USE_SENSOR_OPTIX)
+if(CH_USE_SENSOR_OPTIX OR CH_USE_SENSOR_VULKAN_RT OR CH_USE_SENSOR_METAL_RT)
    set(TESTS ${TESTS}
        pyutest_SEN_data_access
    )
