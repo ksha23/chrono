@@ -44,7 +44,9 @@ using namespace chrono::sensor;
   %template(UserDIBuffer) chrono::sensor::LidarBufferT<std::shared_ptr<chrono::sensor::PixelDI[]>>;
   %template(UserXYZIBuffer) chrono::sensor::LidarBufferT<std::shared_ptr<chrono::sensor::PixelXYZI[]>>;
   
-  //radar
+  //radar (as for the lidar, the base buffer is instantiated first: it holds Width, Height and TimeStamp)
+  %template(UserRadarSensorBuffer) chrono::sensor::SensorBufferT<std::shared_ptr<chrono::sensor::RadarReturn[]>>;
+  %template(UserRadarXYZSensorBuffer) chrono::sensor::SensorBufferT<std::shared_ptr<chrono::sensor::RadarXYZReturn[]>>;
   %template(UserRadarBuffer) chrono::sensor::RadarBufferT<std::shared_ptr<chrono::sensor::RadarReturn[]>>;
   %template(UserRadarXYZBuffer) chrono::sensor::RadarBufferT<std::shared_ptr<chrono::sensor::RadarXYZReturn[]>>;
   
