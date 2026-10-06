@@ -50,9 +50,89 @@ def chrono_data_dir():
     return os.path.join(d, "data", "mcity")
 
 try:
-    from pxr import Usd, UsdGeom, UsdShade, Gf
+    from pxr import Usd, UsdGeom, UsdLux, UsdShade, Gf
 except ImportError:
     sys.exit("usd-core is required:  python3 -m pip install usd-core")
+
+
+def arc_items(prim):
+    """The references and payloads authored on a prim.
+
+    Both lists are read, and separately. One Mcity traffic light carries an empty references
+    list beside the payload that actually brings it in, and reading references first and
+    payloads only as a fallback saw the empty list and skipped the light.
+    """
+    items = []
+    for key in ("references", "payload"):
+        arcs = prim.GetMetadata(key)
+        if arcs:
+            items += (list(arcs.prependedItems) + list(arcs.appendedItems) +
+                      list(arcs.addedItems) + list(arcs.explicitItems))
+    return items
+
+
+SEMANTIC = "semantics:labels:wikidata_qcode"
+
+
+def semantic_label(prim):
+    """The Wikidata code upstream tagged this placement with, e.g. Q8004 for a traffic light.
+
+    Every mesh in the stage is covered by one, set on the placement, on a prim above it, or on
+    the first transform inside the referenced asset.
+    """
+    def read(p):
+        attr = p.GetAttribute(SEMANTIC)
+        v = attr.Get() if attr else None
+        for token in (v or []):
+            token = str(token).strip("[]")
+            if token.startswith("Q") and token[1:].isdigit():
+                return token
+        return None
+
+    p = prim
+    while p and str(p.GetPath()) != "/":
+        hit = read(p)
+        if hit:
+            return hit
+        p = p.GetParent()
+    for p in Usd.PrimRange(prim, Usd.TraverseInstanceProxies()):
+        hit = read(p)
+        if hit:
+            return hit
+    return None
+
+
+def gather_lights(stage, xf, scale):
+    """Every light in the stage, in metres. At Mcity these are the 206 signal lamps.
+
+    Chrono's visual shapes have no light of their own, so these cannot ride along on a mesh. They
+    go into the manifest as data: where each lamp is, which way it points, and its colour.
+    """
+    out = []
+    for prim in stage.Traverse(Usd.TraverseInstanceProxies()):
+        if not prim.HasAPI(UsdLux.LightAPI):
+            continue
+        light = UsdLux.LightAPI(prim)
+        m = xf.GetLocalToWorldTransform(prim)
+        pos = m.ExtractTranslation()
+        aim = m.TransformDir(Gf.Vec3d(0, 0, -1)).GetNormalized()  # USD lights emit along -Z
+        colour = light.GetColorAttr().Get() or (1, 1, 1)
+        parts = str(prim.GetPath()).split("/")
+        entry = {
+            "name": prim.GetName(),
+            "type": prim.GetTypeName(),
+            "owner": parts[3] if len(parts) > 3 else "",
+            "group": parts[2] if len(parts) > 2 else "Root",
+            "pos": [round(pos[i] * scale, 4) for i in range(3)],
+            "dir": [round(aim[i], 5) for i in range(3)],
+            "colour": [round(float(c), 4) for c in colour],
+            "intensity": float(light.GetIntensityAttr().Get() or 0.0),
+        }
+        cone = prim.GetAttribute("inputs:shaping:cone:angle")
+        if cone and cone.Get() is not None:
+            entry["cone_angle"] = float(cone.Get())
+        out.append(entry)
+    return out
 
 
 def safe_name(path):
@@ -183,7 +263,7 @@ def material_signature(placement):
 
 def gather_meshes(placement, xf):
     """Every mesh under one placement, with its transform relative to the placement and the
-    material bound to it *in the composed stage*.
+    material bound to it *in the composed stage*. Also returns the placement's point instancers.
 
     Reading the composed stage rather than the referenced asset file is what makes signage work.
     Mcity builds its signs from a few blank plates and binds the legend as a per-placement
@@ -191,16 +271,73 @@ def gather_meshes(placement, xf):
     face, while the same face in context reports MI_R2_1_SpeedLimit_45_24x30.
     """
     root_inv = xf.GetLocalToWorldTransform(placement).GetInverse()
-    out = []
+    out, clumps = [], []
     # TraverseInstanceProxies, because the foliage prims are USD *native instances*: their
     # geometry lives in a shared prototype and a plain PrimRange reports zero meshes under them.
-    for prim in Usd.PrimRange(placement, Usd.TraverseInstanceProxies()):
+    it = iter(Usd.PrimRange(placement, Usd.TraverseInstanceProxies()))
+    for prim in it:
+        if prim.IsA(UsdGeom.PointInstancer):
+            clumps += gather_clumps(prim, xf, root_inv)
+            # What sits under an instancer is its prototypes. They are drawn where the instancer
+            # puts them and nowhere else, so they must not also be exported as meshes in place.
+            it.PruneChildren()
+            continue
         if not prim.IsA(UsdGeom.Mesh):
             continue
         bound = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()[0]
         mat = bound.GetPrim().GetName() if bound else "default"
         out.append((prim, xf.GetLocalToWorldTransform(prim) * root_inv, mat))
+    return out, clumps
+
+
+def gather_clumps(instancer, xf, root_inv):
+    """One point instancer, as (name, prototype meshes, instance matrices) per prototype.
+
+    This is where the trees are. Ten of Mcity's species model only the trunk as a mesh and place
+    every branch, with its leaves or needles, through instancers: 52 to 454 of them per tree. An
+    exporter that walks Mesh prims alone sees each branch prototype once, sitting wherever it was
+    authored, and writes out a trunk with a few stray twigs. That is what this converter did
+    until the instancers were read, and it is why the trees looked dead.
+
+    Meshes come back relative to the prototype root's parent, i.e. with the root's own transform
+    applied, and each instance matrix then carries that into the placement's frame.
+    """
+    pi = UsdGeom.PointInstancer(instancer)
+    indices = list(pi.GetProtoIndicesAttr().Get() or [])
+    if not indices:
+        return []
+    time = Usd.TimeCode.Default()
+    xforms = pi.ComputeInstanceTransformsAtTime(time, time, UsdGeom.PointInstancer.ExcludeProtoXform)
+    if len(xforms) != len(indices):
+        return []
+    to_placement = xf.GetLocalToWorldTransform(instancer) * root_inv
+    stage = instancer.GetStage()
+    out = []
+    for k, target in enumerate(pi.GetPrototypesRel().GetTargets()):
+        proto = stage.GetPrimAtPath(target)
+        if not proto:
+            continue
+        parent_inv = xf.GetLocalToWorldTransform(proto.GetParent()).GetInverse()
+        meshes = []
+        for prim in Usd.PrimRange(proto, Usd.TraverseInstanceProxies()):
+            if not prim.IsA(UsdGeom.Mesh):
+                continue
+            bound = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()[0]
+            mat = bound.GetPrim().GetName() if bound else "default"
+            meshes.append((prim, xf.GetLocalToWorldTransform(prim) * parent_inv, mat))
+        mats = [xforms[i] * to_placement for i, which in enumerate(indices) if which == k]
+        if meshes and mats:
+            out.append((proto.GetName(), meshes, mats))
     return out
+
+
+def affine12(m, scale):
+    """A USD matrix as 12 numbers: the 3x3 row-major, then the translation in metres.
+
+    Row-vector convention, as USD has it: a point p goes to p @ M + t.
+    """
+    return ([round(m[i][j], 6) for i in range(3) for j in range(3)] +
+            [round(m[3][j] * scale, 5) for j in range(3)])
 
 
 def export_variant(meshes, out_obj, scale, surface_for):
@@ -305,16 +442,21 @@ def export_variant(meshes, out_obj, scale, surface_for):
                 else:
                     f.write(f"f {i}/{i} {j}/{j} {k}/{k}\n")
 
-        parts.append({"name": mat_name,
-                      "mesh": os.path.join("assets", part_name + ".obj"),
-                      "texture": surf.get("texture"),
-                      "normal": surf.get("normal"),
-                      "roughness": surf.get("roughness"),
-                      "metallic": surf.get("metallic"),
-                      "colour": surf.get("kd", [0.62, 0.62, 0.64]),
-                      "ks": surf.get("ks", [0.05, 0.05, 0.05]),
-                      "ns": surf.get("ns", 10.0),
-                      "tris": len(faces)})
+        part = {"name": mat_name,
+                "mesh": os.path.join("assets", part_name + ".obj"),
+                "texture": surf.get("texture"),
+                "normal": surf.get("normal"),
+                "roughness": surf.get("roughness"),
+                "metallic": surf.get("metallic"),
+                "colour": surf.get("kd", [0.62, 0.62, 0.64]),
+                "ks": surf.get("ks", [0.05, 0.05, 0.05]),
+                "ns": surf.get("ns", 10.0),
+                "tris": len(faces)}
+        # Present only where the material has them, which is a small minority.
+        for key in OPTIONAL_SURFACE:
+            if surf.get(key) is not None:
+                part[key] = surf[key]
+        parts.append(part)
 
     # Still written, for anything outside Chrono that reads the OBJ set.
     write_mtl(stem + ".mtl", base,
@@ -322,6 +464,15 @@ def export_variant(meshes, out_obj, scale, surface_for):
 
     textured = sum(1 for p in parts if p["texture"])
     return {"tris": num_faces, "parts": parts, "textured": textured}
+
+
+# Surface fields beyond the four maps every part lists. Maps are paths relative to the manifest.
+#   ao, opacity, emissive_texture   further maps
+#   emissive, emissive_intensity    what a lamp gives off when it is lit
+#   roughness_value, metallic_value constants for a material with no such map
+#   uv_scale                        texture tiling, multiplies the mesh's own coordinates
+OPTIONAL_SURFACE = ("ao", "opacity", "emissive_texture", "emissive", "emissive_intensity",
+                    "roughness_value", "metallic_value", "uv_scale")
 
 
 def decompose(m):
@@ -377,12 +528,18 @@ def main():
 
     # Textures resolved by resolve_textures.py, keyed by material. Materials without one keep
     # the catalogue's flat colour.
-    tex_map = {}
+    tex_map, sky = {}, None
     tex_json = os.path.join(args.indir, "asset_textures.json")
     if os.path.exists(tex_json):
         with open(tex_json) as f:
-            tex_map = json.load(f).get("materials", {})
+            doc = json.load(f)
+        tex_map, sky = doc.get("materials", {}), doc.get("sky")
         print(f"  texture assignments: {len(tex_map)} materials")
+
+    labels = {}
+    if os.path.exists(os.path.join(here, "semantics.json")):
+        with open(os.path.join(here, "semantics.json")) as f:
+            labels = json.load(f)
 
     tex_dir = os.path.join(args.outdir, "textures")
 
@@ -390,22 +547,26 @@ def main():
         """Resolve one material to a Wavefront surface: its texture if we found one, else a
         catalogue colour."""
         surf = dict(match_material(catalog, material_name, asset_name))
-        entry = tex_map.get(material_name)
-        if entry and os.path.exists(os.path.join(tex_dir, entry["texture"])):
+        entry = tex_map.get(material_name) or {}
+        if entry.get("texture") and os.path.exists(os.path.join(tex_dir, entry["texture"])):
             # Two spellings of the same file. map_kd is relative to the MTL, which sits beside
             # the OBJ in assets/, for any external tool that reads the OBJ. "texture" is relative
             # to the manifest, which is what Chrono resolves against.
             surf["map_kd"] = os.path.join("..", "textures", entry["texture"])
             surf["texture"] = os.path.join("textures", entry["texture"])
-            # Relief and gloss maps. The base colour on its own reads flat: these are what make
-            # asphalt look like asphalt rather than grey paint.
-            for kind in ("normal", "roughness", "metallic"):
-                name = entry.get(kind)
-                if name and os.path.exists(os.path.join(tex_dir, name)):
-                    surf[kind] = os.path.join("textures", name)
             # A textured surface must not also be tinted, or the texture is multiplied by the
-            # catalogue colour and comes out muddy.
+            # catalogue colour and comes out muddy. A tint the material does ask for is already
+            # baked into the texture by resolve_textures.py.
             surf["kd"] = [1.0, 1.0, 1.0]
+        # Relief and gloss maps. The base colour on its own reads flat: these are what make
+        # asphalt look like asphalt rather than grey paint.
+        for kind in ("normal", "roughness", "metallic", "ao", "opacity", "emissive_texture"):
+            name = entry.get(kind)
+            if name and os.path.exists(os.path.join(tex_dir, name)):
+                surf[kind] = os.path.join("textures", name)
+        for key in ("emissive", "emissive_intensity", "roughness_value", "metallic_value", "uv_scale"):
+            if key in entry:
+                surf[key] = entry[key]
         return surf
 
     stage = Usd.Stage.Open(root_usd)
@@ -423,10 +584,7 @@ def main():
         # Both composition arcs matter. The props are brought in by reference, but the 2010 trees
         # and shrubs under /Root/Foliage_Instanced arrive by payload, and looking only at
         # references silently drops every one of them.
-        arcs = prim.GetMetadata("references") or prim.GetMetadata("payload")
-        if not arcs:
-            continue
-        items = list(arcs.prependedItems) or list(arcs.appendedItems) or list(arcs.addedItems)
+        items = arc_items(prim)
         if not items:
             continue
 
@@ -477,18 +635,32 @@ def main():
         if key in variants:
             per_placement.append(key if variants[key] else None)
             continue
-        meshes = gather_meshes(prim, xf)
+        meshes, clumps = gather_meshes(prim, xf)
 
         stem = safe_name(path)
         collisions = sum(1 for k in variants if k[0] == path)
         name = stem if collisions == 0 else f"{stem}__v{collisions}"
         info = export_variant(meshes, os.path.join(assets_dir, name + ".obj"), mpu,
                               lambda m, a=stem: surface_for(m, a))
+        # Instanced geometry is written once per prototype, with its placements beside it, and
+        # left for decimate_foliage.py to expand. Expanded here it would be 0.6 to 15.6 million
+        # triangles for a single tree.
+        exported = []
+        for n, (cname, cmeshes, mats) in enumerate(clumps):
+            cinfo = export_variant(cmeshes, os.path.join(assets_dir, f"{name}__c{n}.obj"), mpu,
+                                   lambda m, a=stem: surface_for(m, a))
+            if cinfo:
+                exported.append({"name": cname, "parts": cinfo["parts"],
+                                 "xforms": [affine12(m, mpu) for m in mats]})
+        if info is None and exported:
+            info = {"tris": 0, "parts": [], "textured": 0}
         if info is None:
             variants[key] = None
             per_placement.append(None)
             skipped += 1
             continue
+        if exported:
+            info["clumps"] = exported
         # No manifest colour: the MTL now carries a surface per submesh, and a shape-level colour
         # would flatten all of them back into one.
         variants[key] = {"name": name, "info": info}
@@ -503,18 +675,25 @@ def main():
     tot_tex = sum(v["info"]["textured"] for v in live)
     print(f"  {tot_mat} material slots, {tot_tex} textured ({100*tot_tex//max(tot_mat,1)}%)")
 
-    instances = []
-    for (path, _, m, group), key in zip(placements, per_placement):
+    instances, used_labels = [], set()
+    for (path, prim, m, group), key in zip(placements, per_placement):
         if key is None or key not in index:
             continue
         t, q, s = decompose(m)
-        instances.append({
+        inst = {
             "asset": index[key],
             "group": group,
+            # The prim's own name. For a traffic light it ends in the OpenDRIVE signal id.
+            "name": prim.GetName(),
             "pos": [round(t[0] * mpu, 4), round(t[1] * mpu, 4), round(t[2] * mpu, 4)],
             "rot": [round(v, 6) for v in q],
             "scale": [round(v, 6) for v in s],
-        })
+        }
+        label = semantic_label(prim)
+        if label:
+            inst["label"] = label
+            used_labels.add(label)
+        instances.append(inst)
 
     # The collision surface, as one merged Wavefront mesh.
     #
@@ -531,7 +710,10 @@ def main():
     #
     # Anything omitted here is simply not solid, so keep the list complete: every surface a wheel
     # can end up on, including the kerbs, the roundabout apron and the traffic islands.
-    GROUND = ("Roads", "Ground", "Sidewalk", "Curb", "Roundabout", "TrafficIsland", "Terrain")
+    # Gutters were missing from this list at first. They fill the strip between the carriageway
+    # and the curb, so without them the ground had a 388 m2 slot along the road edges with
+    # nothing under a wheel.
+    GROUND = ("Roads", "Ground", "Sidewalk", "Curb", "Gutter", "Roundabout", "TrafficIsland", "Terrain")
     NOT_GROUND = ("LaneMarking",)  # paint, coplanar with the road it sits on
 
     ground_path = os.path.join(args.outdir, "mcity_ground.obj")
@@ -574,19 +756,36 @@ def main():
                 base += len(verts)
     print(f"  ground mesh: {n_tri} triangles -> {ground_path}")
 
+    lights = [l for l in gather_lights(stage, xf, mpu)
+              if (not wanted or l["group"] in wanted) and l["group"] not in unwanted]
+
     manifest = {
         "name": "Mcity",
+        # Bumped when the manifest gains fields or the conversion changes what it extracts.
+        # 1 was meshes and four maps. 2 adds labels, lights, sky, the road network, opacity,
+        # emission and the layered ground materials.
+        "version": 2,
         "source": "github.com/mcity/mcity-digital-twin (MIT)",
         "units": "metres, Z up; converted from a USD stage with metersPerUnit %.4g" % mpu,
-        "assets": [{"name": v["name"], "parts": v["info"]["parts"]} for v in live],
+        # What the instance labels mean. They are Wikidata ids, as upstream tagged them.
+        "labels": {q: labels.get(q, q) for q in sorted(used_labels, key=lambda q: int(q[1:]))},
+        "assets": [dict({"name": v["name"], "parts": v["info"]["parts"]},
+                        **({"clumps": v["info"]["clumps"]} if v["info"].get("clumps") else {}))
+                   for v in live],
         "instances": instances,
+        "lights": lights,
     }
+    if sky and os.path.exists(os.path.join(args.outdir, sky)):
+        manifest["sky"] = sky
+    if os.path.exists(os.path.join(args.outdir, "McityMap_Main.xodr")):
+        manifest["road_network"] = "McityMap_Main.xodr"
     out_json = os.path.join(args.outdir, "mcity_scene.json")
     with open(out_json, "w") as f:
         json.dump(manifest, f, indent=1)
 
     from collections import Counter
-    print(f"  wrote {out_json}: {len(live)} assets, {len(instances)} instances")
+    print(f"  wrote {out_json}: {len(live)} assets, {len(instances)} instances, {len(lights)} lights, "
+          f"{len(manifest['labels'])} labels")
     for g, n in Counter(i["group"] for i in instances).most_common():
         print(f"    {n:5d}  {g}")
 

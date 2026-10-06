@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Work out which base-colour texture belongs to each Mcity *material*, and fetch those textures.
+"""Work out which textures and surface settings belong to each Mcity *material*, and fetch them.
+
+The shader is the first source
+------------------------------
+Each material prim carries a shader whose inputs name its maps directly: BaseColor_Map,
+Normal_Map, Roughness_Map, Metallic_Map, a packed AO_Rough_Metal_Map, an OpacityMap, an
+emissive mask. Those inputs are read first and everything below is the fallback for the
+materials whose shader names nothing. An earlier version read only two of the three spellings
+of the base-colour input and guessed the rest from names, which left ten materials flat grey
+that the stage does give a texture, and gave five ground materials the wrong one.
 
 The join key is the material, not the asset
 -------------------------------------------
@@ -66,21 +75,11 @@ RAW = f"https://raw.githubusercontent.com/{REPO}/main"
 
 # Materials whose name describes their role rather than the texture's subject. Verified by hand
 # against the texture library; there is no rule that would produce these.
+# The ground materials used to be here too. They are two-layer blends and the shader says exactly
+# which two textures, so they are now resolved from it: see LAYERED.
 ALIASES = {
-    "MI_McityAsphaltDark":   "T_Asphalt_Mcity_BC.png",
-    "MI_McityPebbles":       "T_Asphalt_2_Mcity_BC.png",
-    # Named for the master material it was derived from, not for what it is: this covers 85% of
-    # SM_Roads_v2, i.e. the carriageway itself, which at Mcity is asphalt. Flip it back to
-    # T_CrackedConcrete_Mcity_BC.png if you disagree -- it is one line and nothing else depends
-    # on the choice.
-    "MI_McityConcreteDark":  "T_Asphalt_Mcity_BC.png",
-    "MI_McityConcreteWarm":  "T_CrackedConcrete_Mcity_BC.png",
-    "MI_McityConcreteLight": "T_Sidewalk_Mcity_BC.png",
-    "MI_McitySidewalks":     "T_Sidewalk_Mcity_BC.png",
-    "MI_McityGrass_1":       "T_Grass_Mcity_BC.png",
     "MI_WaterTower_s001":    "T_WaterTower_s001_Mcity_BC.png",
     "LaneMarking1_Marking":  "LaneMarking1_Diff.png",
-    "MI_Pavilion_s001_Metal_Sheet": "T_Pavilion_s001_CoatedMetal_Sheet_BC.png",
     # Deliberately left unmapped, so the colour catalogue keeps them yellow rather than
     # tinting a white paint texture:  LaneMarkingYellow1_Marking.
 }
@@ -98,6 +97,26 @@ MAP_TYPE = re.compile(r"_(nrm|orm|met|rgh|spec|ao|mask|opacity|alph|n|m)\.(png|j
 # grey. These are safe to match anywhere in the name.
 NOT_BASE_COLOUR = ("macrovariation", "variation", "detail", "noise", "grid", "testmaterial")
 PLACEHOLDER = "t_default"
+
+# Shader inputs that name a map, by role. The scene mixes three shader families and each spells
+# its inputs differently: the props (BaseColor_Map), the signs (BaseColorMap) and the OmniPBR
+# vegetation and signal lamps (diffuse_texture).
+INPUTS = {
+    "texture":   ("BaseColor_Map", "BaseColorMap", "diffuse_texture"),
+    "normal":    ("Normal_Map", "NormalMap", "normalmap_texture"),
+    "roughness": ("Roughness_Map", "RoughnessMap", "reflectionroughness_texture"),
+    "metallic":  ("Metallic_Map", "MetallicMap"),
+    "orm":       ("AO_Rough_Metal_Map", "ORM_texture"),
+    "opacity":   ("OpacityMap", "Opacity_Map"),
+    "emissive_texture": ("emissive_mask_texture",),
+}
+
+# Stand-ins the exporter left where a material has no map of that kind.
+NOT_A_MAP = ("t_default", "t_empty", "worldgrid")
+
+
+def real_map(name):
+    return bool(name) and not any(p in name.lower() for p in NOT_A_MAP)
 
 
 def is_base_colour(name):
@@ -127,7 +146,7 @@ def repo_tree(cache):
 
 
 def collect_materials(root_usd):
-    """Every material bound anywhere in the composed scene, plus any inline shader texture.
+    """Every material bound anywhere in the composed scene, with what its shader says.
 
     This reads the *composed* root stage rather than the per-asset files, and the difference is
     not cosmetic. Mcity builds its signage from a handful of blank plates -- SM_Rect_24x30 and
@@ -135,9 +154,11 @@ def collect_materials(root_usd):
     file on its own and the sign face reports Unreal's WorldGridMaterial placeholder; compose the
     stage and the same face reports MI_R2_1_SpeedLimit_45_24x30, which is the material that
     actually has a texture behind it.
+
+    Returns the material names and, per material, {"maps": role -> file, "values": input -> value}.
     """
     stage = Usd.Stage.Open(root_usd)
-    names, inline, inline_aux = set(), {}, {}
+    names, shader = set(), {}
     # Instance proxies included: the foliage is natively instanced, and its materials are only
     # reachable through the prototype.
     for prim in stage.Traverse(Usd.TraverseInstanceProxies()):
@@ -147,26 +168,37 @@ def collect_materials(root_usd):
         if not mat:
             continue
         mname = mat.GetPrim().GetName()
+        if mname in names:
+            continue
         names.add(mname)
-        for shader in mat.GetPrim().GetChildren():
-            # Two spellings, because the scene mixes two shader families. The props carry
-            # BaseColorMap; the vegetation is OmniPBR and names it diffuse_texture. Reading only
-            # the first left every tree and shrub untextured -- rendered flat grey, which for
-            # geometry that is 70-85% leaves is most of what you see off-road.
-            for attr in ("inputs:BaseColorMap", "inputs:diffuse_texture"):
-                a = shader.GetAttribute(attr)
-                if a and a.Get():
-                    base = os.path.basename(str(a.Get().path))
-                    if base and is_base_colour(base):
-                        inline.setdefault(mname, base)
-            for attr, kind in (("inputs:normalmap_texture", "normal"),
-                               ("inputs:ORM_texture", "orm")):
-                a = shader.GetAttribute(attr)
-                if a and a.Get():
-                    base = os.path.basename(str(a.Get().path))
-                    if base:
-                        inline_aux.setdefault(mname, {}).setdefault(kind, base)
-    return sorted(names), inline, inline_aux
+        maps, values = {}, {}
+        for sh in mat.GetPrim().GetChildren():
+            for attr in sh.GetAttributes():
+                name = attr.GetName()
+                if not name.startswith("inputs:"):
+                    continue
+                v = attr.Get()
+                if v is None:
+                    continue
+                key = name[len("inputs:"):]
+                if hasattr(v, "path"):
+                    if v.path:
+                        values[key] = os.path.basename(str(v.path))
+                elif isinstance(v, (bool, int, float, str)):
+                    values[key] = v
+                else:
+                    try:
+                        values[key] = [float(x) for x in v]
+                    except TypeError:
+                        pass
+        for role, spellings in INPUTS.items():
+            for spelling in spellings:
+                f = values.get(spelling)
+                if isinstance(f, str) and real_map(f) and (role != "texture" or is_base_colour(f)):
+                    maps[role] = f
+                    break
+        shader[mname] = {"maps": maps, "values": values}
+    return sorted(names), shader
 
 
 def companions(base_colour, tex_index):
@@ -227,10 +259,11 @@ def pick_base_colour(candidates):
     return usable[0] if usable else None
 
 
-def resolve(material, tex_index, tex_squashed, inline, mdl_dir):
+def resolve(material, tex_index, tex_squashed, shader, mdl_dir):
     """Return (texture_basename, how) for one material, or (None, 'none')."""
-    if material in inline:
-        return inline[material], "inline"
+    named = shader.get(material, {}).get("maps", {}).get("texture")
+    if named and named.lower() in tex_index:
+        return named, "shader"
 
     hit = mdl_texture(material, mdl_dir, tex_index)
     if hit:
@@ -265,6 +298,184 @@ def resolve(material, tex_index, tex_squashed, inline, mdl_dir):
     return None, "none"
 
 
+def settings(values, maps):
+    """Shader constants that change how a material looks and that Chrono can represent."""
+    out = {}
+
+    def vec(key, n=3):
+        v = values.get(key)
+        return [float(x) for x in v[:n]] if isinstance(v, list) and len(v) >= n else None
+
+    def num(key):
+        v = values.get(key)
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+    # Everything that multiplies the base colour, folded into one tint.
+    tint = [1.0, 1.0, 1.0]
+    for key in ("AlbedoTint", "BaseColorTint", "diffuse_tint"):
+        v = vec(key)
+        if v:
+            tint = [a * b for a, b in zip(tint, v)]
+    brightness = num("albedo_brightness")
+    if brightness is not None:
+        tint = [a * brightness for a in tint]
+    if any(abs(a - 1.0) > 0.01 for a in tint):
+        out["tint"] = [round(a, 4) for a in tint]
+
+    # The props remap their roughness map into a range instead of using it as authored.
+    lo = num("MinRoughness") if num("MinRoughness") is not None else num("RoughnessMIN")
+    hi = num("MaxRoughness") if num("MaxRoughness") is not None else num("RoughnessMAX")
+    if lo is not None and hi is not None and (abs(lo) > 0.005 or abs(hi - 1.0) > 0.005):
+        out["roughness_range"] = [round(lo, 3), round(hi, 3)]
+
+    # Constants that stand in for a map the material does not have.
+    if "roughness" not in maps and "orm" not in maps:
+        r = vec("Roughness", 1) or ([num("reflection_roughness_constant")] if num("reflection_roughness_constant") is not None else None)
+        if r:
+            out["roughness_value"] = round(r[0], 3)
+    if "metallic" not in maps and "orm" not in maps:
+        m = num("Metallic") if num("Metallic") is not None else num("Metallic_Value")
+        if m is None:
+            m = num("metallic_constant")
+        if m is not None and m > 0.005:
+            out["metallic_value"] = round(m, 3)
+
+    scale = vec("texture_scale", 2)
+    if scale and any(abs(a - 1.0) > 0.005 for a in scale):
+        out["uv_scale"] = [round(a, 4) for a in scale]
+
+    if values.get("enable_emission") is True and vec("emissive_color"):
+        out["emissive"] = [round(a, 4) for a in vec("emissive_color")]
+        if num("emissive_intensity") is not None:
+            out["emissive_intensity"] = num("emissive_intensity")
+    return out
+
+
+def layered(values, tex_index):
+    """The two-layer ground materials: roads, grass, sidewalks, gravel.
+
+    These are Unreal terrain blends. Each mixes two tinted textures at their own tiling through a
+    noise mask,
+
+        mask   = clamp((noise * TerrainBlendAmount) ** TerrainBlendContrast, 0, 1)
+        colour = lerp(T1 * T1BaseColorTint, T2 * T2BaseColorTint, mask)
+
+    and Chrono has one texture per material. So the blend is baked: the layer the mask favours
+    keeps its detail and its tiling, and the other one contributes its average colour in
+    proportion to how much of the surface it covers. Returns the recipe, or None.
+    """
+    t1, t2, blend = values.get("T1BaseColorMap"), values.get("T2BaseColorMap"), values.get("TerrainBlendTexture")
+    if not (isinstance(t1, str) and isinstance(t2, str) and isinstance(blend, str)):
+        return None
+    if not all(f.lower() in tex_index for f in (t1, t2, blend)):
+        return None
+
+    def num(key, default):
+        v = values.get(key)
+        return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else default
+
+    def tint(key):
+        v = values.get(key)
+        return [float(x) for x in v[:3]] if isinstance(v, list) else [1.0, 1.0, 1.0]
+
+    return {
+        "t1": t1, "t2": t2, "blend": blend,
+        "tint1": tint("T1BaseColorTint"), "tint2": tint("T2BaseColorTint"),
+        "scale1": num("T1ScaleNEAR", 1.0), "scale2": num("T2ScaleNEAR", 1.0),
+        "amount": num("TerrainBlendAmount", 1.0), "contrast": num("TerrainBlendContrast", 1.0),
+        "normal1": values.get("T1NormalMap"), "normal2": values.get("T2NormalMap"),
+        "roughness1": values.get("T1RoughnessMap"), "roughness2": values.get("T2RoughnessMap"),
+    }
+
+
+def stem_of(name):
+    return os.path.splitext(name)[0]
+
+
+def derive(material, entry, out_dir):
+    """Write the maps that have to be computed rather than downloaded. Returns the new files.
+
+    Chrono's VSG backend ignores a material's colour once it has a texture, takes roughness and
+    metalness as two separate maps, and has no remap or blend. So tints, packed ORM maps,
+    roughness ranges and layer blends are all turned into plain image files here.
+    """
+    from PIL import Image, ImageChops, ImageStat
+    made = []
+
+    def path(name):
+        return os.path.join(out_dir, name)
+
+    def tinted(im, rgb):
+        im = im.convert("RGBA") if im.mode in ("RGBA", "LA") else im.convert("RGB")
+        bands = list(im.split())
+        for i in range(3):
+            k = max(0.0, rgb[i])
+            bands[i] = bands[i].point(lambda v, k=k: min(255, int(v * k + 0.5)))
+        return Image.merge(im.mode, bands)
+
+    recipe = entry.get("layers")
+    if recipe and all(os.path.exists(path(recipe[k])) for k in ("t1", "t2", "blend")):
+        noise = Image.open(path(recipe["blend"])).convert("RGB").split()[0].resize((256, 256))
+        a, c = recipe["amount"], recipe["contrast"]
+        mask = noise.point(lambda v: int(255 * min(1.0, max(v / 255.0 * a, 1e-6) ** c) + 0.5))
+        share2 = ImageStat.Stat(mask).mean[0] / 255.0  # how much of the surface is layer 2
+        top, other = ("2", "1") if share2 >= 0.5 else ("1", "2")
+        weight = share2 if top == "2" else 1.0 - share2
+        base = tinted(Image.open(path(recipe["t" + top])), recipe["tint" + top]).convert("RGB")
+        under = tinted(Image.open(path(recipe["t" + other])), recipe["tint" + other]).convert("RGB")
+        mean = tuple(int(v + 0.5) for v in ImageStat.Stat(under).mean[:3])
+        out = Image.blend(Image.new("RGB", base.size, mean), base, weight)
+        name = f"{material}-blend.png"
+        out.save(path(name))
+        made.append(name)
+        entry["texture"] = name
+        recipe["share2"] = round(share2, 3)
+        scale = abs(recipe["scale" + top])
+        if abs(scale - 1.0) > 0.005:
+            entry["uv_scale"] = [round(scale, 4), round(scale, 4)]
+        for kind in ("normal", "roughness"):
+            f = recipe.get(kind + top)
+            if isinstance(f, str) and real_map(f) and os.path.exists(path(f)):
+                entry[kind] = f
+            else:
+                entry.pop(kind, None)
+        entry.pop("tint", None)  # already in the bake
+
+    tint = entry.get("tint")
+    if tint and entry.get("texture") and os.path.exists(path(entry["texture"])):
+        tag = "".join(f"{min(255, int(v * 255 + 0.5)):02x}" for v in tint)
+        name = f"{stem_of(entry['texture'])}-tint{tag}.png"
+        tinted(Image.open(path(entry["texture"])), tint).save(path(name))
+        made.append(name)
+        entry["texture"] = name
+
+    orm = entry.get("orm")
+    if orm and os.path.exists(path(orm)):
+        bands = Image.open(path(orm)).convert("RGB").split()
+        for band, kind, tag in ((0, "ao", "ao"), (1, "roughness", "rough"), (2, "metallic", "metal")):
+            if kind in entry and kind != "ao":
+                continue
+            name = f"{stem_of(orm)}-{tag}.png"
+            bands[band].save(path(name))
+            made.append(name)
+            entry[kind] = name
+
+    rng = entry.get("roughness_range")
+    if rng and entry.get("roughness") and os.path.exists(path(entry["roughness"])):
+        lo, hi = rng
+        name = f"{stem_of(entry['roughness'])}-r{int(lo * 100 + 0.5):03d}-{int(hi * 100 + 0.5):03d}.png"
+        Image.open(path(entry["roughness"])).convert("L").point(
+            lambda v: min(255, max(0, int((lo + (hi - lo) * v / 255.0) * 255 + 0.5)))).save(path(name))
+        made.append(name)
+        entry["roughness"] = name
+    return made
+
+
+# The sky. The stage carries a sky material but binds it to nothing, so the dome texture is easy
+# to miss: it is only ever named inside an MDL.
+SKY = "T_Sky_Blue.png"
+
+
 def main():
     ap = argparse.ArgumentParser()
     here = os.path.dirname(os.path.abspath(__file__))
@@ -292,39 +503,63 @@ def main():
     root_usd = os.path.join(args.dir, "usd", "McityMap_Main.usdc")
     if not os.path.exists(root_usd):
         sys.exit(f"missing {root_usd} -- run fetch_mcity.sh first")
-    materials, inline, inline_aux = collect_materials(root_usd)
+    materials, shader = collect_materials(root_usd)
     print(f"  distinct materials bound in the composed scene: {len(materials)}")
 
+    AUX = ("normal", "roughness", "metallic", "orm", "opacity", "emissive_texture")
     resolved, how, unresolved = {}, Counter(), []
     for m in materials:
-        tex, layer = resolve(m, tex_index, tex_squashed, inline, mdl_dir)
-        how[layer] += 1
-        if tex:
-            entry = {"texture": tex, "how": layer}
-            entry.update(companions(tex, tex_index))
-            # An inline normal map named by the shader beats one guessed from the base-colour name.
-            aux = inline_aux.get(m, {})
-            if aux.get("normal") and aux["normal"].lower() in tex_index:
-                entry["normal"] = aux["normal"]
-            resolved[m] = entry
+        info = shader.get(m, {"maps": {}, "values": {}})
+        maps, values = info["maps"], info["values"]
+        entry = {}
+        recipe = layered(values, tex_index)
+        if recipe:
+            entry["layers"] = recipe
+            layer = "layers"
         else:
+            tex, layer = resolve(m, tex_index, tex_squashed, shader, mdl_dir)
+            if tex:
+                entry["texture"] = tex
+                entry.update(companions(tex, tex_index))
+        how[layer] += 1
+        if layer == "none":
             unresolved.append(m)
+        # Anything the shader names outright beats a companion guessed from the base-colour name.
+        for kind in AUX:
+            f = maps.get(kind)
+            if f and f.lower() in tex_index:
+                entry[kind] = f
+        if values.get("NormalStrength") == 0:
+            entry.pop("normal", None)  # authored, then switched off
+        entry.update(settings(values, maps))
+        if "emissive" not in entry:
+            entry.pop("emissive_texture", None)
+        if entry:
+            entry["how"] = layer
+            resolved[m] = entry
 
-    extra = Counter(k for v in resolved.values() for k in ("normal", "roughness", "metallic")
-                    if v.get(k))
-    print("  companion maps: " + ", ".join(f"{extra[k]} {k}" for k in
-                                           ("normal", "roughness", "metallic")))
-
-    print(f"  materials resolved to a texture: {len(resolved)}/{len(materials)}")
-    for layer in ("inline", "mdl", "rule", "alias", "none"):
+    extra = Counter(k for v in resolved.values() for k in AUX + ("layers", "tint", "emissive") if v.get(k))
+    print("  maps and settings found: " + ", ".join(f"{extra[k]} {k}" for k in sorted(extra)))
+    textured = sum(1 for v in resolved.values() if v.get("texture") or v.get("layers"))
+    print(f"  materials resolved to a texture: {textured}/{len(materials)}")
+    for layer in ("shader", "layers", "mdl", "rule", "alias", "none"):
         if how[layer]:
             print(f"    {how[layer]:4d}  {layer}")
     if unresolved:
         print(f"  falling back to a catalogue colour: {', '.join(unresolved)}")
 
-    needed = sorted({t for v in resolved.values()
-                     for t in (v.get("texture"), v.get("normal"), v.get("roughness"),
-                               v.get("metallic")) if t})
+    needed = set()
+    for v in resolved.values():
+        needed.update(v[k] for k in ("texture",) + AUX if v.get(k))
+        recipe = v.get("layers")
+        if recipe:
+            needed.update(f for f in (recipe[k] for k in ("t1", "t2", "blend", "normal1", "normal2",
+                                                           "roughness1", "roughness2"))
+                          if isinstance(f, str) and real_map(f) and f.lower() in tex_index)
+    if SKY.lower() in tex_index:
+        needed.add(SKY)
+    needed = sorted(needed)
+
     out_dir = os.path.join(args.dir, "textures")
     if not args.no_fetch and needed:
         os.makedirs(out_dir, exist_ok=True)
@@ -341,15 +576,28 @@ def main():
         size = sum(os.path.getsize(os.path.join(out_dir, t)) for t in have)
         print(f"  have {len(have)}/{len(needed)} textures, {size/1e6:.0f} MB")
 
+        try:
+            import PIL  # noqa: F401
+        except ImportError:
+            sys.exit("Pillow is required to build the derived maps:  python3 -m pip install pillow")
+
+        made = []
+        for m, entry in resolved.items():
+            made += derive(m, entry, out_dir)
+        if made:
+            print(f"  derived {len(made)} maps: tints, split ORM, roughness ranges, layer blends")
+
+        # The sky dome, as Chrono wants it: see sky_dome().
+        sky = sky_dome(out_dir, args.dir)
+
         if args.max_base or args.max_aux:
-            aux = {t for v in resolved.values()
-                   for t in (v.get("normal"), v.get("roughness"), v.get("metallic")) if t}
+            from PIL import Image
+            base = {v["texture"] for v in resolved.values() if v.get("texture")}
             shrunk, before, after = 0, 0, 0
-            for t in have:
-                limit = args.max_aux if t in aux else args.max_base
+            for t in sorted(set(have) | set(made)):
+                limit = args.max_base if t in base else args.max_aux
                 path = os.path.join(out_dir, t)
                 try:
-                    from PIL import Image
                     im = Image.open(path)
                     w, h = im.size
                     before += w * h * 4
@@ -363,11 +611,39 @@ def main():
                     print(f"    could not resize {t}: {e}")
             print(f"  resized {shrunk} textures; resident RGBA "
                   f"{before/1e9:.1f} GB -> {after/1e9:.1f} GB")
+    else:
+        sky = None
 
     out = {"materials": resolved}
+    if sky:
+        out["sky"] = sky
     with open(os.path.join(args.dir, "asset_textures.json"), "w") as f:
         json.dump(out, f, indent=1)
     print(f"  wrote {os.path.join(args.dir, 'asset_textures.json')}")
+
+
+def sky_dome(tex_dir, data_dir):
+    """Turn Unreal's sky-sphere texture into the full-sphere panorama Chrono's sky dome takes.
+
+    The source runs from the horizon at its bottom edge to the zenith at its top, once around.
+    Chrono maps a dome texture over the whole sphere, so the sky goes in the upper half and the
+    lower half, which sits below the ground and is never seen, repeats the horizon colour.
+    """
+    src = os.path.join(tex_dir, SKY)
+    if not os.path.exists(src):
+        return None
+    from PIL import Image
+    sky = Image.open(src).convert("RGB")
+    w = 2048
+    upper = sky.resize((w, w // 2), Image.LANCZOS)
+    horizon = upper.crop((0, w // 2 - 2, w, w // 2 - 1)).resize((w, w // 2))
+    pano = Image.new("RGB", (w, w))
+    pano.paste(upper, (0, 0))
+    pano.paste(horizon, (0, w // 2))
+    os.makedirs(os.path.join(data_dir, "sky"), exist_ok=True)
+    out = os.path.join("sky", "mcity_sky.jpg")
+    pano.save(os.path.join(data_dir, out), quality=92)
+    return out
 
 
 if __name__ == "__main__":
