@@ -33,12 +33,12 @@ set -e
 
 # The published scene. Its hash is checked before anything is extracted, so a changed or truncated
 # download stops here instead of turning up later as a half-loaded scene.
-SCENE_URL="https://github.com/ksha23/chrono-mcity/releases/download/v2"
+SCENE_URL="https://github.com/ksha23/chrono-mcity/releases/download/v3"
 SCENE_BASE="mcity_scene_base.tar.gz"
-SCENE_BASE_SHA256="daf79764350bba37878437541de591e152d8187e5a35aa0878054559b154735a"
+SCENE_BASE_SHA256="af202b7cf7f3e2356c3fc18c1262f3edf314a9bb6e317d18c485ef9c9a60bbe6"
 # Vegetation, as an add-on that extracts over the base scene.
 SCENE_FOLIAGE="mcity_scene_foliage.tar.gz"
-SCENE_FOLIAGE_SHA256="443f33b83a76f4d8158f441d238473087a9e779f3d194407a307ad9daad33527"
+SCENE_FOLIAGE_SHA256="f2903e5444a389b579ee545e36bf78e5b86457f78e20f878fc9d6721c7df987b"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 # Locate the Chrono root by walking up to the marker directory, rather than counting "..".
