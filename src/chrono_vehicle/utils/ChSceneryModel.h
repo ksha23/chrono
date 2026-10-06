@@ -27,7 +27,7 @@
 //
 // The manifest is deliberately not tied to any authoring tool. Anything able to
 // emit a mesh list and a transform list can feed this; see
-// demos_live/mcity/usd_to_chrono.py for a USD producer.
+// src/demos/vehicle/terrain/mcity/usd_to_chrono.py for a USD producer.
 //
 // =============================================================================
 
@@ -93,14 +93,20 @@ struct ChSceneryOptions {
 /// \code
 /// {
 ///   "name": "Mcity",
-///   "assets":    [ { "name": "SM_Pole", "mesh": "assets/SM_Pole.obj",
-///                    "colour": [0.4, 0.4, 0.4] } ],
+///   "assets":    [ { "name": "SM_Pole",
+///                    "parts": [ { "mesh": "assets/SM_Pole__MI_Metal.obj",
+///                                 "texture": "textures/T_Metal_BC.png",
+///                                 "normal": "textures/T_Metal_NRM.png",
+///                                 "roughness": "textures/T_Metal_RGH.png",
+///                                 "metallic": "textures/T_Metal_MET.png",
+///                                 "colour": [0.4, 0.4, 0.4], "ks": [0.05, 0.05, 0.05], "ns": 10 } ] } ],
 ///   "instances": [ { "asset": 0, "group": "TrafficPoles",
 ///                    "pos": [x, y, z], "rot": [w, x, y, z], "scale": [sx, sy, sz] } ]
 /// }
 /// \endcode
-/// Mesh paths are relative to the manifest. Lengths are metres, and the frame is Chrono's own
-/// (Z up), so a producer is responsible for any unit or axis conversion.
+/// An asset is a list of parts, each a single-material mesh. Only "mesh" is required in a part.
+/// Paths are relative to the manifest. Lengths are metres, and the frame is Chrono's own (Z up),
+/// so a producer is responsible for any unit or axis conversion.
 class CH_VEHICLE_API ChSceneryModel {
   public:
     using Options = ChSceneryOptions;
