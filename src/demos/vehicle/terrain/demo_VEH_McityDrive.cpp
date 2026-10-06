@@ -16,22 +16,24 @@
 // GETTING THE SCENE
 // -----------------------------------------------------------------------------
 // Chrono ships the converter, not the scene: the Mcity assets are a third-party
-// dataset of a few hundred megabytes under their own licence. Build it once,
-// from this directory:
+// dataset of a few hundred megabytes under their own licence. A converted copy is
+// published, and one command downloads it:
 //
 //     cd src/demos/vehicle/terrain/mcity
-//     python3 -m pip install usd-core        # one-off, the converter reads USD
-//     ./setup_mcity.sh --repo /path/to/mcity-digital-twin
+//     ./setup_mcity.sh
 //
-// Omit --repo to fetch over HTTPS instead. Add --foliage for vegetation, which
-// downloads a further ~200 MB and builds the --foliage levels below.
-//
-//     git clone https://github.com/mcity/mcity-digital-twin
-//
-// Output lands in <chrono>/data/mcity and is entirely generated: delete it and
-// re-run to rebuild. Then, from a build tree:
+// It lands in <chrono>/data/mcity. Add --foliage for the vegetation behind the
+// --foliage levels below, a further 158 MB. Then, from a build tree:
 //
 //     cd bin && ./demo_VEH_McityDrive
+//
+// Converting it yourself is only needed to change the conversion:
+//
+//     python3 -m pip install usd-core        # one-off, the converter reads USD
+//     ./setup_mcity.sh --convert
+//
+// The same scene also runs on stock PyChrono, from one script:
+// https://github.com/ksha23/chrono-mcity
 //
 // -----------------------------------------------------------------------------
 // WHAT THIS USES
@@ -107,7 +109,7 @@ void PrintUsage() {
         "Options\n"
         "  --foliage LEVEL   none | trees | trees-leaf | shrubs | full   (default none)\n"
         "                      none        no vegetation\n"
-        "                      trees       447 trees, bare branches\n"
+        "                      trees       383 trees, bare branches\n"
         "                      trees-leaf  447 trees with leaves\n"
         "                      shrubs      trees and shrubs, bare branches\n"
         "                      full        everything with leaves (heavy)\n"
@@ -116,14 +118,10 @@ void PrintUsage() {
         "  --speed-limit V   speed the throttle is scaled toward, m/s (default 20)\n"
         "  --tire MODEL      pac02 | tmeasy | rigid   (default pac02)\n"
         "  --tire-step S     tire internal step, s (default 1e-4)\n"
-        "                             build at startup and roughly half the frame rate.\n"
         "  -h, --help        this message\n"
         "\n"
-        "First time? The scene is generated, not shipped:\n"
-        "  cd src/demos/vehicle/terrain/mcity\n"
-        "  python3 -m pip install usd-core\n"
-        "  ./setup_mcity.sh --repo /path/to/mcity-digital-twin     # or omit --repo to download\n"
-        "  git clone https://github.com/mcity/mcity-digital-twin   # if you need a clone\n"
+        "First time? One command downloads the converted scene:\n"
+        "  cd src/demos/vehicle/terrain/mcity && ./setup_mcity.sh\n"
         "\n");
 }
 
@@ -206,7 +204,7 @@ int main(int argc, char** argv) {
     std::ifstream gf(ground_obj);
     if (!gf.good()) {
         printf("\nCould not read %s\n", ground_obj.c_str());
-        printf("Re-run setup_mcity.sh; the converter writes it alongside the manifest.\n");
+        printf("Re-run setup_mcity.sh; the ground mesh ships alongside the manifest.\n");
         return 1;
     }
 

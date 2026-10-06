@@ -1,5 +1,5 @@
 #!/bin/bash
-# Turn the Mcity digital twin into a Chrono scene, in one command.
+# Get the Mcity digital twin as a Chrono scene, in one command.
 #
 # Chrono ships this pipeline, not the scene. The Mcity assets are a third-party dataset of a few
 # hundred megabytes under its own licence, and pinning a copy inside Chrono would be both large
@@ -7,21 +7,38 @@
 # surface catalogue, and the material rules. Everything under data/mcity/ is generated and can be
 # deleted and rebuilt.
 #
-#   ./setup_mcity.sh --repo /path/to/mcity-digital-twin    use a clone you already have
-#   ./setup_mcity.sh                                       fetch the pieces over HTTPS
+# The conversion gives everybody the same output, so a converted copy is published and that is
+# what this installs by default: one 200 MB download, with no USD toolchain and no 3.2 GB clone.
+#
+#   ./setup_mcity.sh                                       download the converted scene
+#   ./setup_mcity.sh --foliage                             and the vegetation levels, 158 MB more
+#   ./setup_mcity.sh --convert                             rebuild it from the upstream USD
+#   ./setup_mcity.sh --repo /path/to/mcity-digital-twin    rebuild it from a clone you have
 #
 # Options:
-#   --bundle SRC   install a pre-converted scene (URL or local .tar.gz) and stop. This is the
-#                  easy path: no USD toolchain, no 3.2 GB clone, no conversion -- roughly 190 MB
-#                  instead. Use it unless you are changing the conversion itself.
-#   --repo DIR     convert from a local clone instead of downloading
-#   --out DIR      where to write the converted scene (default: <chrono>/data/mcity)
-#   --foliage      include vegetation (adds ~200 MB and the LOD configurations)
-#   --skip-fetch   reuse whatever is already in --out
+#   --convert      run the conversion instead of downloading its result. Needs usd-core. Use it
+#                  when changing the conversion itself.
+#   --repo DIR     convert from a local clone instead of fetching the sources over HTTPS.
+#                  Implies --convert. The clone is large:
+#                    git clone https://github.com/mcity/mcity-digital-twin
+#   --foliage      include vegetation and its LOD configurations. Downloads the published
+#                  add-on, or with --convert fetches ~200 MB of sources and builds it.
+#   --skip-fetch   convert whatever sources are already in --out. Implies --convert.
+#   --bundle SRC   install some other pre-converted archive (URL or local .tar.gz) and stop.
+#   --out DIR      where to write the scene (default: <chrono>/data/mcity)
 #
-# The clone is large; --repo is much the faster route if you have one:
-#   git clone https://github.com/mcity/mcity-digital-twin
+# The published scene comes from package_mcity.sh. To publish a new one, upload the archives it
+# writes and update the URL and hashes below.
 set -e
+
+# The published scene. Its hash is checked before anything is extracted, so a changed or truncated
+# download stops here instead of turning up later as a half-loaded scene.
+SCENE_URL="https://github.com/ksha23/chrono-mcity/releases/download/v1"
+SCENE_BASE="mcity_scene_base.tar.gz"
+SCENE_BASE_SHA256="41b0e14eb0a10609fde95621a2085ab194d8aa4de45054bb8f09a76a766a41f7"
+# Vegetation, as an add-on that extracts over the base scene.
+SCENE_FOLIAGE="mcity_scene_foliage.tar.gz"
+SCENE_FOLIAGE_SHA256="246434ba4e3249fd50b08cf50411b38f48bd6d451575a3731401139c35995c87"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 # Locate the Chrono root by walking up to the marker directory, rather than counting "..".
@@ -35,44 +52,89 @@ fi
 OUT="$ROOT/data/mcity"
 REPO_DIR=""
 BUNDLE=""
+CONVERT=0
 FOLIAGE=0
 SKIP_FETCH=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    --convert) CONVERT=1; shift ;;
     --bundle) BUNDLE="$2"; shift 2 ;;
-    --repo) REPO_DIR="$2"; shift 2 ;;
+    --repo) REPO_DIR="$2"; CONVERT=1; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
     --foliage) FOLIAGE=1; shift ;;
-    --skip-fetch) SKIP_FETCH=1; shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    --skip-fetch) SKIP_FETCH=1; CONVERT=1; shift ;;
+    -h|--help) sed -n '2,31p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
 
 mkdir -p "$OUT"
 
-# The pre-converted path. Nothing below this point runs: no Python, no USD, no conversion.
-if [ -n "$BUNDLE" ]; then
-  echo "== installing pre-converted scene =="
-  case "$BUNDLE" in
+sha256_of() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# install_archive SRC [SHA256] -- SRC is a URL or a local .tar.gz.
+install_archive() {
+  local src="$1" want="${2:-}" file="" tmp=""
+  case "$src" in
     http://*|https://*)
-      echo "  downloading $BUNDLE"
-      curl -fL --progress-bar "$BUNDLE" -o "$OUT/.bundle.tar.gz" || {
-        echo "  download failed" >&2; exit 1; }
-      SRC="$OUT/.bundle.tar.gz" ;;
+      tmp="$OUT/.download.tar.gz"
+      echo "  downloading $src"
+      curl -fL --progress-bar "$src" -o "$tmp" || {
+        rm -f "$tmp"; echo "  download failed" >&2; exit 1; }
+      file="$tmp" ;;
     *)
-      [ -f "$BUNDLE" ] || { echo "  no such file: $BUNDLE" >&2; exit 1; }
-      SRC="$BUNDLE" ;;
+      [ -f "$src" ] || { echo "  no such file: $src" >&2; exit 1; }
+      file="$src" ;;
   esac
+  if [ -n "$want" ]; then
+    local got
+    got="$(sha256_of "$file")"
+    if [ "$got" != "$want" ]; then
+      echo "  checksum mismatch for $src" >&2
+      echo "    expected $want" >&2
+      echo "    got      $got" >&2
+      if [ -n "$tmp" ]; then rm -f "$tmp"; fi
+      exit 1
+    fi
+  fi
   echo "  extracting into $OUT"
-  tar -xzf "$SRC" -C "$OUT"
-  rm -f "$OUT/.bundle.tar.gz"
+  tar -xzf "$file" -C "$OUT"
+  if [ -n "$tmp" ]; then rm -f "$tmp"; fi
+}
+
+installed() {
   [ -f "$OUT/mcity_scene.json" ] || { echo "  archive did not contain a scene manifest" >&2; exit 1; }
   echo
   echo "done -- scene installed to $OUT"
-  echo "  cd bin && ./demo_VEH_McityDrive"
+  if [ "$OUT" = "$ROOT/data/mcity" ]; then
+    echo "  cd bin && ./demo_VEH_McityDrive"
+  else
+    echo "  cd bin && ./demo_VEH_McityDrive --data $OUT"
+  fi
+  if [ "$FOLIAGE" = 1 ]; then
+    echo "  vegetation levels:  --foliage none | trees | trees-leaf | shrubs | full"
+  fi
   exit 0
+}
+
+# The pre-converted paths. Nothing below them runs: no Python, no USD, no conversion.
+if [ -n "$BUNDLE" ]; then
+  echo "== installing pre-converted scene =="
+  install_archive "$BUNDLE"
+  installed
+fi
+
+if [ "$CONVERT" = 0 ]; then
+  echo "== installing the published scene =="
+  install_archive "$SCENE_URL/$SCENE_BASE" "$SCENE_BASE_SHA256"
+  if [ "$FOLIAGE" = 1 ]; then
+    install_archive "$SCENE_URL/$SCENE_FOLIAGE" "$SCENE_FOLIAGE_SHA256"
+  fi
+  installed
 fi
 
 if ! python3 -c "import pxr" 2>/dev/null; then
