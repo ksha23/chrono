@@ -53,7 +53,7 @@ if [ -z "$UPSTREAM_REV" ] && [ -s "$DATA/repo_tree.json" ]; then
   UPSTREAM_REV="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1])).get('sha',''))" "$DATA/repo_tree.json" 2>/dev/null || true)"
 fi
 CONVERTER_REV="$(git -C "$ROOT" log -1 --format=%H -- "$DIR/usd_to_chrono.py" "$DIR/resolve_textures.py" \
-  "$DIR/decimate_foliage.py" "$DIR/materials.json" 2>/dev/null || true)"
+  "$DIR/decimate_foliage.py" "$DIR/build_configs.sh" "$DIR/materials.json" "$DIR/semantics.json" 2>/dev/null || true)"
 
 # The upstream notice travels with the data, as MIT requires.
 if [ ! -f "$DATA/LICENSE.mcity" ]; then
@@ -69,9 +69,10 @@ Source:     https://github.com/mcity/mcity-digital-twin  (MIT, see LICENSE.mcity
 Upstream:   ${UPSTREAM_REV:-not recorded}
 Converter:  ${CONVERTER_REV:-not recorded}  (Chrono, src/demos/vehicle/terrain/mcity)
 
-Derived by usd_to_chrono.py: USD meshes exported to Wavefront OBJ, materials resolved
-to their published textures, and the drivable surfaces merged into mcity_ground.obj
-for RigidTerrain.
+Derived by usd_to_chrono.py: USD meshes exported to Wavefront OBJ, materials read from
+their shaders, instanced branches expanded and reduced, and the drivable surfaces
+merged into mcity_ground.obj for RigidTerrain. Labels, signal lamps, the sky and the
+road network ride along in the manifest.
 
 Extract into <chrono>/data/mcity and run:  demo_VEH_McityDrive
 TXT
@@ -79,7 +80,7 @@ TXT
 python3 - "$DATA" "$OUTDIR" <<'PY'
 import json, os, sys, glob
 data, outdir = sys.argv[1], sys.argv[2]
-REFS = ("mesh", "texture", "normal", "roughness", "metallic")
+REFS = ("mesh", "texture", "normal", "roughness", "metallic", "ao", "opacity", "emissive_texture")
 NOTICE = {"LICENSE.mcity", "README.txt"}
 SOURCE_ONLY = "mcity_scene_foliage.json"  # input to decimate_foliage.py, never loaded by the demo
 
@@ -87,9 +88,12 @@ def closure(manifests):
     need = set()
     for man in manifests:
         need.add(os.path.basename(man))
-        for a in json.load(open(man)).get("assets", []):
+        doc = json.load(open(man))
+        for a in doc.get("assets", []):
             for p in a.get("parts", []):
                 need.update(p[k] for k in REFS if p.get(k))
+        # The sky panorama and the road network ride with whichever manifest names them.
+        need.update(doc[k] for k in ("sky", "road_network") if doc.get(k))
     return need
 
 base = closure([os.path.join(data, "mcity_scene.json")]) | {"mcity_ground.obj"}

@@ -8,16 +8,16 @@
 # deleted and rebuilt.
 #
 # The conversion gives everybody the same output, so a converted copy is published and that is
-# what this installs by default: one 200 MB download, with no USD toolchain and no 3.2 GB clone.
+# what this installs by default: one 211 MB download, with no USD toolchain and no 3.2 GB clone.
 #
 #   ./setup_mcity.sh                                       download the converted scene
-#   ./setup_mcity.sh --foliage                             and the vegetation levels, 158 MB more
+#   ./setup_mcity.sh --foliage                             and the vegetation levels, 42 MB more
 #   ./setup_mcity.sh --convert                             rebuild it from the upstream USD
 #   ./setup_mcity.sh --repo /path/to/mcity-digital-twin    rebuild it from a clone you have
 #
 # Options:
-#   --convert      run the conversion instead of downloading its result. Needs usd-core. Use it
-#                  when changing the conversion itself.
+#   --convert      run the conversion instead of downloading its result. Needs usd-core, Pillow
+#                  and numpy. Use it when changing the conversion itself.
 #   --repo DIR     convert from a local clone instead of fetching the sources over HTTPS.
 #                  Implies --convert. The clone is large:
 #                    git clone https://github.com/mcity/mcity-digital-twin
@@ -33,12 +33,12 @@ set -e
 
 # The published scene. Its hash is checked before anything is extracted, so a changed or truncated
 # download stops here instead of turning up later as a half-loaded scene.
-SCENE_URL="https://github.com/ksha23/chrono-mcity/releases/download/v1"
+SCENE_URL="https://github.com/ksha23/chrono-mcity/releases/download/v2"
 SCENE_BASE="mcity_scene_base.tar.gz"
-SCENE_BASE_SHA256="41b0e14eb0a10609fde95621a2085ab194d8aa4de45054bb8f09a76a766a41f7"
+SCENE_BASE_SHA256="daf79764350bba37878437541de591e152d8187e5a35aa0878054559b154735a"
 # Vegetation, as an add-on that extracts over the base scene.
 SCENE_FOLIAGE="mcity_scene_foliage.tar.gz"
-SCENE_FOLIAGE_SHA256="246434ba4e3249fd50b08cf50411b38f48bd6d451575a3731401139c35995c87"
+SCENE_FOLIAGE_SHA256="443f33b83a76f4d8158f441d238473087a9e779f3d194407a307ad9daad33527"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 # Locate the Chrono root by walking up to the marker directory, rather than counting "..".
@@ -110,11 +110,9 @@ installed() {
   [ -f "$OUT/mcity_scene.json" ] || { echo "  archive did not contain a scene manifest" >&2; exit 1; }
   echo
   echo "done -- scene installed to $OUT"
-  if [ "$OUT" = "$ROOT/data/mcity" ]; then
-    echo "  cd bin && ./demo_VEH_McityDrive"
-  else
-    echo "  cd bin && ./demo_VEH_McityDrive --data $OUT"
-  fi
+  # A Chrono build tree keeps its own copy of data/, taken when CMake last ran. A scene installed
+  # after that is not in the copy, so the demo is pointed at this one outright.
+  echo "  cd bin && ./demo_VEH_McityDrive --data $OUT"
   if [ "$FOLIAGE" = 1 ]; then
     echo "  vegetation levels:  --foliage none | trees | trees-leaf | shrubs | full"
   fi
@@ -137,8 +135,9 @@ if [ "$CONVERT" = 0 ]; then
   installed
 fi
 
-if ! python3 -c "import pxr" 2>/dev/null; then
-  echo "usd-core is required:  python3 -m pip install usd-core" >&2
+if ! python3 -c "import pxr, PIL, numpy" 2>/dev/null; then
+  echo "the conversion needs usd-core, Pillow and numpy:" >&2
+  echo "  python3 -m pip install usd-core pillow numpy" >&2
   exit 1
 fi
 
@@ -177,7 +176,7 @@ if [ "$FOLIAGE" = 1 ]; then
   cp "$OUT/mcity_scene.json" "$OUT/mcity_scene_foliage.json"
   python3 "$DIR/usd_to_chrono.py" --in "$OUT" --out "$OUT"
   echo "== building vegetation configurations =="
-  "$DIR/build_configs.sh"
+  "$DIR/build_configs.sh" "$OUT"
 else
   python3 "$DIR/usd_to_chrono.py" --in "$OUT" --out "$OUT"
 fi
