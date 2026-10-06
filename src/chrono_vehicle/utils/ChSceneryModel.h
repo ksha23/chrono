@@ -73,6 +73,10 @@ struct ChSceneryOptions {
     /// category at run time.
     bool body_per_group = true;
 
+    /// Traffic signal lenses to light: "red", "amber", "green" or "all".
+    /// The scenery is static and has no signal phases, so by default every lens is dark.
+    std::string lit_signals;
+
     /// Rigid offset applied to every placement.
     ///
     /// Needed when the scenery and the driving surface come from different sources that do not
@@ -107,6 +111,12 @@ struct ChSceneryOptions {
 /// An asset is a list of parts, each a single-material mesh. Only "mesh" is required in a part.
 /// Paths are relative to the manifest. Lengths are metres, and the frame is Chrono's own (Z up),
 /// so a producer is responsible for any unit or axis conversion.
+///
+/// A part may also carry "ao", "opacity" and "emissive_texture" maps, an "emissive" colour,
+/// "roughness_value" and "metallic_value" constants for a material with no such map, and a
+/// "uv_scale". An instance may carry a "label", an id into the manifest's "labels" table, which
+/// becomes the class id of the asset's materials for Chrono::Sensor's segmentation camera. The
+/// manifest may name a "sky" panorama.
 class CH_VEHICLE_API ChSceneryModel {
   public:
     using Options = ChSceneryOptions;
@@ -141,12 +151,17 @@ class CH_VEHICLE_API ChSceneryModel {
 
 
 
+    /// Full path of the sky panorama the manifest names, or empty if it names none.
+    /// Hand it to ChVisualSystemVSG::SetSkyDomeTexture.
+    const std::string& GetSkyTexture() const { return m_sky; }
+
     /// Print a short summary of what was loaded, per group.
     void ReportTo(std::ostream& out) const;
 
   private:
     std::vector<std::shared_ptr<ChBody>> m_bodies;
     std::map<std::string, unsigned int> m_per_group;  ///< instances loaded, by group
+    std::string m_sky;                                ///< sky panorama, full path
 
     unsigned int m_num_assets;
     unsigned int m_num_instances;

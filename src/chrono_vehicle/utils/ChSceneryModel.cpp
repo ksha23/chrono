@@ -124,11 +124,20 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
         std::string mesh;     ///< absolute path
         std::string texture;    ///< base colour, absolute path; empty when there is none
         std::string normal;     ///< normal map, absolute path
-        std::string roughness;  ///< roughness map, absolute path
+        std::string roughness_map;  ///< roughness map, absolute path
         std::string metallic;   ///< metallic map, absolute path
+        std::string ao;         ///< ambient occlusion map, absolute path
+        std::string opacity;    ///< opacity map, absolute path: glass and netting
+        std::string glow;       ///< emissive map, absolute path
+        std::string name;       ///< material name
         ChColor colour{0.62f, 0.62f, 0.64f};
         ChColor specular{0.05f, 0.05f, 0.05f};
+        ChColor emissive{0, 0, 0};
         float shininess = 10.0f;
+        float roughness = -1;  ///< constant roughness, or negative to derive it from shininess
+        float metallic_value = -1;
+        float uv_scale[2] = {1, 1};
+        bool emits = false;
     };
     struct Asset {
         std::string name;
@@ -153,7 +162,7 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
                 if (p.HasMember("normal") && p["normal"].IsString())
                     part.normal = dir + "/" + p["normal"].GetString();
                 if (p.HasMember("roughness") && p["roughness"].IsString())
-                    part.roughness = dir + "/" + p["roughness"].GetString();
+                    part.roughness_map = dir + "/" + p["roughness"].GetString();
                 if (p.HasMember("metallic") && p["metallic"].IsString())
                     part.metallic = dir + "/" + p["metallic"].GetString();
                 if (p.HasMember("colour") && p["colour"].IsArray() && p["colour"].Size() >= 3)
@@ -164,6 +173,27 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
                                             p["ks"][2].GetFloat());
                 if (p.HasMember("ns") && p["ns"].IsNumber())
                     part.shininess = p["ns"].GetFloat();
+                if (p.HasMember("name") && p["name"].IsString())
+                    part.name = p["name"].GetString();
+                if (p.HasMember("ao") && p["ao"].IsString())
+                    part.ao = dir + "/" + p["ao"].GetString();
+                if (p.HasMember("opacity") && p["opacity"].IsString())
+                    part.opacity = dir + "/" + p["opacity"].GetString();
+                if (p.HasMember("emissive_texture") && p["emissive_texture"].IsString())
+                    part.glow = dir + "/" + p["emissive_texture"].GetString();
+                if (p.HasMember("emissive") && p["emissive"].IsArray() && p["emissive"].Size() >= 3) {
+                    part.emissive = ChColor(p["emissive"][0].GetFloat(), p["emissive"][1].GetFloat(),
+                                            p["emissive"][2].GetFloat());
+                    part.emits = true;
+                }
+                if (p.HasMember("roughness_value") && p["roughness_value"].IsNumber())
+                    part.roughness = p["roughness_value"].GetFloat();
+                if (p.HasMember("metallic_value") && p["metallic_value"].IsNumber())
+                    part.metallic_value = p["metallic_value"].GetFloat();
+                if (p.HasMember("uv_scale") && p["uv_scale"].IsArray() && p["uv_scale"].Size() >= 2) {
+                    part.uv_scale[0] = p["uv_scale"][0].GetFloat();
+                    part.uv_scale[1] = p["uv_scale"][1].GetFloat();
+                }
 
                 if (part.mesh.empty() || !FileExists(part.mesh))
                     continue;
@@ -184,6 +214,37 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
         assets.push_back(asset);
     }
 
+
+    if (doc.HasMember("sky") && doc["sky"].IsString() && FileExists(dir + "/" + doc["sky"].GetString()))
+        m_sky = dir + "/" + doc["sky"].GetString();
+
+    // Class ids for a segmentation camera: the manifest's labels, numbered from 1 in the order
+    // it lists them, and each asset takes the label of its first placement.
+    std::map<std::string, unsigned short> label_ids;
+    if (doc.HasMember("labels") && doc["labels"].IsObject()) {
+        unsigned short n = 0;
+        for (auto it = doc["labels"].MemberBegin(); it != doc["labels"].MemberEnd(); ++it)
+            label_ids[it->name.GetString()] = ++n;
+    }
+    std::map<unsigned int, unsigned short> asset_class;
+    for (const auto& inst : doc["instances"].GetArray()) {
+        if (!inst.HasMember("asset") || !inst.HasMember("label") || !inst["label"].IsString())
+            continue;
+        auto found = label_ids.find(inst["label"].GetString());
+        if (found != label_ids.end())
+            asset_class.emplace(inst["asset"].GetUint(), found->second);
+    }
+
+    // A lens material is named emit_<colour>.
+    auto lit = [&options](const std::string& name) {
+        const std::string& want = options.lit_signals;
+        if (want.empty())
+            return false;
+        if (want == "all")
+            return true;
+        const std::string tail = "_" + want;
+        return name.size() >= tail.size() && name.compare(name.size() - tail.size(), tail.size(), tail) == 0;
+    };
 
     // One body per group keeps categories independently controllable; a single body is marginally
     // cheaper. Either way these never enter the solver.
@@ -280,7 +341,12 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
                     // Wavefront Ns runs 0..1000 and is the inverse sense of PBR roughness.
                     // Mapping it that way keeps asphalt matte and glass sharp instead of
                     // flattening both.
-                    mat->SetRoughness(1.0f - std::min(1.0f, p.shininess / 100.0f));
+                    mat->SetRoughness(p.roughness >= 0 ? p.roughness
+                                                       : 1.0f - std::min(1.0f, p.shininess / 100.0f));
+                    if (p.metallic_value >= 0)
+                        mat->SetMetallic(p.metallic_value);
+                    if (p.uv_scale[0] != 1 || p.uv_scale[1] != 1)
+                        mat->SetTextureScale(p.uv_scale[0], p.uv_scale[1]);
                     if (!p.texture.empty() && FileExists(p.texture)) {
                         mat->SetKdTexture(p.texture);
                         m_num_textures++;
@@ -291,11 +357,24 @@ bool ChSceneryModel::Load(ChSystem& sys, const std::string& manifest_file, const
                         mat->SetNormalMapTexture(p.normal);
                     // Chrono's VSG backend packs these into one texture and needs both or
                     // neither.
-                    if (!p.roughness.empty() && FileExists(p.roughness) && !p.metallic.empty() &&
+                    if (!p.roughness_map.empty() && FileExists(p.roughness_map) && !p.metallic.empty() &&
                         FileExists(p.metallic)) {
-                        mat->SetRoughnessTexture(p.roughness);
+                        mat->SetRoughnessTexture(p.roughness_map);
                         mat->SetMetallicTexture(p.metallic);
                     }
+                    if (!p.ao.empty() && FileExists(p.ao))
+                        mat->SetAmbientOcclusionTexture(p.ao);
+                    // Glass and netting. Without this they draw as solid panels.
+                    if (!p.opacity.empty() && FileExists(p.opacity))
+                        mat->SetOpacityTexture(p.opacity);
+                    if (p.emits && lit(p.name)) {
+                        mat->SetEmissiveColor(p.emissive);
+                        if (!p.glow.empty() && FileExists(p.glow))
+                            mat->SetKeTexture(p.glow);
+                    }
+                    auto klass = asset_class.find(ai);
+                    if (klass != asset_class.end())
+                        mat->SetClassID(klass->second);
                     matit = part_materials.emplace(p.mesh, mat).first;
                 }
 

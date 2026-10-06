@@ -23,13 +23,16 @@
 //     ./setup_mcity.sh
 //
 // It lands in <chrono>/data/mcity. Add --foliage for the vegetation behind the
-// --foliage levels below, a further 158 MB. Then, from a build tree:
+// --foliage levels below, a further 42 MB. Then, from a build tree:
 //
-//     cd bin && ./demo_VEH_McityDrive
+//     cd bin && ./demo_VEH_McityDrive --data <chrono>/data/mcity
+//
+// The --data matters: a build tree keeps its own copy of data/, taken when CMake
+// last ran, and a scene installed after that is not in it.
 //
 // Converting it yourself is only needed to change the conversion:
 //
-//     python3 -m pip install usd-core        # one-off, the converter reads USD
+//     python3 -m pip install usd-core pillow numpy
 //     ./setup_mcity.sh --convert
 //
 // The same scene also runs on stock PyChrono, from one script:
@@ -64,10 +67,10 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <thread>
 #include <memory>
 #include <vector>
 
-#include "chrono/core/ChRealtimeStep.h"
 #include "chrono/physics/ChSystemNSC.h"
 #include "chrono/solver/ChIterativeSolver.h"
 
@@ -109,11 +112,13 @@ void PrintUsage() {
         "Options\n"
         "  --foliage LEVEL   none | trees | trees-leaf | shrubs | full   (default none)\n"
         "                      none        no vegetation\n"
-        "                      trees       383 trees, bare branches\n"
+        "                      trees       447 trees, bare branches\n"
         "                      trees-leaf  447 trees with leaves\n"
-        "                      shrubs      trees and shrubs, bare branches\n"
-        "                      full        everything with leaves (heavy)\n"
+        "                      shrubs      2009 trees and shrubs, bare branches\n"
+        "                      full        2009 trees and shrubs with leaves\n"
         "                    Anything but 'none' needs setup_mcity.sh --foliage.\n"
+        "  --signals COLOUR  light the traffic signal lenses: red | amber | green | all\n"
+        "                    (default: all dark, the scene has no signal phases)\n"
         "  --data DIR        converted scene directory (default <chrono data>/mcity)\n"
         "  --speed-limit V   speed the throttle is scaled toward, m/s (default 20)\n"
         "  --tire MODEL      pac02 | tmeasy | rigid   (default pac02)\n"
@@ -122,6 +127,7 @@ void PrintUsage() {
         "\n"
         "First time? One command downloads the converted scene:\n"
         "  cd src/demos/vehicle/terrain/mcity && ./setup_mcity.sh\n"
+        "then pass --data <chrono>/data/mcity here, or re-run CMake so the build tree copies it.\n"
         "\n");
 }
 
@@ -131,6 +137,7 @@ int main(int argc, char** argv) {
     setvbuf(stdout, nullptr, _IOLBF, 0);
 
     std::string foliage = "none";
+    std::string signals;
     std::string data_dir;
     double speed_limit = 20.0;
     std::string tire = "pac02";
@@ -140,6 +147,8 @@ int main(int argc, char** argv) {
         std::string a = argv[i];
         if (a == "--foliage" && i + 1 < argc)
             foliage = argv[++i];
+        else if (a == "--signals" && i + 1 < argc)
+            signals = argv[++i];
         else if (a == "--data" && i + 1 < argc)
             data_dir = argv[++i];
         else if (a == "--speed-limit" && i + 1 < argc)
@@ -186,8 +195,10 @@ int main(int argc, char** argv) {
     // Scene
     // ---------------------------------------------------------------------------------------
 
+    ChSceneryOptions scenery_options;
+    scenery_options.lit_signals = signals;
     ChSceneryModel scenery;
-    if (!scenery.Load(sys, manifest, ChSceneryOptions())) {
+    if (!scenery.Load(sys, manifest, scenery_options)) {
         printf("\nCould not read %s\n", manifest.c_str());
         PrintUsage();
         return 1;
@@ -295,6 +306,11 @@ int main(int argc, char** argv) {
     vis->SetLightIntensity(1.0f);
     vis->SetLightDirection(1.5 * CH_PI_2, CH_PI_4);
     vis->EnableShadows();
+    // The sky upstream ships as a texture but attaches to nothing in the stage.
+    if (!scenery.GetSkyTexture().empty()) {
+        vis->SetSkyDomeTexture(scenery.GetSkyTexture(), 0.0);
+        vis->EnableSkyTexture();
+    }
     vis->AttachDriver(&driver);
     vis->Initialize();
 
@@ -304,29 +320,50 @@ int main(int argc, char** argv) {
     auto t_loop = std::chrono::steady_clock::now();
     double next_report = 0;
     double render_s = 0, physics_s = 0;
+    int frames = 0;
 
     const double step = 1e-3;
     const double render_step = 1.0 / 50;  // physics wants 1 kHz; the display does not
     double next_render = 0;
-    ChRealtimeStepTimer realtime;
+    double last_render = -1;
+
+    // The wall-clock instant that simulated time 0 is held against.
+    auto clock = std::chrono::steady_clock::now();
+    auto elapsed = [&clock]() {
+        return std::chrono::duration<double>(std::chrono::steady_clock::now() - clock).count();
+    };
 
     while (vis->Run()) {
         double time = sys.GetChTime();
 
-        if (time >= next_render) {
+        // How far the simulation has fallen behind the wall clock. A stall that long is the
+        // window being dragged or the machine being busy, and is written off instead of chased.
+        double lag = elapsed() - time;
+        if (lag > 0.5) {
+            clock += std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                std::chrono::duration<double>(lag - 0.05));
+            lag = 0.05;
+        }
+
+        // Draw only when the simulation is keeping up. Heavy vegetation can take longer to draw
+        // than a 50 Hz frame lasts, and drawing every frame regardless turns that into slow
+        // motion. Skipping frames keeps the car at real time and lets the frame rate drop
+        // instead, down to a floor of five a second.
+        if (time >= next_render && (lag < render_step || time - last_render >= 0.2)) {
             auto tR = std::chrono::steady_clock::now();
             vis->BeginScene();
             vis->Render();
             vis->EndScene();
             render_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - tR).count();
-            next_render += render_step;
+            frames++;
+            last_render = time;
+            next_render = time + render_step;
         }
-
 
         if (time >= next_report) {
             double wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_loop).count();
-            printf("  t=%5.1f s   %.2fx real time   (physics %.1f s, render %.1f s of %.1f s wall)\n",
-                   time, wall > 0 ? time / wall : 0, physics_s, render_s, wall);
+            printf("  t=%5.1f s   %.2fx real time   %4.1f frames/s   (physics %.1f s, render %.1f s of %.1f s wall)\n",
+                   time, wall > 0 ? time / wall : 0, wall > 0 ? frames / wall : 0, physics_s, render_s, wall);
             next_report += 2.0;
         }
 
@@ -344,14 +381,10 @@ int main(int argc, char** argv) {
         sys.DoStepDynamics(step);
         physics_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - tP).count();
 
-        // Throttle once per rendered frame, not once per physics step.
-        //
-        // Spinning every step caps each one at the step size, so the 19 steps between frames
-        // sleep away their slack and the 20th still has to pay for the render. The loop can
-        // never make that back, and a scene that runs comfortably faster than real time reports
-        // roughly half speed. Pacing per frame lets the fast steps absorb the slow one.
-        if (time >= next_render - step)
-            realtime.Spin(render_step);
+        // Physics alone runs several times faster than real time, so wait for the clock.
+        double ahead = (time + step) - elapsed();
+        if (ahead > 0.002)
+            std::this_thread::sleep_for(std::chrono::duration<double>(ahead - 0.001));
     }
 
     return 0;
