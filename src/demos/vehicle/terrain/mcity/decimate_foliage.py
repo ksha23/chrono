@@ -16,14 +16,16 @@ How a plant is reduced
 ----------------------
 Every plant gets a triangle budget, split between wood and foliage.
 
-Wood, meaning trunks and branch tubes, is welded by vertex clustering. A tube survives that as
-a coarser tube.
+Wood is handled two ways. A trunk is welded by vertex clustering and survives as a coarser
+trunk. An instanced branch is a thousand separate twig tubes and a few real stems, which no
+welding reduces to a hundred triangles, so its largest tubes are kept whole and its stems are
+redrawn as tapered sticks.
 
 Foliage is thousands of separate leaf-shaped cards sharing one texture. Clustering would smear
 texture coordinates across unrelated leaves, so cards are dropped whole instead and every
-survivor keeps its exact shape. A canopy thinned to a hundredth of its leaves looks dead, so the
-survivors are scaled up about their own centres until they cover a similar area. Up close that
-reads as oversized leaves. From a road it reads as a tree.
+survivor stays a leaf: its convex outline, with its own texture coordinates. A canopy thinned to
+a hundredth of its leaves looks dead, so the survivors are enlarged about their own centres to
+win back cover, up to a limit set by the size of the plant.
 
 Which treatment a part gets comes from its material name first and from its geometry only when
 the name says nothing: these trees model every twig as its own disconnected tube, so bark looks
@@ -194,8 +196,31 @@ def card_ids(mesh):
     return ids
 
 
-def cluster(mesh, target):
-    """Vertex clustering on a uniform grid, sized by bisection to land at or under the target."""
+def twig_thickness(mesh):
+    """About how thick the thicker tubes of a wood mesh are, from its own triangles.
+
+    A tube is rings of triangles that run long along its axis and short around it, so the
+    shortest edge of a triangle is about the tube's radius. Three times the 90th percentile of
+    that is a size no honest piece of this wood exceeds. The longest edges say nothing: they
+    follow the length of a twig, not its girth.
+    """
+    if not len(mesh.F):
+        return math.inf
+    a, b, c = mesh.V[mesh.F[:, 0]], mesh.V[mesh.F[:, 1]], mesh.V[mesh.F[:, 2]]
+    shortest = np.minimum(np.minimum(np.linalg.norm(b - a, axis=1), np.linalg.norm(c - b, axis=1)),
+                          np.linalg.norm(a - c, axis=1))
+    return 3.0 * float(np.percentile(shortest, 90))
+
+
+def cluster(mesh, target, max_thickness=math.inf):
+    """Vertex clustering on a uniform grid, sized by bisection to land at or under the target.
+
+    max_thickness removes the shards. Welding a spray of thin twigs on a coarse grid collapses
+    most of them to slivers, which is fine, but where three twigs fall in three neighbouring
+    cells it also leaves a broad flat triangle strung between them. Through a canopy those read
+    as dark shards. A triangle whose height is more than the wood it came from was thick cannot
+    be part of a tube, so it is dropped.
+    """
     if len(mesh.F) <= target:
         return mesh
     lo_corner = mesh.V.min(axis=0)
@@ -214,6 +239,12 @@ def cluster(mesh, target):
             return out / counts[:, None]
 
         V = mean(mesh.V)
+        if len(F) and math.isfinite(max_thickness):
+            a, b, c = V[F[:, 0]], V[F[:, 1]], V[F[:, 2]]
+            longest = np.maximum(np.maximum(np.linalg.norm(b - a, axis=1), np.linalg.norm(c - b, axis=1)),
+                                 np.linalg.norm(a - c, axis=1))
+            height = np.linalg.norm(np.cross(b - a, c - a), axis=1) / np.maximum(longest, 1e-12)
+            F = F[height <= max_thickness]
         VT = mean(mesh.VT) if mesh.VT is not None else None
         VN = None
         if mesh.VN is not None:
@@ -239,53 +270,218 @@ def cluster(mesh, target):
 # Plants
 # --------------------------------------------------------------------------------------------
 
+# Bumped when the reduction changes what a plant looks like. 1 enlarged whole leaves without a
+# limit tied to the plant. 2 draws leaves as outlines and caps their size.
+VEGETATION_VERSION = 2
+
 WOOD = ("bark", "trunk", "wood", "branch", "stem", "twig")
 CARDS = ("leaf", "leaves", "needle", "flower", "frond", "blossom", "petal", "privet", "grass")
 
 # Fewer triangles than this is not a branch any more.
 MIN_BRANCH_TRIS = 12
-# How large a surviving leaf may grow, and how much of the lost area it is asked to make up.
-# Both were settled by eye against renders. At 6x and three quarters of the area a spruce came out
-# as a trunk in a haze of wisps. Welding foliage the way wood is welded was tried too and left a
-# skeleton of flat shards. Full coverage with leaves allowed to reach 20x gives a solid crown.
-MAX_CARD_SCALE = 20.0
+# A surviving leaf is drawn as its convex outline, in at most this many triangles. The source
+# spends 20 to 60 triangles on the lobes of one leaf. Spending 4 buys several times as many
+# leaves for the same budget, and many modest leaves make a better crown than a few vast ones.
+CARD_TRIS = 4
+# How far a leaf may be enlarged to make up for the ones removed, and how much of the lost area
+# it is asked to cover.
+MAX_CARD_SCALE = 8.0
 COVERAGE = 1.0
 # A grown card is kept no more than this many times longer than it is wide. A needle is thirty
 # times longer than wide, and grown evenly a spruce turns into a heap of metre-long sticks.
 MAX_CARD_ASPECT = 3.0
+# The largest a grown card may be, as a share of the height of its plant. Without a limit tied
+# to the plant, a thin canopy asks for 20x and gets leaves half the size of the tree.
+MAX_CARD_SHARE = {"tree": 0.05, "shrub": 0.09, "grass": 0.30}
 
 
-def grow_cards(mesh, grow):
-    """Scale every card of a mesh about its own centre so that it covers grow^2 times the area.
+def convex_outline(points):
+    """Indices of the convex hull of 2D points, counter-clockwise (monotone chain)."""
+    order = sorted(range(len(points)), key=lambda i: (points[i][0], points[i][1]))
+
+    def cross(o, a, b):
+        return ((points[a][0] - points[o][0]) * (points[b][1] - points[o][1]) -
+                (points[a][1] - points[o][1]) * (points[b][0] - points[o][0]))
+
+    lower, upper = [], []
+    for i in order:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], i) <= 0:
+            lower.pop()
+        lower.append(i)
+    for i in reversed(order):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], i) <= 0:
+            upper.pop()
+        upper.append(i)
+    return lower[:-1] + upper[:-1]
+
+
+def shape_card(mesh, faces, grow, max_size):
+    """One leaf: reduced to its outline, then enlarged about its own centre.
 
     Growth goes into width before length for anything long and thin, which is what turns a
-    surviving needle into a tuft instead of a stick. Each card stays where its branch is.
+    surviving needle into a tuft instead of a stick, and stops at max_size in either direction.
+    The card stays where its branch is. Returns a small Mesh of its own.
     """
+    F = mesh.F[faces]
+    used, inv = np.unique(F, return_inverse=True)
+    F = inv.reshape(-1, 3)
+    pts = mesh.V[used]
+    centre = pts.mean(axis=0)
+    rel = pts - centre
+    # Principal axes of the card: across its thickness, its width, then its length.
+    _, axes = np.linalg.eigh(rel.T @ rel)
+    local = rel @ axes
+    width = float(np.ptp(local[:, 1])) or 1e-9
+    length = float(np.ptp(local[:, 2])) or 1e-9
+
+    if len(F) > CARD_TRIS and width > 1e-6:
+        hull = convex_outline(local[:, 1:3].tolist())
+        if len(hull) > CARD_TRIS + 2:
+            hull = [hull[int(round(k))] for k in np.linspace(0, len(hull), CARD_TRIS + 2, endpoint=False)]
+        if len(hull) >= 3:
+            F = np.array([(hull[0], hull[k], hull[k + 1]) for k in range(1, len(hull) - 1)], dtype=np.int64)
+
+    aspect = length / width
+    if aspect > MAX_CARD_ASPECT:
+        g_width = math.sqrt(grow * grow * aspect / MAX_CARD_ASPECT)
+        g_length = max(1.0, grow * grow / g_width)
+    else:
+        g_width = g_length = grow
+    g_length = max(1.0, min(g_length, max_size / length))
+    g_width = max(1.0, min(g_width, max_size / width))
+    local = local * np.array([min(g_width, g_length), g_width, g_length])
+
+    card = Mesh(centre + local @ axes.T,
+                None if mesh.VT is None else mesh.VT[used],
+                None if mesh.VN is None else mesh.VN[used], F)
+    return compact(card)
+
+
+def tubes(mesh, budget):
+    """A branch reduced by keeping its largest tubes, in at most budget triangles.
+
+    Measured, a branch prototype is about a thousand separate tubes. Nearly all are twigs a few
+    millimetres thick that the source already draws in six triangles. A handful are real stems,
+    a few hundred triangles each. Welding the lot is the wrong tool: the twigs are too thin to
+    survive it and what is left are flat shards strung between them.
+
+    So tubes are taken whole, largest surface first, until the budget is spent. A twig is kept
+    exactly as it is. A stem is too dear to keep, so it is redrawn as a three-sided stick that
+    follows its curve and taper, a ring every third of a metre.
+    """
+    empty = Mesh(mesh.V[:0], None, None, np.zeros((0, 3), dtype=np.int64))
+    if not len(mesh.F) or budget < 6:
+        return empty
     ids = card_ids(mesh)
-    vert_card = np.zeros(len(mesh.V), dtype=np.int64)
-    vert_card[mesh.F.ravel()] = np.repeat(ids, 3)
-    V = mesh.V.copy()
-    for c in range(int(ids.max()) + 1):
-        sel = np.nonzero(vert_card == c)[0]
-        pts = mesh.V[sel]
+    a, b, c = mesh.V[mesh.F[:, 0]], mesh.V[mesh.F[:, 1]], mesh.V[mesh.F[:, 2]]
+    area = np.bincount(ids, weights=0.5 * np.linalg.norm(np.cross(b - a, c - a), axis=1))
+    count = np.bincount(ids)
+    face_order = np.argsort(ids, kind="stable")
+    face_bounds = np.searchsorted(ids[face_order], np.arange(len(count) + 1))
+
+    kept_faces, V, VT, VN, F = [], [], [], [], []
+    spent = 0
+    for t in np.argsort(-area):
+        if spent + 6 > budget:
+            break
+        faces = face_order[face_bounds[t]:face_bounds[t + 1]]
+        n = int(count[t])
+        if n <= 12:
+            if spent + n <= budget:
+                kept_faces.append(faces)
+                spent += n
+            continue
+        pts = mesh.V[np.unique(mesh.F[faces])]
         centre = pts.mean(axis=0)
         rel = pts - centre
-        # Principal axes of the card: across its thickness, its width, then its length.
         _, axes = np.linalg.eigh(rel.T @ rel)
-        local = rel @ axes
-        width = np.ptp(local[:, 1]) or 1e-9
-        length = np.ptp(local[:, 2]) or 1e-9
-        aspect = length / width
-        if aspect > MAX_CARD_ASPECT:
-            g_width = math.sqrt(grow * grow * aspect / MAX_CARD_ASPECT)
-            g_length = grow * grow / g_width
-            if g_length < 1.0:
-                g_length, g_width = 1.0, grow * grow
-        else:
-            g_width = g_length = grow
-        local = local * np.array([min(g_width, g_length), g_width, g_length])
-        V[sel] = centre + local @ axes.T
-    return Mesh(V, mesh.VT, mesh.VN, mesh.F)
+        axis, u, w = axes[:, 2], axes[:, 1], axes[:, 0]
+        along = rel @ axis
+        lo, hi = float(along.min()), float(along.max())
+        length = hi - lo
+        if length < 1e-4:
+            continue
+        segments = int(min(10, max(1, round(length / 0.35))))
+        while segments > 1 and spent + 6 * segments > budget:
+            segments -= 1
+        if spent + 6 * segments > budget:
+            continue
+        if 6 * segments >= n:
+            kept_faces.append(faces)
+            spent += n
+            continue
+
+        half = max(0.02, length / (2 * segments))
+        mids, radii = [], []
+        for k in range(segments + 1):
+            at = lo + length * k / segments
+            near = np.abs(along - at) <= half
+            if near.sum() < 3:
+                near = np.argsort(np.abs(along - at))[:6]
+            mid = rel[near].mean(axis=0)
+            mid = mid + (at - mid @ axis) * axis  # the middle of the tube here, at this station
+            off = rel[near] - mid
+            off = off - np.outer(off @ axis, axis)
+            mids.append(mid)
+            radii.append(float(np.median(np.linalg.norm(off, axis=1))))
+        # A fork or a kink inside one window inflates that ring. Hold each ring near the stem's
+        # own typical girth, and under what its surface area says a tube this long can be.
+        typical = float(np.median(radii))
+        ceiling = 1.5 * float(area[t]) / (2.0 * math.pi * length)
+        radii = [max(0.002, min(r, 1.5 * typical, ceiling)) for r in radii]
+
+        base = sum(len(v) for v in V)
+        ring_v, ring_t, ring_n = [], [], []
+        for k in range(segments + 1):
+            for j in range(3):
+                turn = 2.0 * math.pi * j / 3
+                out = math.cos(turn) * u + math.sin(turn) * w
+                ring_v.append(centre + mids[k] + radii[k] * out)
+                ring_t.append((j / 3.0, lo + length * k / segments))
+                ring_n.append(out)
+        V.append(np.array(ring_v))
+        VT.append(np.array(ring_t))
+        VN.append(np.array(ring_n))
+        for k in range(segments):
+            for j in range(3):
+                p, q = base + 3 * k + j, base + 3 * k + (j + 1) % 3
+                F.append((p, q, p + 3))
+                F.append((q, q + 3, p + 3))
+        spent += 6 * segments
+
+    parts = []
+    if kept_faces:
+        parts.append(compact(Mesh(mesh.V, mesh.VT, mesh.VN, mesh.F[np.concatenate(kept_faces)])))
+    if F:
+        parts.append(Mesh(np.concatenate(V), None if mesh.VT is None else np.concatenate(VT),
+                          None if mesh.VN is None else np.concatenate(VN), np.array(F, dtype=np.int64)))
+    return join(parts) or empty
+
+
+def lit_from_above(mesh):
+    """Give placed leaves normals that face the sky, and windings that agree with them.
+
+    A source leaf is two-sided: a front and a back layer with opposite normals. Its outline
+    picks vertices from either layer, so a rebuilt leaf can come out with the back's normal on
+    its lit side and draw dark grey in full sun. Every leaf is therefore re-aimed: its normal is
+    flipped to the upper side and leaned toward the vertical, which is also roughly how a canopy
+    scatters light. The winding follows, so a renderer that tells front from back agrees.
+    """
+    if not len(mesh.F):
+        return mesh
+    tri = np.cross(mesh.V[mesh.F[:, 1]] - mesh.V[mesh.F[:, 0]], mesh.V[mesh.F[:, 2]] - mesh.V[mesh.F[:, 0]])
+    down = tri[:, 2] < 0
+    F = mesh.F.copy()
+    F[down] = F[down][:, ::-1]
+    tri[down] *= -1.0
+    # One normal per vertex, from the faces around it, already on the upper side.
+    VN = np.zeros_like(mesh.V)
+    for k in range(3):
+        np.add.at(VN, F[:, k], tri)
+    VN = VN / np.maximum(np.linalg.norm(VN, axis=1, keepdims=True), 1e-12)
+    VN = VN + np.array([0.0, 0.0, 0.6])
+    VN = VN / np.maximum(np.linalg.norm(VN, axis=1, keepdims=True), 1e-12)
+    return Mesh(mesh.V, mesh.VT, VN, F)
 
 
 def kind_of(part, mesh):
@@ -298,8 +494,11 @@ def kind_of(part, mesh):
     return "cards" if (n > 50 and len(mesh.F) / n < 200) else "wood"
 
 
-def reduce_plant(asset, data_dir, wood_budget, card_budget, rng):
-    """One plant, expanded and reduced. Returns {material name: (part template, Mesh)}."""
+def reduce_plant(asset, data_dir, wood_budget, card_budget, rng, card_share):
+    """One plant, expanded and reduced. Returns {material name: (part template, Mesh)}.
+
+    card_share caps a grown leaf at that share of the plant's height.
+    """
     items = []  # (part, mesh, kind, xforms, instanced)
     for part in asset["parts"]:
         path = os.path.join(data_dir, part["mesh"])
@@ -329,7 +528,7 @@ def reduce_plant(asset, data_dir, wood_budget, card_budget, rng):
     limbs = [it for it in wood if it[4]]
     trunk_budget = wood_budget * (0.35 if limbs else 1.0)
     limb_budget = wood_budget - trunk_budget if trunk else wood_budget
-    for group, budget in ((trunk, trunk_budget), (limbs, limb_budget)):
+    for group, budget, instanced in ((trunk, trunk_budget, False), (limbs, limb_budget, True)):
         total = sum(len(m.F) * len(x) for _, m, _, x, _ in group)
         ratio = min(1.0, budget / total) if total else 0.0
         for part, mesh, _, xforms, _ in group:
@@ -338,38 +537,51 @@ def reduce_plant(asset, data_dir, wood_budget, card_budget, rng):
             if want < MIN_BRANCH_TRIS < len(mesh.F):
                 # Too many branches for the budget: keep some whole rather than all as slivers.
                 keep, want = want / MIN_BRANCH_TRIS, MIN_BRANCH_TRIS
-            small = cluster(mesh, max(4, int(want))) if ratio < 1.0 else mesh
+            if ratio >= 1.0:
+                small = mesh
+            elif instanced:
+                small = tubes(mesh, int(want))
+            else:
+                small = cluster(mesh, max(4, int(want)), twig_thickness(mesh))
             for xform in xforms:
-                if keep >= 1.0 or rng.random() < keep:
+                if len(small.F) and (keep >= 1.0 or rng.random() < keep):
                     emit(part, placed(small, xform))
 
-    # Foliage.
-    cards = [it for it in items if it[2] == "cards"]
-    total = sum(len(m.F) * len(x) for _, m, _, x, _ in cards)
-    fraction = min(1.0, card_budget / total) if total else 0.0
-    grow = min(MAX_CARD_SCALE, max(1.0, COVERAGE / math.sqrt(fraction))) if fraction > 0 else 1.0
-    for part, mesh, _, xforms, _ in cards:
-        if fraction <= 0.0:
-            continue
-        if fraction >= 1.0:
-            for xform in xforms:
-                emit(part, placed(mesh, xform))
+    # Foliage. First how tall the plant stands, since that is what a leaf is sized against.
+    z_lo, z_hi = math.inf, -math.inf
+    for _, mesh, _, xforms, _ in items:
+        lo, hi = mesh.V.min(axis=0), mesh.V.max(axis=0)
+        corners = np.array([[x, y, z] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
+        for xform in xforms:
+            z = corners @ np.array(xform[:9]).reshape(3, 3)[:, 2] + xform[11]
+            z_lo, z_hi = min(z_lo, float(z.min())), max(z_hi, float(z.max()))
+    max_size = card_share * max(z_hi - z_lo, 0.3) if items else 0.3
+
+    cards = []
+    total = 0  # triangles if every leaf were kept, each drawn as its outline
+    for part, mesh, kind, xforms, _ in items:
+        if kind != "cards":
             continue
         ids = card_ids(mesh)
         order = np.argsort(ids, kind="stable")
         bounds = np.searchsorted(ids[order], np.arange(ids.max() + 2))
+        total += len(xforms) * int(np.minimum(np.diff(bounds), CARD_TRIS).sum())
+        cards.append((part, mesh, xforms, order, bounds))
+    fraction = min(1.0, card_budget / total) if total else 0.0
+    grow = min(MAX_CARD_SCALE, max(1.0, COVERAGE / math.sqrt(fraction))) if fraction > 0 else 1.0
+    for part, mesh, xforms, order, bounds in cards:
+        if fraction <= 0.0:
+            continue
         ncards = len(bounds) - 1
-        want = fraction * ncards  # cards per instance, usually a fraction of one
+        want = fraction * ncards  # leaves per instance, often a fraction of one
         for xform in xforms:
             n = int(want) + (1 if rng.random() < want - int(want) else 0)
             if n == 0:
                 continue
             chosen = rng.choice(ncards, size=min(n, ncards), replace=False)
-            faces = np.concatenate([order[bounds[c]:bounds[c + 1]] for c in chosen])
-            sub = compact(Mesh(mesh.V, mesh.VT, mesh.VN, mesh.F[faces]))
-            if grow > 1.0:
-                sub = grow_cards(sub, grow)
-            emit(part, placed(sub, xform))
+            leaves = join([shape_card(mesh, order[bounds[c]:bounds[c + 1]], grow, max_size) for c in chosen])
+            if leaves is not None:
+                emit(part, lit_from_above(placed(leaves, xform)))
 
     merged = {}
     for name, (part, meshes) in out.items():
@@ -451,7 +663,7 @@ def main():
             wood_budget, card_budget = args.tree_wood, 0 if args.no_leaves else args.tree_leaves
         # Seeded per species, so a plant comes out the same whatever else is in the run.
         rng = np.random.default_rng(args.seed + zlib.crc32(a["name"].encode()))
-        merged, before = reduce_plant(a, args.dir, wood_budget, card_budget, rng)
+        merged, before = reduce_plant(a, args.dir, wood_budget, card_budget, rng, MAX_CARD_SHARE[k])
 
         parts = []
         for name, (template, mesh) in merged.items():
@@ -472,6 +684,7 @@ def main():
     for a in assets:
         a.pop("clumps", None)
     man["instances"] = other + fol
+    man["vegetation"] = VEGETATION_VERSION
     # A species this level leaves out keeps its slot, so asset indices stay put, but must stop
     # naming its source meshes: anything a manifest names gets packaged, and these are the
     # 300k-triangle originals.
